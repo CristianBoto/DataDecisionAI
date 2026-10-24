@@ -1,0 +1,77 @@
+@import '@fontsource-variable/inter';
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+
+  /* Azul oscuro institucional */
+  --color-navy-50: #eef3fb;
+  --color-navy-100: #d6e1f4;
+  --color-navy-200: #aec3e8;
+  --color-navy-300: #7d9bd6;
+  --color-navy-400: #4c71bd;
+  --color-navy-500: #2f529d;
+  --color-navy-600: #213f80;
+  --color-navy-700: #1a3267;
+  --color-navy-800: #132653;
+  --color-navy-900: #0b1f4a;
+  --color-navy-950: #071330;
+
+  /* Series de gráficos (paleta categórica validada: azul, naranja, aqua) */
+  --color-series-1: #2a78d6;
+  --color-series-2: #eb6834;
+  --color-series-3: #1baf7a;
+
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px -4px rgb(15 23 42 / 0.06);
+  --shadow-elevated: 0 10px 40px -12px rgb(11 31 74 / 0.25);
+
+  --animate-fade-in: fade-in 0.35s ease-out both;
+  --animate-slide-up: slide-up 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-pulse-dot: pulse-dot 1.2s ease-in-out infinite;
+
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes pulse-dot {
+    0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
+    40% { opacity: 1; transform: scale(1); }
+  }
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-slate-50 font-sans text-slate-800;
+  }
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-blue-500;
+  }
+}
+
+@layer components {
+  .grid-backdrop {
+    background-image:
+      linear-gradient(to right, rgb(148 163 184 / 0.12) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(148 163 184 / 0.12) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(203 213 225) transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
