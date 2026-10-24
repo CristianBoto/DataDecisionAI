@@ -11,6 +11,15 @@ DataDecision AI se usa de dos formas con **el mismo código**:
 
 ## A. Demo pública en Cloudflare Pages
 
+**Publicada:** https://datadecisionai.pages.dev
+
+| Evidencia | Tipo |
+|-----------|------|
+| Publicación exitosa confirmada con captura del panel de Cloudflare, provista por el desarrollador | Comunicada |
+| El 24/10/2026 la URL respondió HTTP 200 con el título "DataDecision AI", y la ruta interna `/analisis/cargar` también respondió 200 (las rutas de React Router funcionan al recargar) | Verificada (consulta HTTP) |
+
+La configuración `VITE_DEMO_MODE=true` del despliegue consta en la captura comunicada; no se verificó directamente en el panel.
+
 ### Qué funciona en la demo pública
 
 - Recorrido completo: inicio → carga → asistente → confirmación → workspace → exportación.
@@ -48,6 +57,7 @@ DataDecision AI se usa de dos formas con **el mismo código**:
    | `VITE_DEMO_MODE` | `true` |
 
    No agregues claves ni secretos: todas las variables `VITE_*` quedan visibles en el navegador.
+   **No** definas `VITE_BACKEND_PROFILING`: sin esa variable (o en `false`) la demo pública no hace ninguna llamada al backend.
 7. **Save and Deploy**. Al terminar, Cloudflare muestra la URL pública.
 
 Cada `git push` a `main` vuelve a publicar automáticamente. Las ramas distintas de `main` generan URLs de vista previa.

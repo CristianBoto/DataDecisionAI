@@ -68,6 +68,8 @@ export interface DatasetProfile {
   /** true si rowCount se calculó sobre una muestra del archivo. */
   rowCountIsEstimate: boolean
   columnCount: number
+  /** Filas idénticas; undefined o null cuando no se calculó (vista previa local). */
+  duplicateRowCount?: number | null
   columns: ColumnProfile[]
   /** Primeras filas, indexadas por nombre de columna. */
   previewRows: Record<string, string>[]

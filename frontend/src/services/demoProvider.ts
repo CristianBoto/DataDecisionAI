@@ -24,6 +24,7 @@ import {
   type DemoConversationState,
   type ScriptedReply,
 } from '@/mocks/demoAssistant'
+import type { DatasetProfiler } from './backendProfile'
 import { ApiError, BackendRequiredError } from './errors'
 import type { DataDecisionService } from './types'
 
@@ -32,6 +33,10 @@ import type { DataDecisionService } from './types'
  * guarda todo en memoria (se pierde al recargar). No usa localStorage ni
  * guarda archivos. Los resultados de análisis solo existen para el dataset
  * ficticio; para archivos propios se informa que se necesita el backend.
+ *
+ * Con `profiler` (VITE_BACKEND_PROFILING=true) el perfil de los archivos
+ * propios lo calcula FastAPI + Pandas; si falla, se informa el error y no se
+ * reemplaza por una vista previa local ni por datos ficticios.
  */
 
 interface ProjectRecord {
@@ -44,8 +49,14 @@ interface ProjectRecord {
 /** Latencia artificial para que se vean los estados de carga. */
 const DEFAULT_DELAY_MS = 450
 
-export function createDemoService(options: { delayMs?: number } = {}): DataDecisionService {
+export interface DemoServiceOptions {
+  delayMs?: number
+  profiler?: DatasetProfiler
+}
+
+export function createDemoService(options: DemoServiceOptions = {}): DataDecisionService {
   const delayMs = options.delayMs ?? DEFAULT_DELAY_MS
+  const { profiler } = options
   const datasets = new Map<string, Dataset>()
   const profiles = new Map<string, DatasetProfile>()
   const projects = new Map<string, ProjectRecord>()
@@ -74,6 +85,7 @@ export function createDemoService(options: { delayMs?: number } = {}): DataDecis
 
   return {
     mode: 'demo',
+    profiling: profiler ? 'backend' : 'browser',
 
     checkHealth: () =>
       wait({ status: 'ok', service: 'DataDecision AI (proveedor DEMO)', version: '0.1.0', environment: 'demo' }, 150),
@@ -93,9 +105,10 @@ export function createDemoService(options: { delayMs?: number } = {}): DataDecis
         status: 'ready',
       }
 
-      // Perfil preliminar: real para CSV (calculado en el navegador), vacío para Excel.
-      const profile: DatasetProfile =
-        validation.format === 'csv'
+      // Perfil: Pandas si está activado; si no, preliminar en el navegador (CSV) o vacío (Excel).
+      const profile: DatasetProfile = profiler
+        ? await profiler.profile(file, dataset.id)
+        : validation.format === 'csv'
           ? await profileCsvFile(file, dataset.id)
           : {
               datasetId: dataset.id,
@@ -112,7 +125,7 @@ export function createDemoService(options: { delayMs?: number } = {}): DataDecis
 
       datasets.set(dataset.id, dataset)
       profiles.set(dataset.id, profile)
-      return wait(dataset)
+      return profiler ? dataset : wait(dataset)
     },
 
     loadDemoDataset() {
@@ -176,7 +189,7 @@ export function createDemoService(options: { delayMs?: number } = {}): DataDecis
           break
         }
         case 'awaiting_clarification':
-          reply = replyToClarification(text, state.intent)
+          reply = replyToClarification(text, state.intent, dataset.source === 'demo')
           state.stage = 'proposal_ready'
           break
         case 'proposal_ready':

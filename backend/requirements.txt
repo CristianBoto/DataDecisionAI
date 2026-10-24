@@ -1,13 +1,16 @@
-# Dependencias actuales del backend (esqueleto inicial)
+
+# Backend - DataDecision AI
+
+# API REST
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.30
 pydantic-settings>=2.4
-python-multipart>=0.0.9
+python-multipart>=0.0.20,<1
+
+# Ciencia de datos
+pandas>=2.2,<3
+openpyxl>=3.1,<4
 
 # Pruebas
 pytest>=8.0
 httpx>=0.27
-
-# Se agregarán en las próximas etapas (ver docs/NEXT_STEPS.md):
-# pandas, numpy, openpyxl, sqlalchemy, openai, reportlab o weasyprint,
-# python-docx, xlsxwriter, python-pptx

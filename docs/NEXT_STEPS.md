@@ -77,7 +77,8 @@ Cada tarea indica qué construir, dónde y cómo saber que está terminada. Conv
 | Ya funciona | Se implementará después con ChatGPT |
 |-------------|-------------------------------------|
 | Interfaz completa en modo DEMO | Backend real (tareas 1 a 12) |
-| Vista previa local de CSV sin envío por red | Lectura de Excel y perfilado con Pandas |
+| Vista previa local de CSV sin envío por red | Guardar datasets y perfil por `datasetId` |
+| Perfilado con Pandas sin guardar (`POST /api/datasets/profile`, `VITE_BACKEND_PROFILING=true`) | Tipos de columna calculados en el backend |
 | Guion DEMO del asistente | IA 1 e IA 2 con OpenAI |
 | Resultados ficticios marcados | Cálculos y gráficos con datos reales |
 | Interfaz de exportación | Generación de PDF, Excel, Word y Canva |

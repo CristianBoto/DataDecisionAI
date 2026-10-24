@@ -13,6 +13,7 @@ Este documento define las operaciones que el backend **FastAPI** debe implementa
 |---|-----------|---------------|--------|
 | 0 | Salud | `GET /api/health` | ✅ Implementado |
 | 1 | Carga de archivo | `POST /api/datasets` | Pendiente |
+| 1b | Perfilado sin guardar (CSV/XLSX con Pandas) | `POST /api/datasets/profile` | ✅ Implementado |
 | 2 | Perfil del dataset | `GET /api/datasets/{datasetId}/profile` | Pendiente |
 | 3 | Crear proyecto | `POST /api/projects` | Pendiente |
 | 4 | Consultar proyecto | `GET /api/projects/{projectId}` | Pendiente |
@@ -56,6 +57,43 @@ Validación definitiva en el backend: extensión `.csv`/`.xlsx`, tamaño máximo
 ```
 
 Errores: `413` archivo demasiado grande · `415` formato no compatible (por ejemplo PDF) · `422` archivo vacío o ilegible.
+
+## 1b. Perfilado sin guardar
+
+`POST /api/datasets/profile` — `multipart/form-data` con el campo `file` (CSV o XLSX, hasta 25 MB). El backend lee el archivo con Pandas, devuelve el diagnóstico y **no lo guarda**.
+
+La respuesta usa **snake_case** (tal como la genera `backend/app/services/dataset_profiler.py`). El frontend la convierte a `DatasetProfile` en [`backendProfile.ts`](../frontend/src/services/backendProfile.ts) sin cambiar ninguno de los dos contratos.
+
+```json
+{
+  "filename": "ventas.csv",
+  "format": "csv",
+  "encoding": "utf-8-sig",
+  "sheet_name": null,
+  "row_count": 102254,
+  "column_count": 8,
+  "duplicate_rows": 12,
+  "columns": [
+    { "name": "region", "missing": 4, "non_empty": 102250, "distinct": 5, "examples": ["Norte", "Sur", "Centro"] }
+  ],
+  "preview": [{ "region": "Norte" }],
+  "warnings": ["La columna 'region' tiene 4 valores vacíos."]
+}
+```
+
+| Backend | Frontend (`DatasetProfile`) |
+|---------|-----------------------------|
+| `row_count`, `column_count` | `rowCount`, `columnCount` (`rowCountIsEstimate: false`, `isComplete: true`, `origin: "backend"`) |
+| `duplicate_rows` | `duplicateRowCount` (opcional) |
+| `columns[].missing` / `non_empty` / `distinct` / `examples` | `nullCount` / `nonNullCount` / `uniqueCount` / `sampleValues` |
+| — | `inferredType`: estimado en el frontend con `examples` y `preview` (Pandas lee todo como texto) |
+| `preview` | `previewRows` |
+| `warnings[]` | `issues[]` con `severity: "warning"` (y `column` si el mensaje la nombra) |
+| `encoding`, `sheet_name` | `note` |
+
+Errores: `413` más de 25 MB · `422` formato no admitido, archivo vacío o ilegible (con `detail` en español).
+
+Lo usa el proveedor DEMO cuando `VITE_BACKEND_PROFILING=true`.
 
 ## 2. Perfil del dataset
 

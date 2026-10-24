@@ -4,8 +4,19 @@ Plataforma web para cargar datasets CSV o Excel, explicar en lenguaje común qu�
 
 Proyecto final de **Prácticas Profesionalizantes — Tecnicatura en Ciencia de Datos**.
 
-> **Demo pública:** _enlace reservado — se publicará en Cloudflare Pages (por ejemplo `https://datadecisionai.pages.dev`)._
+> **Demo pública:** https://datadecisionai.pages.dev (Cloudflare Pages)
 > La demo usa datos ficticios y no requiere backend. No cargues datos confidenciales en ella.
+
+**MVP académico con arquitectura preparada para crecer.** Esta versión prioriza un recorrido completo, verificable y honesto: lo simulado se marca como DEMO y las piezas reales se integran de a una (hoy, el perfilado de datos con Pandas). La separación entre interfaz, servicios y backend permite sumar persistencia, IA y exportaciones sin reescribir la aplicación.
+
+### Documentación del proyecto
+
+| Documento | Contenido |
+|-----------|-----------|
+| [Bitácora de desarrollo](docs/BITACORA_DESARROLLO.md) | Idea, decisiones, stack, problemas y aprendizajes (base de la exposición final) |
+| [Pruebas y validaciones](docs/PRUEBAS_Y_VALIDACIONES.md) | Pruebas verificadas y comunicadas, resultados y pendientes |
+| [Seguridad y privacidad](docs/SEGURIDAD.md) | Protecciones existentes, procesamiento local, OpenAI/Ollama y controles faltantes |
+| [Arquitectura](docs/ARCHITECTURE.md) · [Contrato de la API](docs/API_CONTRACT.md) · [Despliegue](docs/DEPLOYMENT.md) · [Próximos pasos](docs/NEXT_STEPS.md) | Documentación técnica |
 
 ## Estado del proyecto (v0.1)
 
@@ -13,11 +24,12 @@ Proyecto final de **Prácticas Profesionalizantes — Tecnicatura en Ciencia de 
 |-------|-------------|
 | Interfaz completa (carga, asistente, confirmación, workspace, exportación) | ✅ Funciona |
 | Vista previa local de CSV en el navegador | ✅ Funciona (preliminar, sin enviar el archivo) |
+| Perfilado de CSV/XLSX con FastAPI + Pandas | ✅ Funciona en ejecución local (`POST /api/datasets/profile`, sin guardar el archivo) |
 | Asistente de requisitos (IA 1) | 🟡 Simulación DEMO con guion fijo |
 | Análisis, gráficos y hallazgos | 🟡 Solo resultados ficticios del dataset de ejemplo |
 | Exportación PDF, Excel, Word y Canva | 🟡 Interfaz lista; generación pendiente de backend |
-| Backend FastAPI | 🟡 Esqueleto con `/api/health` |
-| Pandas, SQLite, OpenAI, autenticación | ❌ Pendiente |
+| Backend FastAPI | 🟡 `/api/health` y perfilado de datasets |
+| SQLite, OpenAI u Ollama, autenticación | ❌ Pendiente |
 
 ## Modalidades de uso
 
@@ -130,6 +142,23 @@ Reiniciá `npm run dev` después de cambiar el `.env.local`.
 
 En modo DEMO la app no hace ninguna solicitud de red con los datos: la vista previa de CSV se calcula en el navegador y no se usa `localStorage`.
 
+### Perfilado real con Pandas (solo ejecución local)
+
+`VITE_BACKEND_PROFILING=true` hace que la pantalla de carga envíe el CSV/XLSX a `POST /api/datasets/profile` y muestre el perfil calculado por Pandas: filas y columnas reales, vacíos por columna, filas duplicadas, primeras filas y advertencias. El asistente y los resultados **siguen en DEMO**. Si el backend falla, se muestra el error; no se reemplaza por datos locales ni ficticios.
+
+1. Iniciá el backend (sección anterior) en `http://127.0.0.1:8000`.
+2. Creá `frontend/.env.local` con:
+
+   ```
+   VITE_DEMO_MODE=true
+   VITE_BACKEND_PROFILING=true
+   VITE_API_BASE_URL=http://127.0.0.1:8000
+   ```
+
+3. `npm run dev` y abrí http://localhost:5173/analisis/cargar.
+
+El backend ya permite por CORS `http://localhost:5173` y `http://127.0.0.1:5173`. En la demo pública de Cloudflare **no** se define `VITE_BACKEND_PROFILING` (queda en `false`), así que no hay llamadas al backend.
+
 ## Publicar la demo
 
 Cloudflare Pages (gratis): repositorio `CristianBoto/DataDecisionAI`, rama `main`, directorio raíz `frontend`, build `npm run build`, salida `dist`, variable `VITE_DEMO_MODE=true`. Paso a paso en [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
@@ -139,7 +168,8 @@ Cloudflare Pages (gratis): repositorio `CristianBoto/DataDecisionAI`, rama `main
 - Pantalla inicial con presentación y explicación del flujo.
 - Carga por arrastrar o seleccionar; acepta CSV y XLSX, rechaza PDF y otros formatos con mensajes claros; muestra nombre, tamaño y estado.
 - **Vista previa real de CSV** calculada en el navegador (columnas, tipos inferidos, primeras filas, vacíos), marcada como preliminar.
-- Excel: se acepta, pero se indica que la vista previa llegará con el backend (no se inventan columnas).
+- Excel: se acepta; en DEMO sin backend se indica que la vista previa llegará con el backend (no se inventan columnas).
+- **Perfilado real con Pandas** (opcional, local): con `VITE_BACKEND_PROFILING=true`, CSV y XLSX se perfilan en FastAPI mediante `POST /api/datasets/profile`.
 - Chat con el asistente (simulado en DEMO, con guion determinista basado en el perfil real del dataset).
 - Propuesta versionada con estado de viabilidad (viable, parcial, insuficiente), modificaciones y aprobación obligatoria.
 - Workspace con sidebar, indicadores, gráficos de barras, líneas, áreas y distribución (con vista de tabla), hallazgos con nivel de evidencia, limitaciones, panel del asistente y vista del dataset.
@@ -149,7 +179,7 @@ Cloudflare Pages (gratis): repositorio `CristianBoto/DataDecisionAI`, rama `main
 
 ## Funcionalidades pendientes
 
-- Persistencia, carga real de archivos y perfilado con Pandas.
+- Persistencia, carga real de archivos guardados y perfil por `datasetId` (hoy el perfilado con Pandas existe, pero sin guardar el archivo).
 - IA 1 e IA 2 con OpenAI desde FastAPI.
 - Cálculos reales, validación de resultados y gráficos con datos reales.
 - Generación de PDF, Excel, Word y archivos para Canva.
@@ -168,4 +198,4 @@ Lo que ya existe:
 - El frontend no guarda archivos ni datos en `localStorage` y, en modo DEMO, no envía archivos por la red.
 - Datasets subidos, bases locales e informes generados están excluidos en `.gitignore`.
 
-Lo que **todavía no** existe: autenticación, cifrado, auditoría y políticas de retención. Por eso la aplicación **no garantiza hoy confidencialidad empresarial**.
+Lo que **todavía no** existe: autenticación, cifrado, auditoría y políticas de retención. Por eso la aplicación **no garantiza hoy confidencialidad empresarial**. Detalle en [docs/SEGURIDAD.md](docs/SEGURIDAD.md).

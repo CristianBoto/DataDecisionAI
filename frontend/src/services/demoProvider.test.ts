@@ -78,7 +78,8 @@ describe('proveedor DEMO', () => {
     const beaconSpy = vi.fn()
     Object.defineProperty(navigator, 'sendBeacon', { value: beaconSpy, configurable: true })
     try {
-      const service = createService(true)
+      // Explícito: no depender de VITE_BACKEND_PROFILING de un .env.local del desarrollador.
+      const service = createService(true, false)
       expect(service.mode).toBe('demo')
       const file = new File(['cliente,importe\nA,10\nB,20\n'], 'privado.csv', { type: 'text/csv' })
       const dataset = await service.uploadDataset(file)

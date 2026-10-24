@@ -16,6 +16,12 @@ function parsePositiveNumber(value: string | undefined, fallback: number): numbe
 export const appConfig = {
   /** Modo DEMO activo por defecto para que la app funcione sin backend. */
   demoMode: parseBoolean(import.meta.env.VITE_DEMO_MODE, true),
+  /**
+   * Perfilado real con FastAPI + Pandas (POST /api/datasets/profile) aunque el
+   * resto de la app siga en DEMO. Desactivado por defecto: la demo pública no
+   * debe definirlo para que no haya llamadas al backend.
+   */
+  backendProfiling: parseBoolean(import.meta.env.VITE_BACKEND_PROFILING, false),
   apiBaseUrl: (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/+$/, ''),
   maxUploadMb: parsePositiveNumber(import.meta.env.VITE_MAX_UPLOAD_MB, 25),
 } as const

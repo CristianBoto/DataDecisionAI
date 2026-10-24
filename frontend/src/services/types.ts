@@ -22,6 +22,11 @@ import type {
  */
 export interface DataDecisionService {
   readonly mode: 'demo' | 'http'
+  /**
+   * Dónde se calcula el perfil de un archivo propio: `browser` (vista previa
+   * local, sin red) o `backend` (FastAPI + Pandas).
+   */
+  readonly profiling: 'browser' | 'backend'
 
   checkHealth(): Promise<HealthStatus>
 

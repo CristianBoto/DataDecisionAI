@@ -35,6 +35,9 @@ export function QualityPanel({ profile }: { profile: DatasetProfile }) {
       value: completeness === null ? 'Pendiente' : `${(completeness * 100).toLocaleString('es-AR', { maximumFractionDigits: 1 })} %`,
     },
   ]
+  if (profile.duplicateRowCount !== undefined && profile.duplicateRowCount !== null) {
+    stats.push({ label: 'Filas duplicadas', value: formatNumber(profile.duplicateRowCount) })
+  }
 
   return (
     <Card>
@@ -44,7 +47,7 @@ export function QualityPanel({ profile }: { profile: DatasetProfile }) {
         description={profile.note}
         actions={profile.origin === 'demo' ? <DemoBadge label="FICTICIO" /> : <Badge tone={origin.tone}>{origin.label}</Badge>}
       />
-      <div className="grid grid-cols-3 gap-3 px-5 pt-4">
+      <div className={`grid gap-3 px-5 pt-4 ${stats.length > 3 ? 'grid-cols-2' : 'grid-cols-3'}`}>
         {stats.map((s) => (
           <div key={s.label} className="rounded-xl bg-slate-50 px-3 py-2.5">
             <p className="text-[11px] font-medium text-slate-500">{s.label}</p>

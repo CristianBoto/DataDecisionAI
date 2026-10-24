@@ -53,6 +53,7 @@ export function UploadPage() {
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
+  const usesBackendProfiling = service.profiling === 'backend'
   const busy = status === 'uploading' || status === 'profiling' || creating
   const nameError = validateProjectName(projectName)
 
@@ -117,10 +118,17 @@ export function UploadPage() {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 space-y-4">
-          {service.mode === 'demo' && (
+          {service.mode === 'demo' && !usesBackendProfiling && (
             <Alert tone="warning" title="No cargues datos confidenciales">
               En la demo pública tu archivo se lee solo en este navegador para la vista previa y no se envía a ningún
               servidor. Aun así, usá datos de prueba o anonimizados.
+            </Alert>
+          )}
+
+          {service.mode === 'demo' && usesBackendProfiling && (
+            <Alert tone="info" title="Perfilado real con el backend local">
+              El archivo se envía a FastAPI ({appConfig.apiBaseUrl}) para leerlo con Pandas y no se guarda. El
+              asistente y los resultados siguen en modo DEMO.
             </Alert>
           )}
 
@@ -154,7 +162,10 @@ export function UploadPage() {
                   {dataset?.source === 'demo' && <DemoBadge label="FICTICIO" />}
                 </p>
                 <p className="text-xs text-slate-500">
-                  {formatBytes(selected.size)} · {STATUS_TEXT[status]}
+                  {formatBytes(selected.size)} ·{' '}
+                  {status === 'uploading' && usesBackendProfiling && selected.size >= 0
+                    ? 'Perfilando con Python (Pandas)…'
+                    : STATUS_TEXT[status]}
                 </p>
                 {(status === 'uploading' || status === 'profiling') && (
                   <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-100">
@@ -169,12 +180,12 @@ export function UploadPage() {
           )}
 
           {error && (
-            <Alert tone="error" title="No pudimos usar este archivo">
+            <Alert tone="error" title={usesBackendProfiling ? 'El backend no pudo perfilar el archivo' : 'No pudimos usar este archivo'}>
               {error}
             </Alert>
           )}
 
-          {dataset?.format === 'xlsx' && (
+          {dataset?.format === 'xlsx' && profile?.origin !== 'backend' && (
             <Alert tone="info" title="Vista previa de Excel pendiente">
               El archivo se recibió correctamente, pero la vista previa completa de Excel se habilitará al conectar el
               backend con Pandas. No mostramos columnas que todavía no fueron leídas.

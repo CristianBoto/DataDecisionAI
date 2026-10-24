@@ -81,6 +81,11 @@ export function classifyColumns(profile: DatasetProfile) {
 
 const quote = (name: string) => `«${name}»`
 
+/** Aclaración para archivos propios: el guion no conoce el rubro de los datos. */
+export const UPLOADED_DATA_DISCLAIMER =
+  'Soy un asistente DEMO con respuestas guiadas: uso solo los nombres y tipos de tus columnas, ' +
+  'sin interpretar el rubro ni sacar conclusiones sobre el contenido.'
+
 // ---------------------------------------------------------------------------
 // Mensajes del guion
 // ---------------------------------------------------------------------------
@@ -114,10 +119,11 @@ export function buildGreeting(dataset: Dataset, profile: DatasetProfile): { cont
     profile.rowCount === null
       ? ''
       : ` y ${profile.rowCountIsEstimate ? 'al menos ' : ''}${profile.rowCount} filas`
+  const source = profile.origin === 'backend' ? 'el perfil calculado con Pandas' : 'la vista previa'
   return {
     content:
-      `¡Hola! Revisé la vista previa de «${dataset.fileName}»: ${profile.columnCount} columnas${rows}. ` +
-      'Contame qué necesitás analizar o decidir con estos datos.',
+      `¡Hola! Revisé ${source} de «${dataset.fileName}»: ${profile.columnCount} columnas${rows}. ` +
+      `${UPLOADED_DATA_DISCLAIMER} Contame qué necesitás analizar o decidir con estos datos.`,
     suggestions: [
       'Quiero un resumen general de mis datos',
       'Quiero comparar grupos o categorías',
@@ -142,7 +148,22 @@ export function replyToObjective(
   const intent = detectIntent(text)
   const { numeric, dates, categorical } = classifyColumns(profile)
 
-  if (intent === 'restock' && !findStockColumn(profile)) {
+  if (intent === 'restock' && !findStockColumn(profile) && dataset.source !== 'demo' && profile.columnCount > 0) {
+    return {
+      intent,
+      reply: {
+        kind: 'question',
+        producesProposal: false,
+        content:
+          'Tu pedido menciona compras, reposición o stock. No encontré una columna de stock o inventario en ' +
+          'el archivo, así que no podría recomendar cantidades. ¿Querés continuar con un análisis descriptivo ' +
+          'de las columnas disponibles o agregar esa información más adelante?',
+        suggestions: ['Continuar con las columnas disponibles', 'Quiero agregar información de stock'],
+      },
+    }
+  }
+
+  if (intent === 'restock' && !findStockColumn(profile) && dataset.source === 'demo') {
     return {
       intent,
       reply: {
@@ -210,7 +231,7 @@ export function replyToObjective(
   }
 }
 
-export function replyToClarification(text: string, intent: DemoIntent): ScriptedReply {
+export function replyToClarification(text: string, intent: DemoIntent, isDemoDataset = true): ScriptedReply {
   const wantsToAddStock = intent === 'restock' && /(agreg|sum|stock|inventario)/.test(normalize(text)) && !/continu/.test(normalize(text))
   if (wantsToAddStock) {
     return {
@@ -218,8 +239,9 @@ export function replyToClarification(text: string, intent: DemoIntent): Scripted
       producesProposal: true,
       content:
         'Perfecto. En esta versión DEMO todavía no se pueden sumar archivos a un proyecto; cuando el backend ' +
-        'esté conectado vas a poder cargar tu inventario. Por ahora preparé la propuesta con las ventas y dejé ' +
-        'el stock como información faltante. Revisala y aprobala si estás de acuerdo.',
+        'esté conectado vas a poder cargar tu inventario. Por ahora preparé la propuesta con ' +
+        (isDemoDataset ? 'las ventas' : 'las columnas disponibles') +
+        ' y dejé el stock como información faltante. Revisala y aprobala si estás de acuerdo.',
     }
   }
   return {
@@ -362,11 +384,12 @@ function uploadedDatasetProposal(profile: DatasetProfile, intent: DemoIntent) {
   const missingInformation: string[] = []
   const limitations: string[] = [
     'En modo DEMO no se ejecutan cálculos sobre tu archivo: los resultados reales requieren el backend con Pandas.',
+    'Propuesta genérica: el asistente DEMO no interpreta el rubro ni el significado de tus columnas.',
   ]
   if (profile.rowCountIsEstimate) limitations.push('La vista previa se calculó sobre una muestra del archivo.')
   if (dates.length === 0) limitations.push('No se detectaron columnas de fecha: no se podrán analizar tendencias temporales.')
   if (intent === 'restock' && !findStockColumn(profile)) {
-    missingInformation.push('Stock actual por producto')
+    missingInformation.push('Stock o inventario actual (necesario para decidir compras o reposición)')
     limitations.push('Sin stock no es posible recomendar cantidades de compra.')
   }
 
@@ -388,7 +411,7 @@ function uploadedDatasetProposal(profile: DatasetProfile, intent: DemoIntent) {
 
   return {
     objective: 'Responder el objetivo planteado con las columnas disponibles en el archivo.',
-    summary: `Usaremos ${profile.columnCount} columnas detectadas en la vista previa para calcular indicadores descriptivos y comparaciones.`,
+    summary: `Usaremos ${profile.columnCount} columnas detectadas en ${profile.origin === 'backend' ? 'el perfil de Pandas' : 'la vista previa'} para calcular indicadores descriptivos y comparaciones.`,
     indicators,
     charts,
     requiredData: [...new Set(charts.flatMap((c) => c.columns).concat(indicators.flatMap((i) => i.columns)))],

@@ -29,6 +29,7 @@ export function createHttpService(baseUrl: string): DataDecisionService {
 
   return {
     mode: 'http',
+    profiling: 'backend',
 
     checkHealth: () => http.json<HealthStatus>('/api/health', { timeoutMs: 5_000 }),
 

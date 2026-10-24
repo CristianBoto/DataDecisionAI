@@ -1,6 +1,6 @@
 import type { Dataset } from '@/types/domain'
 import { buildLocalCsvProfile } from '@/lib/csv'
-import { buildProposal, detectIntent, replyToObjective } from './demoAssistant'
+import { buildGreeting, buildProposal, detectIntent, replyToClarification, replyToObjective } from './demoAssistant'
 import { createDemoDataset, createDemoProfile } from './demoDataset'
 
 const uploaded: Dataset = {
@@ -48,6 +48,32 @@ describe('asistente DEMO', () => {
     expect(proposal.charts.some((c) => c.type === 'line')).toBe(true)
     expect(proposal.feasibility).toBe('viable')
     expect(proposal.isDemo).toBe(true)
+  })
+
+  it('no presenta conclusiones de ventas sobre archivos de otros rubros', () => {
+    const profile = buildLocalCsvProfile('fecha,curso,nota\n2025-03-01,1A,8\n2025-03-02,1B,6\n', {
+      datasetId: uploaded.id,
+      isSample: false,
+    })
+    const greeting = buildGreeting(uploaded, profile)
+    expect(greeting.content).toMatch(/sin interpretar el rubro/)
+
+    const { reply } = replyToObjective('Quiero saber si comprar más stock', uploaded, profile)
+    expect(reply.content).not.toMatch(/ventas/i)
+    expect(replyToClarification('agregar stock', 'restock', false).content).not.toMatch(/ventas/i)
+
+    const proposal = buildProposal({
+      projectId: 'p',
+      dataset: uploaded,
+      profile,
+      intent: 'restock',
+      objectiveText: 'comprar más',
+      version: 1,
+      requestedChanges: [],
+      proposalId: 'prop',
+    })
+    expect(`${proposal.summary} ${proposal.objective}`).not.toMatch(/ventas/i)
+    expect(proposal.limitations.join(' ')).toMatch(/no interpreta el rubro/)
   })
 
   it('marca como insuficiente un Excel sin columnas legibles', () => {

@@ -2,6 +2,7 @@ import { Calendar, CircleHelp, Hash, ToggleLeft, Type } from 'lucide-react'
 import type { ColumnType, DatasetProfile } from '@/types/domain'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { cn } from '@/lib/cn'
+import { formatNumber } from '@/lib/format'
 
 const TYPE_META: Record<ColumnType, { label: string; Icon: typeof Hash; className: string }> = {
   numeric: { label: 'Numérica', Icon: Hash, className: 'bg-blue-50 text-blue-700' },
@@ -41,6 +42,9 @@ export function DatasetPreview({ profile }: { profile: DatasetProfile }) {
                   <span className="block font-semibold text-slate-800">{col.name}</span>
                   <span className="mt-1 block">
                     <ColumnTypeTag type={col.inferredType} />
+                  </span>
+                  <span className={cn('mt-1 block text-[11px] font-normal', col.nullCount > 0 ? 'text-amber-700' : 'text-slate-400')}>
+                    {formatNumber(col.nullCount)} {col.nullCount === 1 ? 'vacío' : 'vacíos'}
                   </span>
                 </th>
               ))}

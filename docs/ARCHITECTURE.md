@@ -37,10 +37,24 @@ Visitante ──► Cloudflare Pages (archivos estáticos de frontend/dist)
                  · Ninguna solicitud de red con datos del usuario
 ```
 
-- `services/index.ts` crea solo el proveedor DEMO; el cliente HTTP no se instancia.
+- `services/index.ts` crea solo el proveedor DEMO; el cliente HTTP no se instancia (con `VITE_BACKEND_PROFILING` sin definir o en `false`).
 - El estado vive en memoria y desaparece al recargar.
 - Los resultados son del dataset ficticio de ejemplo y se marcan como DEMO. Con un archivo propio se muestra "pendiente de backend".
 - Cloudflare Pages resuelve las rutas de React Router devolviendo `index.html` (SPA, sin `404.html`).
+
+### DEMO con perfilado real (ejecución local)
+
+```
+Navegador ──► demoProvider.ts (asistente y resultados DEMO)
+                 │ VITE_BACKEND_PROFILING=true
+                 ▼
+            backendProfile.ts ──POST /api/datasets/profile──► FastAPI ──► Pandas (no guarda el archivo)
+```
+
+- `createService()` inyecta un `DatasetProfiler` en el proveedor DEMO; los demás métodos no cambian.
+- `backendProfile.ts` adapta la respuesta snake_case de Python a `DatasetProfile` (`origin: "backend"`).
+- Si el backend falla, `uploadDataset` rechaza con el error: no hay respaldo silencioso con datos locales o ficticios.
+- El servicio expone `profiling: "browser" | "backend"` para que la pantalla de carga muestre el aviso correcto.
 
 ### Instalación privada (frontend + backend en la organización)
 
@@ -56,7 +70,7 @@ Red interna de la organización
 
 - Cada instalación tiene su propia base SQLite, carpeta de archivos y `.env`. No hay multi-tenancy: una instalación = una organización.
 - OpenAI es una integración opcional que cada organización autoriza y configura con su propia clave.
-- Hoy el backend solo expone `/api/health`. Los controles de seguridad necesarios para datos confidenciales (autenticación, HTTPS, cifrado, auditoría, retención) están **pendientes**: ver [DEPLOYMENT.md](DEPLOYMENT.md).
+- Hoy el backend expone `/api/health` y `POST /api/datasets/profile` (perfilado sin guardar). Los controles de seguridad necesarios para datos confidenciales (autenticación, HTTPS, cifrado, auditoría, retención) están **pendientes**: ver [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ## Flujo funcional
 
@@ -95,7 +109,7 @@ Decisiones:
 |---------|-----------------|
 | `main.py` | Crea la app, CORS de desarrollo, registra routers bajo `/api`. |
 | `core/` | `config.py` con `pydantic-settings` (lee `.env`). |
-| `api/` | Routers HTTP, sin lógica de negocio. Hoy: `routes/health.py`. |
+| `api/` | Routers HTTP, sin lógica de negocio. Hoy: `routes/health.py` y `routes/datasets.py`. |
 | `schemas/` | Modelos Pydantic de entrada/salida (camelCase, iguales a `domain.ts`). |
 | `services/` | Lógica: lectura y perfilado con Pandas, IA 1, IA 2, cálculos, exportaciones. |
 | `models/` | Tablas SQLAlchemy (proyectos, datasets, mensajes, propuestas, planes, resultados). |
@@ -106,3 +120,27 @@ Principios para crecer:
 - La API key de OpenAI vive solo en `backend/.env`.
 - Los números siempre salen de Pandas; la IA interpreta y redacta, y su salida se valida contra los datos.
 - La IA recibe el **perfil** y resúmenes agregados, no el archivo completo.
+
+## Minimización de datos (decisión de diseño, pendiente de implementación)
+
+```
+Dataset ──► Python + Pandas (navegador, backend local o interno)
+                 │  procesa todo el archivo
+                 ▼
+          Resumen mínimo ──► ¿puede ser confidencial? ──sí──► autorización explícita
+          (columnas, tipos,                 │no                      │
+           conteos, agregados)              ▼                        ▼
+                                         OpenAI ◄────────────────────┘
+                                           │
+                                           ▼
+                          Plan de análisis estructurado (catálogo cerrado)
+                                           │
+                                           ▼
+                          Pandas valida y ejecuta ──► resultados
+```
+
+- OpenAI recibe solo la información **mínima, necesaria y autorizada** para comprender objetivos, planificar análisis o interpretar resultados.
+- **No se envían por defecto** el archivo completo, las filas originales, los valores de ejemplo (`examples`) ni las vistas previas (`preview`).
+- Si lo que se pretende enviar puede ser confidencial, se requiere **autorización explícita**.
+- La IA propone **planes estructurados**; no modifica el código fuente del backend ni se ejecuta código generado por ella.
+- **Estado:** política decidida; su implementación y validación están pendientes (ver [SEGURIDAD.md](SEGURIDAD.md)).
