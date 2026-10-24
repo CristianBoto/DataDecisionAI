@@ -24,6 +24,7 @@ import { ErrorState, Skeleton } from '@/components/ui/Feedback'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useWorkspace } from '@/hooks/useWorkspace'
 import { formatDateTime } from '@/lib/format'
+import { COMPLETENESS_CRITERIA, getCompleteness } from '@/lib/profileMetrics'
 
 const EVIDENCE: Record<EvidenceLevel, { label: string; tone: 'green' | 'amber' | 'neutral'; bar: string }> = {
   strong: { label: 'Evidencia sólida', tone: 'green', bar: 'bg-emerald-500' },
@@ -83,13 +84,14 @@ export function OverviewPage() {
     )
   } else if (results.data.status !== 'available') {
     // Archivo propio en modo DEMO: no se inventan resultados.
-    const nullCells = profile.columns.reduce((sum, c) => sum + c.nullCount, 0)
-    const total = (profile.rowCount ?? 0) * profile.columnCount
+    const completeness = getCompleteness(profile)
+    const fromBackend = profile.origin === 'backend'
+    const source = fromBackend ? 'Calculado con Pandas sobre el archivo completo.' : 'Calculado localmente sobre tu archivo.'
     const profileIndicators: Indicator[] = [
-      { id: 'rows', label: 'Filas (vista previa)', value: profile.rowCount ?? 0, format: 'number', description: 'Calculado localmente sobre tu archivo.' },
-      { id: 'cols', label: 'Columnas detectadas', value: profile.columnCount, format: 'number', description: 'Calculado localmente sobre tu archivo.' },
-      ...(total > 0
-        ? [{ id: 'comp', label: 'Completitud', value: 1 - nullCells / total, format: 'percent' as const, description: 'Celdas con valor sobre el total de la muestra.' }]
+      { id: 'rows', label: fromBackend ? 'Filas' : 'Filas (vista previa)', value: profile.rowCount ?? 0, format: 'number', description: source },
+      { id: 'cols', label: 'Columnas detectadas', value: profile.columnCount, format: 'number', description: source },
+      ...(completeness !== null
+        ? [{ id: 'comp', label: 'Completitud', value: completeness, format: 'percent' as const, description: COMPLETENESS_CRITERIA }]
         : []),
     ]
     body = (

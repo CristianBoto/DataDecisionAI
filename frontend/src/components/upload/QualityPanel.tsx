@@ -3,7 +3,9 @@ import { AlertTriangle, Info, ShieldCheck, XCircle } from 'lucide-react'
 import type { DatasetProfile, IssueSeverity } from '@/types/domain'
 import { Badge, DemoBadge } from '@/components/ui/Badge'
 import { Card, CardHeader } from '@/components/ui/Card'
+import { SemanticTag } from '@/components/upload/DatasetPreview'
 import { formatNumber } from '@/lib/format'
+import { COMPLETENESS_CRITERIA, formatCompleteness, getCompleteness, getSuspectedMissingCells } from '@/lib/profileMetrics'
 
 const SEVERITY_ICON: Record<IssueSeverity, ReactNode> = {
   error: <XCircle className="size-4 shrink-0 text-red-600" aria-hidden />,
@@ -17,12 +19,12 @@ const ORIGIN_LABEL = {
   demo: { label: 'Dataset ficticio', tone: 'demo' as const },
 }
 
-/** Resumen de calidad de datos. Hoy es preliminar; el backend devolverá el definitivo. */
+/** Resumen de calidad de datos. Con perfil del backend, todas las cifras vienen de Pandas. */
 export function QualityPanel({ profile }: { profile: DatasetProfile }) {
-  const totalCells = (profile.rowCount ?? 0) * profile.columnCount
-  const nullCells = profile.columns.reduce((sum, c) => sum + c.nullCount, 0)
-  const completeness = totalCells > 0 ? 1 - nullCells / totalCells : null
+  const completeness = getCompleteness(profile)
+  const suspectedCells = getSuspectedMissingCells(profile)
   const origin = ORIGIN_LABEL[profile.origin]
+  const interpreted = profile.columns.filter((c) => c.semanticType)
 
   const stats = [
     {
@@ -30,13 +32,13 @@ export function QualityPanel({ profile }: { profile: DatasetProfile }) {
       value: profile.rowCount === null ? 'Pendiente' : `${profile.rowCountIsEstimate ? '≥ ' : ''}${formatNumber(profile.rowCount)}`,
     },
     { label: 'Columnas', value: profile.columnCount > 0 ? formatNumber(profile.columnCount) : 'Pendiente' },
-    {
-      label: 'Completitud',
-      value: completeness === null ? 'Pendiente' : `${(completeness * 100).toLocaleString('es-AR', { maximumFractionDigits: 1 })} %`,
-    },
+    { label: 'Completitud', value: completeness === null ? 'Pendiente' : formatCompleteness(completeness) },
   ]
   if (profile.duplicateRowCount !== undefined && profile.duplicateRowCount !== null) {
     stats.push({ label: 'Filas duplicadas', value: formatNumber(profile.duplicateRowCount) })
+  }
+  if (suspectedCells > 0) {
+    stats.push({ label: 'Posibles marcadores de ausencia', value: formatNumber(suspectedCells) })
   }
 
   return (
@@ -55,6 +57,26 @@ export function QualityPanel({ profile }: { profile: DatasetProfile }) {
           </div>
         ))}
       </div>
+      <p className="px-5 pt-2 text-[11px] leading-relaxed text-slate-400">Completitud: {COMPLETENESS_CRITERIA}</p>
+
+      {interpreted.length > 0 && (
+        <div className="px-5 pt-4">
+          <p className="text-xs font-semibold text-slate-700">Interpretación estimada de las columnas</p>
+          <p className="mt-0.5 text-[11px] text-slate-400">Inferencia con reglas generales: confirmala antes de calcular.</p>
+          <ul className="mt-2 space-y-2">
+            {interpreted.map((c) => (
+              <li key={c.name} className="text-xs leading-relaxed text-slate-600">
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-semibold text-slate-800">{c.name}</span>
+                  <SemanticTag column={c} />
+                </span>
+                {c.semanticReason && <span className="block text-slate-500">{c.semanticReason}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="p-5">
         <p className="mb-2 text-xs font-semibold text-slate-700">Observaciones</p>
         {profile.issues.length === 0 ? (

@@ -86,10 +86,15 @@ La respuesta usa **snake_case** (tal como la genera `backend/app/services/datase
 | `row_count`, `column_count` | `rowCount`, `columnCount` (`rowCountIsEstimate: false`, `isComplete: true`, `origin: "backend"`) |
 | `duplicate_rows` | `duplicateRowCount` (opcional) |
 | `columns[].missing` / `non_empty` / `distinct` / `examples` | `nullCount` / `nonNullCount` / `uniqueCount` / `sampleValues` |
-| — | `inferredType`: estimado en el frontend con `examples` y `preview` (Pandas lee todo como texto) |
 | `preview` | `previewRows` |
 | `warnings[]` | `issues[]` con `severity: "warning"` (y `column` si el mensaje la nombra) |
 | `encoding`, `sheet_name` | `note` |
+| `columns[].suspected_missing` | `suspectedMissingCount` (marcadores como `NA`; **no** incluidos en `nullCount`) |
+| `columns[].value_kind` | `inferredType` (formato calculado sobre todos los valores; `mixed` → `text`) |
+| `columns[].semantic_type` / `semantic_confidence` / `semantic_reason` | `semanticType` / `semanticConfidence` / `semanticReason` |
+| `completeness`, `suspected_missing_cells` | `completeness`, `suspectedMissingCellCount` |
+
+Campos de calidad (Fase 2): `total_cells`, `empty_cells`, `suspected_missing_cells`, `completeness` (celdas no vacías ÷ total) y, por columna, `suspected_missing`, `suspected_missing_values`, `value_kind`, `semantic_type` (`quantitative | categorical | identifier | temporal | text | unknown`), `semantic_confidence` (`high | medium | low`) y `semantic_reason`. Son **aditivos**: el adaptador tolera su ausencia.
 
 Errores: `413` más de 25 MB · `422` formato no admitido, archivo vacío o ilegible (con `detail` en español).
 

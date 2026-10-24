@@ -12,6 +12,8 @@ from zipfile import BadZipFile, ZipFile, is_zipfile
 
 import pandas as pd
 
+from app.services.column_semantics import classify_column, suspected_missing_mask
+
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_XLSX_UNCOMPRESSED_BYTES = 60 * 1024 * 1024
 MAX_COLUMNS = 250
@@ -90,6 +92,10 @@ def profile_dataset(content: bytes, filename: str) -> dict:
 
     No elimina duplicados, rellena nulos ni altera el archivo original.
     La lectura como texto evita convertir automáticamente identificadores '00123'.
+
+    Política de faltantes: solo la celda vacía (o con espacios) es faltante.
+    Marcadores como 'NA', 'null' o '-' se informan como *sospechosos* y no se
+    descuentan, porque pueden ser valores válidos.
     """
     name = Path(filename or "").name
     extension = Path(name).suffix.lower()
@@ -119,15 +125,33 @@ def profile_dataset(content: bytes, filename: str) -> dict:
         missing_mask = series.str.strip().eq("")
         missing = int(missing_mask.sum())
         values = series.loc[~missing_mask]
+        suspected_mask = suspected_missing_mask(values)
+        suspected = int(suspected_mask.sum())
+        suspected_values = values.loc[suspected_mask].str.strip().value_counts().head(5)
+        semantics = classify_column(column, values.loc[~suspected_mask])
         column_profiles.append({
             "name": column,
             "missing": missing,
             "non_empty": int(len(df) - missing),
             "distinct": int(values.nunique()),
             "examples": values.drop_duplicates().head(3).tolist(),
+            "suspected_missing": suspected,
+            "suspected_missing_values": {str(k): int(v) for k, v in suspected_values.items()},
+            "value_kind": semantics.value_kind,
+            "semantic_type": semantics.semantic_type,
+            "semantic_confidence": semantics.confidence,
+            "semantic_reason": semantics.reason,
         })
         if missing:
             warnings.append(f"La columna '{column}' tiene {missing} valores vacíos.")
+        if suspected:
+            markers = ", ".join(f"'{k}'" for k in suspected_values.index)
+            warnings.append(
+                f"La columna '{column}' tiene {suspected} valores como {markers} que podrían indicar "
+                "ausencia; no se cuentan como faltantes porque pueden ser valores válidos."
+            )
+        if semantics.ambiguity:
+            warnings.append(f"La columna '{column}' {semantics.ambiguity}")
         if column.startswith("Unnamed:"):
             warnings.append(f"La columna '{column}' no tiene un encabezado claro.")
 
@@ -139,6 +163,10 @@ def profile_dataset(content: bytes, filename: str) -> dict:
     if encoding == "cp1252":
         warnings.append("CSV leído como Windows-1252; revisar la codificación de origen.")
 
+    total_cells = int(df.shape[0] * df.shape[1])
+    empty_cells = sum(column["missing"] for column in column_profiles)
+    suspected_cells = sum(column["suspected_missing"] for column in column_profiles)
+
     return {
         "filename": name,
         "format": extension.lstrip("."),
@@ -147,6 +175,11 @@ def profile_dataset(content: bytes, filename: str) -> dict:
         "row_count": int(df.shape[0]),
         "column_count": int(df.shape[1]),
         "duplicate_rows": duplicate_rows,
+        # Completitud sobre el archivo completo: celdas no vacías / total de celdas.
+        "total_cells": total_cells,
+        "empty_cells": empty_cells,
+        "suspected_missing_cells": suspected_cells,
+        "completeness": round(1 - empty_cells / total_cells, 6) if total_cells else None,
         "columns": column_profiles,
         "preview": [
             {column: str(value) for column, value in row.items()}

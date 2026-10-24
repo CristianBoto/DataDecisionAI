@@ -72,6 +72,14 @@ Cada tarea indica qué construir, dónde y cómo saber que está terminada. Conv
 
 ---
 
+## Próxima fase: confirmación humana de la interpretación (planificada)
+
+- El perfilador ya propone tipo semántico, confianza, motivo y marcadores sospechosos; **no decide**.
+- Agregar al asistente preguntas acotadas cuando haya ambigüedad: significado de una variable (¿código o cantidad?), marcadores (`NA`: ¿faltante o valor válido?) y necesidades del análisis.
+- Guardar las decisiones del usuario junto al plan aprobado y aplicarlas en Pandas sobre una copia en memoria; **nunca** modificar ni eliminar datos originales sin autorización.
+- Sin reglas específicas de un dataset: SIACAM es solo un caso de prueba.
+- **Listo cuando**: con SIACAM, el asistente pregunta por `PPRO` y por los `NA` de `ORIGEN`, `PPRO` y `PROCEDENC`, y el plan aprobado registra las respuestas.
+
 ## Estado actual (para orientar el trabajo)
 
 | Ya funciona | Se implementará después con ChatGPT |

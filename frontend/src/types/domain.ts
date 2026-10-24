@@ -29,13 +29,29 @@ export interface Dataset {
   status: DatasetStatus
 }
 
+/** Formato de los valores (tipo técnico). No indica qué significa la columna. */
 export type ColumnType = 'numeric' | 'text' | 'date' | 'boolean' | 'unknown'
+
+/** Rol estadístico estimado de la columna. Es una inferencia, nunca una certeza. */
+export type SemanticType = 'quantitative' | 'categorical' | 'identifier' | 'temporal' | 'text' | 'unknown'
+export type SemanticConfidence = 'high' | 'medium' | 'low'
 
 export interface ColumnProfile {
   name: string
   inferredType: ColumnType
   nonNullCount: number
+  /** Celdas realmente vacías (o solo con espacios). */
   nullCount: number
+  /**
+   * Valores como "NA", "null" o "-" que podrían indicar ausencia. NO se suman
+   * a nullCount porque pueden ser valores válidos (por ejemplo, "NA" = Namibia).
+   */
+  suspectedMissingCount?: number
+  /** Solo lo informa el backend, calculado sobre todos los valores de la columna. */
+  semanticType?: SemanticType
+  semanticConfidence?: SemanticConfidence
+  /** Motivo legible de la clasificación. */
+  semanticReason?: string
   /** Cantidad de valores distintos (puede ser null si no se calculó). */
   uniqueCount: number | null
   sampleValues: string[]
@@ -70,6 +86,10 @@ export interface DatasetProfile {
   columnCount: number
   /** Filas idénticas; undefined o null cuando no se calculó (vista previa local). */
   duplicateRowCount?: number | null
+  /** Celdas no vacías / total de celdas, informado por el backend sobre el archivo completo. */
+  completeness?: number | null
+  /** Total de celdas con marcadores sospechosos de ausencia (no incluidas en los faltantes). */
+  suspectedMissingCellCount?: number
   columns: ColumnProfile[]
   /** Primeras filas, indexadas por nombre de columna. */
   previewRows: Record<string, string>[]

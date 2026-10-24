@@ -16,10 +16,12 @@ Entorno de la verificación: Windows 11, Node 22.17.0, Python 3.12.9.
 |--------|-----------|-----------|
 | Frontend inicial (commit `797fdd7`) | 28 pruebas | 📄 28 casos `it(` en los archivos de prueba de ese commit |
 | Preparación para Cloudflare (commit `1fe248a`) | 29 pruebas | 📄 29 casos en ese commit (se agregó la prueba de "sin envío por red") |
-| Frontend actual (integración React + Pandas) | **41 de 41 aprobadas**, 7 archivos | ✅ `npm test` |
+| Frontend al cierre de la integración React + Pandas (commit `7971702`) | 41 de 41 aprobadas, 7 archivos | ✅ ejecutada en esa etapa |
+| **Frontend actual (Fase 2: calidad de datos)** | **51 de 51 aprobadas**, 8 archivos | ✅ `npm test` (sección 9) |
 | Lint del frontend | Sin errores | ✅ `npm run lint` |
 | Build de producción del frontend | Correcta | ✅ `npm run build` |
-| Backend FastAPI + Pandas | **15 de 15 aprobadas** (1 advertencia de librería) | ✅ `python -m pytest -v` |
+| Backend al cierre de la integración (commit `7971702`) | 15 de 15 aprobadas | ✅ ejecutada en esa etapa |
+| **Backend actual (Fase 2: calidad de datos)** | **26 de 26 aprobadas** (1 advertencia de librería) | ✅ `python -m pytest` (sección 9) |
 | Swagger con el dataset SIACAM: HTTP 200, 102.254 registros, 8 columnas | Informado como correcto | 🗣️ El archivo no está en el repositorio |
 | Integración local React + FastAPI + Pandas con `impominerales-siacam.csv` | 7,4 MB, 102.254 registros, 8 columnas, 0 duplicados, 100 % de completitud, "Perfil del backend" | 🗣️ Capturas del autor (sección 7) |
 | Errores del backend en el navegador | Mensaje 422 visible, sin vista previa sustituta | ✅ Prueba manual (sección 4) |
@@ -92,7 +94,7 @@ La prueba de errores del backend informada por el autor (vía Swagger) es 🗣�
 
 **Qué demuestra.** El flujo completo funciona con un archivo real de más de 100.000 filas: el navegador envía el CSV, Pandas lo perfila y la interfaz muestra el resultado marcado como proveniente del backend.
 
-**Limitaciones conocidas (no resueltas).**
+**Limitaciones conocidas al cierre de esa etapa** (la Fase 2, sección 9, aborda parte de ellas; las que permanecen se listan allí).
 
 - **Tipos de columna estimados:** Pandas lee todo como texto y el frontend estima el tipo con los valores de ejemplo y las primeras filas. No es un tipado definitivo.
 - **Códigos numéricos que pueden ser categorías:** columnas como años, meses o códigos de producto o de país se ven como números, pero pueden ser variables categóricas; sumarlas o promediarlas no tendría sentido.
@@ -104,6 +106,8 @@ Al volver a ejecutar las pruebas con el `.env.local` del autor presente (`VITE_B
 
 ## 8. Limitaciones y verificaciones pendientes
 
+> Ver también las limitaciones propias de la Fase 2 en la sección 9.
+
 - La prueba con el dataset **SIACAM** no se pudo repetir porque el archivo no está en el repositorio. Las capturas del autor son la evidencia; para hacerla reproducible se podría agregar una prueba con una muestra anonimizada.
 - No hay pruebas de punta a punta automatizadas con navegador real (por ejemplo, Playwright); las verificaciones en navegador fueron manuales.
 - No se midió rendimiento ni consumo de memoria con archivos cercanos al límite de 25 MB desde la interfaz.
@@ -111,3 +115,85 @@ Al volver a ejecutar las pruebas con el `.env.local` del autor presente (`VITE_B
 - De la demo publicada solo se verificó la disponibilidad (respuestas HTTP). La configuración `VITE_DEMO_MODE=true` y el recorrido completo en el sitio publicado constan en la evidencia comunicada; conviene repetir el recorrido manual en la URL pública antes de la exposición.
 - La política de minimización de datos para OpenAI está decidida pero sin implementar; no hay pruebas que la validen.
 - El asistente, los resultados y la exportación son DEMO; no hay pruebas de cálculos reales porque todavía no existen.
+
+
+## 9. Fase 2 — Calidad y confiabilidad del dataset (✅ verificada)
+
+Las pruebas automáticas usan datos **sintéticos**. La validación con el archivo real SIACAM fue realizada por el autor (subsección "Validación con SIACAM").
+
+### Resultados
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **26 de 26** (15 anteriores + 11 nuevas en `test_data_quality.py`), 1 advertencia de librería |
+| Frontend (`npm test`) | **51 de 51** en 8 archivos (41 anteriores + 9 en `lib/dataQuality.test.ts` + 1 en `navigation.test.tsx`) |
+| Lint y build | Sin errores |
+| Regresiones | Ninguna: las 41 pruebas previas del frontend y las 15 del backend pasaron sin modificarse |
+
+### Qué cubren las pruebas nuevas
+
+| Aspecto | Backend | Frontend |
+|---------|---------|----------|
+| Solo la celda vacía es faltante; `NA`, `N/A`, `null`, `-` quedan como sospechosos | ✅ | ✅ (vista previa local) |
+| `NA` se conserva como valor válido y distinto; el dato no se modifica | ✅ | ✅ |
+| Completitud sobre el archivo completo (150 vacías de 400 → 62,5 %) | ✅ | ✅ (usa el valor del backend) |
+| Nunca se muestra "100 %" si falta alguna celda | — | ✅ |
+| Misma lista de marcadores en Python y TypeScript | — | ✅ (lee `column_semantics.py`) |
+| Año y mes por nombre + rango; código de longitud fija; cuantitativa con decimales; categórica | ✅ (CSV tipo comercio exterior) | ✅ (adaptador) |
+| Ceros a la izquierda → código con confianza alta | ✅ | — |
+| Fechas en dos formatos → temporal | ✅ | — |
+| Posible año sin nombre, pocos enteros, mezcla número/texto → confianza baja + advertencia | ✅ | — |
+| Columna constante → confianza baja + advertencia | ✅ | — |
+| Reglas independientes del dataset ("Fiscal Year", "Año") | ✅ | — |
+| XLSX con fechas, códigos `00001`, importes, vacíos y `NA` | ✅ | — |
+| Respuesta anterior del backend sin campos nuevos | — | ✅ |
+| El asistente DEMO no suma ni promedia códigos o años | — | ✅ |
+| La pantalla muestra interpretación con "?" y confianza, y posibles NA | — | ✅ |
+
+### Verificación manual en el navegador
+
+Frontend con perfilado real contra el backend local (puerto alternativo, sin modificar la configuración del autor), con un CSV sintético de 500 filas y columnas `ANYO`, `MES`, `PPRO`, `CIF`, `PAIS`, `OBS`:
+
+- Completitud 98,1 % (56 celdas vacías de 3.000), 169 posibles marcadores de ausencia informados aparte.
+- `ANYO` y `MES`: temporal, confianza alta. `PPRO` (8 dígitos fijos): "Código o ID?", confianza media, con advertencia. `CIF`: cuantitativa, alta. `PAIS` (con `NA`): categórica, media, y 125 posibles `NA`.
+- Una columna constante se mostró con confianza baja y advertencia.
+
+### Rendimiento
+
+CSV sintético de 102.254 filas × 8 columnas (4,4 MB), medido en el equipo de desarrollo: **0,69 s antes → 2,04 s después**. Aceptable para el MVP; el costo se concentra en columnas numéricas con valores casi todos distintos.
+
+### Limitaciones que permanecen
+
+- **Interpretación estimada:** las reglas pueden equivocarse. Un código corto de longitud variable sin nombre indicativo (por ejemplo, 1 a 40) se clasifica como cuantitativo con confianza media.
+- **Nombres de columna:** solo se reconocen palabras en español e inglés.
+- **Marcadores sospechosos sin resolver:** se informan, pero la decisión por columna queda pendiente.
+- **Formato numérico ambiguo:** `1.200` puede ser mil doscientos o uno coma dos; no se convierten valores.
+- **Clasificación ambigua observada en SIACAM (`PPRO`):** ver la subsección siguiente.
+
+### Validación con el dataset real SIACAM (🗣️ comunicada)
+
+**Evidencia aportada por el autor** mediante capturas de la aplicación local con `impominerales-siacam.csv` y la versión de la Fase 2. No fue reproducida por el asistente: el archivo no está en el repositorio.
+
+| Aspecto | Resultado observado |
+|---------|---------------------|
+| Carga y vista previa | Archivo cargado correctamente; vista previa visible |
+| Filas / columnas | 102.254 / 8 |
+| Duplicados exactos | 0 |
+| Completitud (celdas no vacías ÷ total) | 100 % |
+| Posibles marcadores de ausencia | 12: cuatro `NA` en `ORIGEN`, cuatro en `PPRO` y cuatro en `PROCEDENC` |
+| `ANYO`, `MES` | Temporal, confianza alta |
+| `CIF` | Cuantitativa, confianza alta |
+| `PPRO` | **Cuantitativa, confianza media**, sin confirmación semántica |
+
+**Lectura de los resultados.**
+
+- La completitud de 100 % y los 12 marcadores son **compatibles**: con el criterio explícito, los `NA` no son celdas vacías, por lo que se informan aparte en lugar de descontarse. Antes de la Fase 2, esos 12 valores no se veían.
+- `ANYO`, `MES` y `CIF` se clasificaron como se esperaba.
+- **Limitación real observada — `PPRO`:** fue clasificada como **cuantitativa con confianza media**. Ninguna regla general encontró evidencia de que sea un código (no tiene ceros a la izquierda, su nombre no contiene palabras de código y, previsiblemente, sus valores no tienen longitud fija; esto último no fue verificado). **No puede afirmarse que la plataforma haya reconocido su significado.** Por eso no conviene sumarla ni promediarla sin confirmación del usuario.
+- Los `NA` de `ORIGEN` y `PROCEDENC` (columnas que, por su nombre, podrían contener países) pueden ser datos faltantes o un código válido; la plataforma no lo decide.
+
+**Decisión de arquitectura para las próximas fases (planificada, no implementada).**
+
+- DataDecision AI debe funcionar con **cualquier dataset tabular CSV/XLSX**. SIACAM es solo un caso de prueba real: **no se incorporan reglas específicas para sus columnas**, aunque eso implique que `PPRO` no se clasifique como código.
+- El perfilador **propone** interpretaciones y advertencias; no decide. La próxima fase incorporará un asistente que **consultará al usuario** cuando sean ambiguos el significado de una variable, los marcadores de ausencia o las necesidades del análisis (por ejemplo: "¿`PPRO` es un código o una cantidad?", "¿los `NA` de `ORIGEN` son datos faltantes o un código de país?").
+- **Tratamiento no destructivo:** las decisiones confirmadas se aplicarán después, al ejecutar el análisis con Pandas, sobre una copia en memoria. **Nunca se eliminan ni modifican automáticamente datos originales sin autorización.** Hoy no se aplica ningún tratamiento: los `NA` se informan y se conservan.

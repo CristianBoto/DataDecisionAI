@@ -85,19 +85,30 @@ export function parseCsv(text: string, delimiter: CsvDelimiter = detectDelimiter
   return rows.filter((r) => r.some((value) => value.trim() !== ''))
 }
 
-const NULL_TOKENS = new Set(['', 'na', 'n/a', 'null', 'none', 'nan', '-'])
+/**
+ * Política de faltantes, igual a la del backend (`column_semantics.py`):
+ * solo la celda vacía es faltante; estos marcadores son *sospechosos* y no se
+ * descuentan, porque pueden ser valores válidos ("NA" puede ser Namibia).
+ */
+export const SUSPECTED_MISSING_TOKENS = new Set([
+  'na', 'n/a', 'n.a.', '#n/a', 'nan', 'null', 'none', 'nil', '-', '--', '?', 's/d', 'sin dato', 'sin datos',
+])
 
-export function isNullLike(value: string): boolean {
-  return NULL_TOKENS.has(value.trim().toLowerCase())
+export function isEmptyValue(value: string): boolean {
+  return value.trim() === ''
+}
+
+export function isSuspectedMissing(value: string): boolean {
+  return SUSPECTED_MISSING_TOKENS.has(value.trim().toLowerCase())
 }
 
 const NUMBER_PATTERN = /^[-+]?(\d{1,3}([.,]\d{3})*|\d+)([.,]\d+)?%?$/
 const DATE_PATTERN = /^(\d{4}[-/]\d{1,2}([-/]\d{1,2})?|\d{1,2}[-/]\d{1,2}[-/]\d{2,4})([ T]\d{1,2}:\d{2}(:\d{2})?)?$/
 const BOOLEAN_TOKENS = new Set(['true', 'false', 'si', 'sí', 'no', 'verdadero', 'falso'])
 
-/** Infiere el tipo de una columna a partir de sus valores no nulos. */
+/** Infiere el formato de una columna ignorando vacíos y marcadores sospechosos. */
 export function inferColumnType(values: string[]): ColumnType {
-  const present = values.map((v) => v.trim()).filter((v) => !isNullLike(v))
+  const present = values.map((v) => v.trim()).filter((v) => !isEmptyValue(v) && !isSuspectedMissing(v))
   if (present.length === 0) return 'unknown'
 
   const ratio = (predicate: (v: string) => boolean) =>
@@ -171,10 +182,19 @@ export function buildLocalCsvProfile(text: string, options: LocalProfileOptions)
 
   const columns: ColumnProfile[] = header.map((name, index) => {
     const values = dataRows.map((r) => r[index] ?? '')
-    const nullCount = values.filter(isNullLike).length
-    const nonNull = values.filter((v) => !isNullLike(v))
+    const nullCount = values.filter(isEmptyValue).length
+    const nonNull = values.filter((v) => !isEmptyValue(v))
+    const suspectedMissingCount = nonNull.filter(isSuspectedMissing).length
     const unique = new Set(nonNull.map((v) => v.trim()))
     const inferredType = inferColumnType(values)
+
+    if (suspectedMissingCount > 0) {
+      issues.push({
+        severity: 'info',
+        column: name,
+        message: `"${name}" tiene ${suspectedMissingCount} valor(es) como "NA" o "-" que podrían indicar ausencia; no se cuentan como vacíos.`,
+      })
+    }
 
     if (dataRows.length > 0 && nullCount / dataRows.length >= 0.2) {
       issues.push({
@@ -192,6 +212,7 @@ export function buildLocalCsvProfile(text: string, options: LocalProfileOptions)
       inferredType,
       nonNullCount: nonNull.length,
       nullCount,
+      suspectedMissingCount,
       uniqueCount: unique.size,
       sampleValues: [...unique].slice(0, 3),
     }

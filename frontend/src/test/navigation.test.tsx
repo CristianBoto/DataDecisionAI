@@ -90,6 +90,43 @@ describe('navegación', () => {
     expect(screen.getByText(/La columna 'sede' tiene 5 valores vacíos/)).toBeInTheDocument()
   })
 
+  it('muestra la interpretación estimada de columnas y los posibles NA sin presentarlos como certezas', async () => {
+    const user = userEvent.setup()
+    const profiler: DatasetProfiler = {
+      profile: async (_file, id) =>
+        adaptBackendProfile(
+          {
+            filename: 'comercio.csv',
+            format: 'csv',
+            encoding: 'utf-8-sig',
+            sheet_name: null,
+            row_count: 200,
+            column_count: 2,
+            duplicate_rows: 0,
+            total_cells: 400,
+            empty_cells: 0,
+            suspected_missing_cells: 12,
+            completeness: 1,
+            columns: [
+              { name: 'PPRO', missing: 0, non_empty: 200, distinct: 30, examples: ['26030000'], suspected_missing: 0, value_kind: 'numeric', semantic_type: 'identifier', semantic_confidence: 'medium', semantic_reason: 'Enteros de longitud fija (8 dígitos): patrón habitual de códigos.' },
+              { name: 'PAIS', missing: 0, non_empty: 200, distinct: 4, examples: ['AR', 'NA'], suspected_missing: 12, value_kind: 'text', semantic_type: 'categorical', semantic_confidence: 'medium', semantic_reason: 'Texto con 3 valores distintos que se repiten.' },
+            ],
+            preview: [{ PPRO: '26030000', PAIS: 'NA' }],
+            warnings: [],
+          },
+          id,
+        ),
+    }
+    renderApp('/analisis/cargar', profiler)
+    await user.upload(screen.getByTestId('file-input'), new File(['PPRO,PAIS\n26030000,NA\n'], 'comercio.csv', { type: 'text/csv' }))
+
+    expect(await screen.findByText('Interpretación estimada de las columnas')).toBeInTheDocument()
+    expect(screen.getAllByText(/Código o ID\? · confianza media/).length).toBeGreaterThan(0)
+    expect(screen.getByText('Posibles marcadores de ausencia')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: /PAIS/ })).toHaveTextContent('12 posible(s) NA')
+    expect(screen.getByText(/no se descuentan/)).toBeInTheDocument()
+  })
+
   it('informa el error del backend sin mostrar una vista previa alternativa', async () => {
     const user = userEvent.setup()
     const profiler: DatasetProfiler = {

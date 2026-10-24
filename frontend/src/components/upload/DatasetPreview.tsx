@@ -1,8 +1,9 @@
 import { Calendar, CircleHelp, Hash, ToggleLeft, Type } from 'lucide-react'
-import type { ColumnType, DatasetProfile } from '@/types/domain'
+import type { ColumnProfile, ColumnType, DatasetProfile } from '@/types/domain'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { cn } from '@/lib/cn'
 import { formatNumber } from '@/lib/format'
+import { CONFIDENCE_LABEL, SEMANTIC_LABEL } from '@/lib/profileMetrics'
 
 const TYPE_META: Record<ColumnType, { label: string; Icon: typeof Hash; className: string }> = {
   numeric: { label: 'Numérica', Icon: Hash, className: 'bg-blue-50 text-blue-700' },
@@ -18,6 +19,24 @@ export function ColumnTypeTag({ type }: { type: ColumnType }) {
     <span className={cn('inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-medium', className)}>
       <Icon className="size-3" aria-hidden />
       {label}
+    </span>
+  )
+}
+
+/** Rol estadístico estimado por el backend, con su nivel de confianza (nunca como certeza). */
+export function SemanticTag({ column }: { column: ColumnProfile }) {
+  if (!column.semanticType) return null
+  const confidence = column.semanticConfidence ?? 'low'
+  return (
+    <span
+      title={column.semanticReason}
+      className={cn(
+        'inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium',
+        confidence === 'low' ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 bg-white text-slate-600',
+      )}
+    >
+      {SEMANTIC_LABEL[column.semanticType]}
+      {confidence === 'high' ? '' : '?'} · {CONFIDENCE_LABEL[confidence]}
     </span>
   )
 }
@@ -43,9 +62,19 @@ export function DatasetPreview({ profile }: { profile: DatasetProfile }) {
                   <span className="mt-1 block">
                     <ColumnTypeTag type={col.inferredType} />
                   </span>
+                  {col.semanticType && (
+                    <span className="mt-1 block">
+                      <SemanticTag column={col} />
+                    </span>
+                  )}
                   <span className={cn('mt-1 block text-[11px] font-normal', col.nullCount > 0 ? 'text-amber-700' : 'text-slate-400')}>
                     {formatNumber(col.nullCount)} {col.nullCount === 1 ? 'vacío' : 'vacíos'}
                   </span>
+                  {(col.suspectedMissingCount ?? 0) > 0 && (
+                    <span className="block text-[11px] font-normal text-amber-700">
+                      {formatNumber(col.suspectedMissingCount ?? 0)} posible(s) NA
+                    </span>
+                  )}
                 </th>
               ))}
             </tr>

@@ -1,4 +1,4 @@
-import type { DataQualityIssue, DatasetProfile } from '@/types/domain'
+import type { ColumnType, DataQualityIssue, DatasetProfile, SemanticConfidence, SemanticType } from '@/types/domain'
 import { inferColumnType } from '@/lib/csv'
 import { ApiError } from './errors'
 import { HttpClient } from './httpClient'
@@ -16,6 +16,13 @@ export interface BackendColumnProfile {
   non_empty: number
   distinct: number
   examples: string[]
+  // Calidad y tipo semántico (opcionales para tolerar versiones previas del backend).
+  suspected_missing?: number
+  suspected_missing_values?: Record<string, number>
+  value_kind?: 'numeric' | 'date' | 'boolean' | 'text' | 'mixed' | 'empty'
+  semantic_type?: SemanticType
+  semantic_confidence?: SemanticConfidence
+  semantic_reason?: string
 }
 
 export interface BackendProfileResponse {
@@ -26,6 +33,10 @@ export interface BackendProfileResponse {
   row_count: number
   column_count: number
   duplicate_rows: number
+  total_cells?: number
+  empty_cells?: number
+  suspected_missing_cells?: number
+  completeness?: number | null
   columns: BackendColumnProfile[]
   preview: Record<string, string>[]
   warnings: string[]
@@ -38,6 +49,15 @@ const COLUMN_IN_WARNING = /^La columna '(.+?)'/
 function toIssue(warning: string): DataQualityIssue {
   const column = COLUMN_IN_WARNING.exec(warning)?.[1]
   return column ? { severity: 'warning', column, message: warning } : { severity: 'warning', message: warning }
+}
+
+const VALUE_KIND_TO_TYPE: Record<NonNullable<BackendColumnProfile['value_kind']>, ColumnType> = {
+  numeric: 'numeric',
+  date: 'date',
+  boolean: 'boolean',
+  text: 'text',
+  mixed: 'text',
+  empty: 'unknown',
 }
 
 export function adaptBackendProfile(response: BackendProfileResponse, datasetId: string): DatasetProfile {
@@ -54,18 +74,29 @@ export function adaptBackendProfile(response: BackendProfileResponse, datasetId:
     rowCountIsEstimate: false,
     columnCount: response.column_count,
     duplicateRowCount: response.duplicate_rows,
+    completeness: response.completeness,
+    suspectedMissingCellCount: response.suspected_missing_cells,
     columns: response.columns.map((column) => ({
       name: column.name,
-      // Pandas lee todo como texto; el tipo se estima con ejemplos y primeras filas.
-      inferredType: inferColumnType([...column.examples, ...response.preview.map((row) => row[column.name] ?? '')]),
+      // El backend clasifica el formato con TODOS los valores; si no lo informa
+      // (versión previa), se estima con ejemplos y primeras filas.
+      inferredType: column.value_kind
+        ? VALUE_KIND_TO_TYPE[column.value_kind]
+        : inferColumnType([...column.examples, ...response.preview.map((row) => row[column.name] ?? '')]),
       nonNullCount: column.non_empty,
       nullCount: column.missing,
+      suspectedMissingCount: column.suspected_missing,
+      semanticType: column.semantic_type,
+      semanticConfidence: column.semantic_confidence,
+      semanticReason: column.semantic_reason,
       uniqueCount: column.distinct,
       sampleValues: column.examples,
     })),
     previewRows: response.preview,
     issues: response.warnings.map(toIssue),
-    note: `Perfil calculado con Python (Pandas) sobre el archivo completo (${source}). Los tipos de columna son estimados.`,
+    note:
+      `Perfil calculado con Python (Pandas) sobre el archivo completo (${source}). ` +
+      'La interpretación de cada columna es una estimación con nivel de confianza.',
   }
 }
 

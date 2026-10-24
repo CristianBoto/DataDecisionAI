@@ -1,5 +1,5 @@
 import { Database } from 'lucide-react'
-import { ColumnTypeTag, DatasetPreview } from '@/components/upload/DatasetPreview'
+import { ColumnTypeTag, DatasetPreview, SemanticTag } from '@/components/upload/DatasetPreview'
 import { QualityPanel } from '@/components/upload/QualityPanel'
 import { Alert } from '@/components/ui/Alert'
 import { Card, CardHeader } from '@/components/ui/Card'
@@ -34,9 +34,11 @@ export function DatasetPage() {
                   <thead className="bg-slate-50 text-slate-500">
                     <tr>
                       <th className="px-4 py-2.5 font-medium">Columna</th>
-                      <th className="px-4 py-2.5 font-medium">Tipo</th>
+                      <th className="px-4 py-2.5 font-medium">Formato</th>
+                      <th className="px-4 py-2.5 font-medium">Interpretación estimada</th>
                       <th className="px-4 py-2.5 text-right font-medium">Con valor</th>
                       <th className="px-4 py-2.5 text-right font-medium">Vacíos</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Posibles NA</th>
                       <th className="px-4 py-2.5 text-right font-medium">Distintos</th>
                       <th className="px-4 py-2.5 font-medium">Ejemplos</th>
                     </tr>
@@ -46,8 +48,10 @@ export function DatasetPage() {
                       <tr key={c.name}>
                         <td className="px-4 py-2.5 font-medium text-slate-800">{c.name}</td>
                         <td className="px-4 py-2.5"><ColumnTypeTag type={c.inferredType} /></td>
+                        <td className="px-4 py-2.5">{c.semanticType ? <SemanticTag column={c} /> : <span className="text-slate-400">—</span>}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">{formatNumber(c.nonNullCount)}</td>
                         <td className={`px-4 py-2.5 text-right tabular-nums ${c.nullCount > 0 ? 'font-semibold text-amber-700' : ''}`}>{formatNumber(c.nullCount)}</td>
+                        <td className={`px-4 py-2.5 text-right tabular-nums ${(c.suspectedMissingCount ?? 0) > 0 ? 'font-semibold text-amber-700' : ''}`}>{c.suspectedMissingCount === undefined ? '—' : formatNumber(c.suspectedMissingCount)}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums">{c.uniqueCount === null ? '—' : formatNumber(c.uniqueCount)}</td>
                         <td className="max-w-64 truncate px-4 py-2.5 text-slate-500">{c.sampleValues.join(', ')}</td>
                       </tr>

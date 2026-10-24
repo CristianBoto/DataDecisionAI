@@ -32,7 +32,8 @@ export function formatValue(value: number, format: IndicatorFormat = 'number'): 
         maximumFractionDigits: 0,
       })
     case 'percent':
-      return value.toLocaleString(LOCALE, { style: 'percent', maximumFractionDigits: 1 })
+      // Un valor menor a 1 nunca se redondea a "100 %" (por ejemplo, completitud con faltantes).
+      return Math.min(value, value < 1 ? 0.999 : value).toLocaleString(LOCALE, { style: 'percent', maximumFractionDigits: 1 })
     default:
       return formatNumber(value, 1)
   }

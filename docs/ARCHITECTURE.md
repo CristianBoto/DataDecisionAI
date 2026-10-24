@@ -111,7 +111,7 @@ Decisiones:
 | `core/` | `config.py` con `pydantic-settings` (lee `.env`). |
 | `api/` | Routers HTTP, sin lógica de negocio. Hoy: `routes/health.py` y `routes/datasets.py`. |
 | `schemas/` | Modelos Pydantic de entrada/salida (camelCase, iguales a `domain.ts`). |
-| `services/` | Lógica: lectura y perfilado con Pandas, IA 1, IA 2, cálculos, exportaciones. |
+| `services/` | Lógica: lectura y perfilado con Pandas (`dataset_profiler.py`, `column_semantics.py`), IA 1, IA 2, cálculos, exportaciones. |
 | `models/` | Tablas SQLAlchemy (proyectos, datasets, mensajes, propuestas, planes, resultados). |
 | `db/` | Motor y sesión de base de datos. |
 
@@ -120,6 +120,25 @@ Principios para crecer:
 - La API key de OpenAI vive solo en `backend/.env`.
 - Los números siempre salen de Pandas; la IA interpreta y redacta, y su salida se valida contra los datos.
 - La IA recibe el **perfil** y resúmenes agregados, no el archivo completo.
+
+## Calidad de datos y tipos semánticos
+
+```
+Archivo ──► dataset_profiler.py (lectura como texto, límites)
+                 │ por columna
+                 ▼
+            column_semantics.py ──► faltantes (solo vacíos) + marcadores sospechosos
+                 │                  formato (sobre todos los valores)
+                 │                  tipo semántico + confianza + motivo
+                 ▼
+            JSON ──► backendProfile.ts ──► DatasetProfile ──► UI (completitud, interpretación, advertencias)
+                                                         └──► asistente DEMO (no suma códigos ni años)
+```
+
+- **Fuente autorizada:** las cifras de calidad y la interpretación de columnas las calcula Pandas sobre el archivo completo; el frontend las muestra y no las recalcula (`lib/profileMetrics.ts` centraliza el criterio).
+- **Separación de conceptos:** `inferredType` (formato) y `semanticType` (rol estadístico) son campos distintos; el segundo siempre viaja con `semanticConfidence` y `semanticReason`.
+- **Política compartida de faltantes:** la lista de marcadores existe en Python y en TypeScript (vista previa local); una prueba verifica que sean iguales.
+- **Compatibilidad:** los campos nuevos son opcionales en el adaptador.
 
 ## Minimización de datos (decisión de diseño, pendiente de implementación)
 

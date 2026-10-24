@@ -7,6 +7,7 @@ import type {
   ProposedChart,
   ProposedIndicator,
 } from '@/types/domain'
+import { isMeasurable } from '@/lib/profileMetrics'
 
 /**
  * ⚠️ SIMULACIÓN DEMO DEL ASISTENTE DE REQUISITOS (IA 1) ⚠️
@@ -64,17 +65,21 @@ export function findStockColumn(profile: DatasetProfile): ColumnProfile | undefi
   return profile.columns.find((c) => STOCK_PATTERN.test(normalize(c.name)))
 }
 
-/** Clasifica las columnas del perfil para adaptar la propuesta. */
+/**
+ * Clasifica las columnas del perfil para adaptar la propuesta. Si el backend
+ * informó el tipo semántico, se respeta: un código o un año no se suma.
+ */
 export function classifyColumns(profile: DatasetProfile) {
   const rowCount = profile.rowCount ?? 0
-  const numeric = profile.columns.filter((c) => c.inferredType === 'numeric')
-  const dates = profile.columns.filter((c) => c.inferredType === 'date')
-  const categorical = profile.columns.filter(
-    (c) =>
-      c.inferredType === 'text' &&
-      c.uniqueCount !== null &&
-      c.uniqueCount >= 2 &&
-      c.uniqueCount <= Math.max(30, Math.round(rowCount * 0.3)),
+  const numeric = profile.columns.filter(isMeasurable)
+  const dates = profile.columns.filter((c) => c.inferredType === 'date' || c.semanticType === 'temporal')
+  const categorical = profile.columns.filter((c) =>
+    c.semanticType
+      ? c.semanticType === 'categorical'
+      : c.inferredType === 'text' &&
+        c.uniqueCount !== null &&
+        c.uniqueCount >= 2 &&
+        c.uniqueCount <= Math.max(30, Math.round(rowCount * 0.3)),
   )
   return { numeric, dates, categorical }
 }
