@@ -20,7 +20,8 @@ describe('navegación', () => {
     const user = userEvent.setup()
     const router = renderApp('/')
     expect(screen.getByRole('heading', { level: 1, name: /decisiones claras/i })).toBeInTheDocument()
-    expect(screen.getByText(/Modo DEMO/)).toBeInTheDocument()
+    expect(screen.getByText(/Demo pública/)).toBeInTheDocument()
+    expect(screen.getAllByText(/no cargues datos confidenciales/i).length).toBeGreaterThan(0)
 
     await user.click(screen.getByRole('link', { name: /Comenzar un análisis/i }))
     expect(router.state.location.pathname).toBe('/analisis/cargar')

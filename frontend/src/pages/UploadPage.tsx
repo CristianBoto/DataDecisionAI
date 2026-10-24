@@ -117,6 +117,13 @@ export function UploadPage() {
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 space-y-4">
+          {service.mode === 'demo' && (
+            <Alert tone="warning" title="No cargues datos confidenciales">
+              En la demo pública tu archivo se lee solo en este navegador para la vista previa y no se envía a ningún
+              servidor. Aun así, usá datos de prueba o anonimizados.
+            </Alert>
+          )}
+
           <Dropzone onFile={handleFile} disabled={busy} maxSizeMb={appConfig.maxUploadMb} />
 
           {service.mode === 'demo' && (

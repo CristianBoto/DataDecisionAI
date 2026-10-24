@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   FileDown,
+  FlaskConical,
   GraduationCap,
   LineChart,
   MessagesSquare,
@@ -17,6 +18,7 @@ import {
   Users,
   Wallet,
 } from 'lucide-react'
+import { useService } from '@/hooks/useService'
 
 const STEPS = [
   { Icon: Upload, title: 'Cargá tus datos', text: 'Subí un archivo CSV o Excel. Revisamos su estructura y la calidad de los datos.' },
@@ -74,6 +76,7 @@ function ProductIllustration() {
 }
 
 export function HomePage() {
+  const { mode } = useService()
   return (
     <>
       {/* Hero */}
@@ -117,6 +120,18 @@ export function HomePage() {
                 </li>
               ))}
             </ul>
+            {mode === 'demo' && (
+              <div className="mt-8 max-w-xl rounded-xl bg-amber-400/10 p-4 text-sm text-amber-100 ring-1 ring-amber-300/30">
+                <p className="flex items-center gap-2 font-semibold text-amber-200">
+                  <FlaskConical className="size-4" aria-hidden /> Sobre esta demo pública
+                </p>
+                <ul className="mt-2 list-inside list-disc space-y-1 text-amber-100/90">
+                  <li>Los análisis y gráficos del ejemplo son ficticios.</li>
+                  <li>Las funciones avanzadas (IA, cálculos reales, exportación) todavía requieren backend.</li>
+                  <li>No cargues datos confidenciales: los archivos se leen solo en tu navegador.</li>
+                </ul>
+              </div>
+            )}
           </div>
           <div className="animate-fade-in lg:pl-6">
             <ProductIllustration />

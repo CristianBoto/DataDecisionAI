@@ -1,5 +1,6 @@
 import { createDemoService } from './demoProvider'
 import { isBackendRequiredError } from './errors'
+import { createService } from './index'
 
 const exportRequest = {
   format: 'pdf' as const,
@@ -71,6 +72,28 @@ describe('proveedor DEMO', () => {
     expect(results.charts).toHaveLength(0)
     expect(results.indicators).toHaveLength(0)
   })
+
+  it('procesa el archivo localmente sin enviarlo por la red', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    const beaconSpy = vi.fn()
+    Object.defineProperty(navigator, 'sendBeacon', { value: beaconSpy, configurable: true })
+    try {
+      const service = createService(true)
+      expect(service.mode).toBe('demo')
+      const file = new File(['cliente,importe\nA,10\nB,20\n'], 'privado.csv', { type: 'text/csv' })
+      const dataset = await service.uploadDataset(file)
+      const profile = await service.getDatasetProfile(dataset.id)
+      expect(profile.origin).toBe('local-preview')
+      const project = await service.createProject({ name: 'Privado', datasetId: dataset.id })
+      await service.sendMessage(project.id, { content: 'resumen general' })
+      await service.checkHealth()
+
+      expect(fetchSpy).not.toHaveBeenCalled()
+      expect(beaconSpy).not.toHaveBeenCalled()
+    } finally {
+      fetchSpy.mockRestore()
+    }
+  }, 10_000)
 
   it('rechaza archivos PDF y la exportación indica que requiere backend', async () => {
     const service = createDemoService({ delayMs: 0 })

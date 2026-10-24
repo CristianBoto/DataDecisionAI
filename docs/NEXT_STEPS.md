@@ -69,3 +69,41 @@ Cada tarea indica qué construir, dónde y cómo saber que está terminada. Conv
 - Sanitizar nombres de archivo, limitar tamaño, no exponer rutas internas en errores.
 - Revisar CORS para producción, límites de uso de la IA y que ningún secreto llegue al frontend.
 - Prueba de punta a punta: cargar → conversar → aprobar → resultados → exportar.
+
+---
+
+## Estado actual (para orientar el trabajo)
+
+| Ya funciona | Se implementará después con ChatGPT |
+|-------------|-------------------------------------|
+| Interfaz completa en modo DEMO | Backend real (tareas 1 a 12) |
+| Vista previa local de CSV sin envío por red | Lectura de Excel y perfilado con Pandas |
+| Guion DEMO del asistente | IA 1 e IA 2 con OpenAI |
+| Resultados ficticios marcados | Cálculos y gráficos con datos reales |
+| Interfaz de exportación | Generación de PDF, Excel, Word y Canva |
+| `/api/health` y configuración | Persistencia, despliegue y seguridad (tareas 13 a 15) |
+| Preparación para Cloudflare Pages ([DEPLOYMENT.md](DEPLOYMENT.md)) | — |
+
+## 13. Despliegue del backend
+- Decidir dónde corre el backend para una demo con datos reales (por ejemplo, un equipo propio o un servicio con plan gratuito) sin exponer claves.
+- Configurar `CORS_ORIGINS` con la URL exacta del frontend publicado; nunca `*`.
+- Servir con `uvicorn` detrás de HTTPS; agregar límites de tamaño y de solicitudes.
+- Mantener la demo pública de Cloudflare en `VITE_DEMO_MODE=true` hasta que el backend tenga los controles de la tarea 15.
+- **Listo cuando**: un frontend con `VITE_DEMO_MODE=false` se conecta al backend desplegado y `/api/health` responde por HTTPS.
+
+## 14. Instalación privada
+- Script o guía paso a paso (PowerShell) que cree `.venv`, instale dependencias, genere `backend/.env` desde el ejemplo y compile el frontend con `VITE_DEMO_MODE=false`.
+- Crear automáticamente `backend/data/` y la base SQLite en el primer arranque.
+- Opción para servir `frontend/dist` desde el mismo FastAPI (`StaticFiles`) y simplificar la instalación a un solo proceso.
+- OpenAI desactivado por defecto; activarlo solo con `OPENAI_API_KEY` y una opción explícita en `.env` (por ejemplo `AI_ENABLED=true`).
+- Documentar copias de seguridad de `backend/data/`.
+- **Listo cuando**: una persona sin experiencia sigue la guía y usa la app con un CSV propio sin Internet (salvo OpenAI, si lo habilita).
+
+## 15. Controles de privacidad
+- Autenticación simple (usuario y contraseña con hash) antes de exponer la instalación en una red.
+- Aviso y consentimiento explícito antes de enviar el perfil o resúmenes a OpenAI; registrar qué se envió.
+- Enviar a la IA solo perfil y agregados, nunca el archivo completo; opción para ocultar columnas sensibles.
+- Política de retención: borrar datasets y resultados después de N días o a pedido del usuario.
+- Cifrado en reposo de `backend/data/` (o del disco) y HTTPS en la red interna.
+- Registro de auditoría: quién subió, analizó y exportó cada dataset.
+- **Listo cuando**: existe una lista de verificación de privacidad aprobada y con pruebas automatizadas para los puntos críticos.

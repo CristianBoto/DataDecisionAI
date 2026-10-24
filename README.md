@@ -4,6 +4,28 @@ Plataforma web para cargar datasets CSV o Excel, explicar en lenguaje común qu�
 
 Proyecto final de **Prácticas Profesionalizantes — Tecnicatura en Ciencia de Datos**.
 
+> **Demo pública:** _enlace reservado — se publicará en Cloudflare Pages (por ejemplo `https://datadecisionai.pages.dev`)._
+> La demo usa datos ficticios y no requiere backend. No cargues datos confidenciales en ella.
+
+## Estado del proyecto (v0.1)
+
+| Parte | Estado real |
+|-------|-------------|
+| Interfaz completa (carga, asistente, confirmación, workspace, exportación) | ✅ Funciona |
+| Vista previa local de CSV en el navegador | ✅ Funciona (preliminar, sin enviar el archivo) |
+| Asistente de requisitos (IA 1) | 🟡 Simulación DEMO con guion fijo |
+| Análisis, gráficos y hallazgos | 🟡 Solo resultados ficticios del dataset de ejemplo |
+| Exportación PDF, Excel, Word y Canva | 🟡 Interfaz lista; generación pendiente de backend |
+| Backend FastAPI | 🟡 Esqueleto con `/api/health` |
+| Pandas, SQLite, OpenAI, autenticación | ❌ Pendiente |
+
+## Modalidades de uso
+
+El mismo código se usa de dos formas (detalle en [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)):
+
+1. **Demo pública gratuita**: solo el frontend, en modo DEMO, publicado en Cloudflare Pages. Sirve para mostrar el flujo. Los archivos que elija el visitante se leen únicamente en su navegador.
+2. **Instalación privada**: frontend + FastAPI + Pandas + SQLite en una computadora o servidor interno de una organización, con sus propios datos y configuración. OpenAI sería opcional y requeriría autorización y clave propias. **Todavía no está lista para datos confidenciales**: faltan los controles de seguridad listados en DEPLOYMENT.md.
+
 ## Qué problema resuelve
 
 Muchas personas tienen datos en planillas pero no saben qué análisis hacer ni cómo interpretarlo. DataDecision AI combina ciencia de datos en Python con dos roles de inteligencia artificial:
@@ -47,14 +69,14 @@ DataDecisionAI/
 │   │   ├── models/      Tablas futuras
 │   │   └── db/          Conexión futura
 │   └── tests/
-└── docs/                ARCHITECTURE, API_CONTRACT, NEXT_STEPS
+└── docs/                ARCHITECTURE, API_CONTRACT, DEPLOYMENT, NEXT_STEPS
 ```
 
 Los componentes nunca llaman a `fetch` ni importan mocks: usan la interfaz `DataDecisionService`. Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) y [docs/API_CONTRACT.md](docs/API_CONTRACT.md).
 
 ## Instalación (Windows PowerShell)
 
-Requisitos: Node.js 20+ y Python 3.11+.
+Requisitos: Node.js 20.19+ (recomendado 22) y Python 3.11+.
 
 ```powershell
 # Frontend
@@ -106,6 +128,12 @@ Se controla con `VITE_DEMO_MODE` en `frontend/.env.local`:
 
 Reiniciá `npm run dev` después de cambiar el `.env.local`.
 
+En modo DEMO la app no hace ninguna solicitud de red con los datos: la vista previa de CSV se calcula en el navegador y no se usa `localStorage`.
+
+## Publicar la demo
+
+Cloudflare Pages (gratis): repositorio `CristianBoto/DataDecisionAI`, rama `main`, directorio raíz `frontend`, build `npm run build`, salida `dist`, variable `VITE_DEMO_MODE=true`. Paso a paso en [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
 ## Funcionalidades actuales
 
 - Pantalla inicial con presentación y explicación del flujo.
@@ -125,13 +153,19 @@ Reiniciá `npm run dev` después de cambiar el `.env.local`.
 - IA 1 e IA 2 con OpenAI desde FastAPI.
 - Cálculos reales, validación de resultados y gráficos con datos reales.
 - Generación de PDF, Excel, Word y archivos para Canva.
-- Edición posterior de informes, autenticación y despliegue (fuera del alcance del MVP).
+- Despliegue del backend e instalación privada completa.
+- Controles de privacidad y seguridad: autenticación, HTTPS, cifrado, retención, auditoría y consentimiento para OpenAI.
+- Edición posterior de informes.
 
-Detalle en [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md).
+Detalle en [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md). Estas etapas se desarrollarán después con ChatGPT siguiendo [docs/API_CONTRACT.md](docs/API_CONTRACT.md).
 
 ## Seguridad
 
+Lo que ya existe:
+
 - Los `.env` están excluidos de git; solo se versionan los `.env.example` sin secretos.
 - La API key de OpenAI se usará exclusivamente en el backend.
-- El frontend no guarda archivos ni datos en `localStorage`.
+- El frontend no guarda archivos ni datos en `localStorage` y, en modo DEMO, no envía archivos por la red.
 - Datasets subidos, bases locales e informes generados están excluidos en `.gitignore`.
+
+Lo que **todavía no** existe: autenticación, cifrado, auditoría y políticas de retención. Por eso la aplicación **no garantiza hoy confidencialidad empresarial**.

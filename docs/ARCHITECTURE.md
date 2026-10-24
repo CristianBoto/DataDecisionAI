@@ -23,6 +23,41 @@ Aplicación web en dos partes, sin microservicios:
 └───────────────────────────────────────────────────────────────────┘
 ```
 
+## Modalidades de uso
+
+El mismo código se ejecuta de dos maneras. La única diferencia es la configuración; no hay ramas ni copias del código.
+
+### Demo pública (frontend solo)
+
+```
+Visitante ──► Cloudflare Pages (archivos estáticos de frontend/dist)
+                 VITE_DEMO_MODE=true → demoProvider.ts
+                 · Sin backend, sin base de datos, sin OpenAI
+                 · CSV leído en el navegador (FileReader / Blob.text)
+                 · Ninguna solicitud de red con datos del usuario
+```
+
+- `services/index.ts` crea solo el proveedor DEMO; el cliente HTTP no se instancia.
+- El estado vive en memoria y desaparece al recargar.
+- Los resultados son del dataset ficticio de ejemplo y se marcan como DEMO. Con un archivo propio se muestra "pendiente de backend".
+- Cloudflare Pages resuelve las rutas de React Router devolviendo `index.html` (SPA, sin `404.html`).
+
+### Instalación privada (frontend + backend en la organización)
+
+```
+Red interna de la organización
+  Navegador ──► frontend/dist (VITE_DEMO_MODE=false, VITE_API_BASE_URL=backend interno)
+                   │
+                   ▼
+              FastAPI ──► Pandas ──► SQLite (backend/data/)  ──► archivos subidos (backend/data/uploads/)
+                   │
+                   └──► OpenAI (opcional, desactivado sin OPENAI_API_KEY)
+```
+
+- Cada instalación tiene su propia base SQLite, carpeta de archivos y `.env`. No hay multi-tenancy: una instalación = una organización.
+- OpenAI es una integración opcional que cada organización autoriza y configura con su propia clave.
+- Hoy el backend solo expone `/api/health`. Los controles de seguridad necesarios para datos confidenciales (autenticación, HTTPS, cifrado, auditoría, retención) están **pendientes**: ver [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ## Flujo funcional
 
 1. **Carga** (`/analisis/cargar`): validación preliminar (extensión, tamaño). Para CSV se calcula una vista previa local real; para Excel se espera al backend.
