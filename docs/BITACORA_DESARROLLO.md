@@ -21,6 +21,7 @@ Autor: Damián Boto. Documento de base para la exposición final.
 | 6e. Auditoría de privacidad, seguridad y flujo de datos antes de OpenAI | Documentada en SEGURIDAD.md (sección 6); sin cambios de código |
 | 6f. Endurecimiento mínimo de la carga (B4, B5, B6, F7) | Commit de cierre de la Fase 3A; ver sección 6f |
 | 6g. Cierre de la Fase 3A con dos datasets reales | Validación manual del autor; ver sección 6g |
+| 6h. Fase 3B.1: frontera de privacidad y autorización para la IA (sin llamadas externas) | Commit de cierre de la Fase 3B.1; validación manual del autor con dos datasets reales |
 | 7. Decisión de minimización de datos para la IA | Registrada en [SEGURIDAD.md](SEGURIDAD.md) y [ARCHITECTURE.md](ARCHITECTURE.md); implementación pendiente |
 
 ---
@@ -290,6 +291,33 @@ No se agregan reglas nuevas: el asistente es una **simulación provisional** y s
 - La transmisión a servicios externos debe estar restringida por **minimización de datos y autorización explícita**.
 
 > La política de transmisión hacia OpenAI es un **requisito de arquitectura pendiente de implementación y verificación**, no una capacidad terminada.
+
+## 6h. Fase 3B.1 — Frontera de privacidad y autorización para la IA
+
+**Decisión central: Python/Pandas calcula; OpenAI interpretará objetivos y propondrá planes; el usuario confirma.**
+
+**Por qué antes de conectar OpenAI.** La auditoría (6e) mostró que no alcanza con "no enviar filas": nombres de archivo y de columnas, objetivos y estadísticas también pueden ser confidenciales. Antes de escribir una sola llamada a un servicio externo había que poder responder con precisión **qué** saldría del sistema y **quién** lo autoriza.
+
+**Qué se construyó.**
+
+- **Un contrato de lista blanca en el backend** (Pydantic con `extra="forbid"`): alias A/B/C, columnas revisadas con formato e interpretación, objetivo y, opcionalmente, un rango de tamaño. Todo lo demás se rechaza aunque lo envíe el navegador.
+- **Un flujo preparar → revisar → autorizar**: el usuario ve el JSON exacto, puede ocultar o renombrar columnas y editar el objetivo; el backend devuelve una huella SHA-256 y la autorización vale una vez, por cinco minutos y para ese contenido exacto.
+- **Denegación por defecto** con `AI_ENABLED=false` y un proveedor que en esta fase **no tiene red**: aunque se habilite y autorice, responde que no se envió nada.
+- **Aislamiento de la demo pública**: allí no existe el cliente de la frontera; el panel solo muestra qué se enviaría.
+
+**Fundamento técnico.** La lista blanca invierte la lógica: en lugar de intentar detectar y quitar lo sensible (siempre incompleto), solo se acepta lo explícitamente permitido. La huella une la autorización al contenido que la persona vio: si cambia un carácter, no vale. El uso único y el vencimiento evitan autorizaciones generales e indefinidas.
+
+**Validación del autor con datos reales.** Con `indicadores-provinciales.csv` (A) e `impominerales-siacam.csv` (B), el autor escribió un objetivo que pide analizar las fuentes por separado y preguntar ante ambigüedades; ocultó `PPRO` (desapareció del JSON), renombró `CIF` (cambió al instante), validó (huella SHA-256, 5 minutos, uso único) y autorizó: el sistema informó `AI_ENABLED=false` y que no se envió nada.
+
+**Dónde llega el JSON en esta fase.** El contexto revisado **sí viaja al backend FastAPI local** (`POST /api/ai/requests`) para que lo valide la lista blanca; **no sale hacia ningún proveedor externo**: no hay SDK, URL ni llamada a OpenAI en el código, y el proveedor de esta fase no tiene red.
+
+**Por qué estas tres decisiones.**
+
+- **Autorización individual** (una solicitud, 5 minutos, contenido exacto por huella SHA-256): una autorización general e indefinida dejaría de reflejar lo que la persona vio; si el contenido cambia, la decisión debe volver a tomarse.
+- **Minimización de metadatos** (alias en lugar de archivos, columnas elegibles y renombrables, tamaño solo por rango): la IA necesita la *estructura* para proponer un plan, no los registros ni las cifras exactas; compartir menos reduce lo que podría filtrarse.
+- **Validación en el backend** (lista blanca Pydantic): las comprobaciones de React se pueden saltear modificando el navegador; el backend es la última puerta antes de cualquier proveedor y no acepta nada fuera de lo permitido.
+
+**Limitaciones.** El sistema valida estructura, no significado: si el usuario escribe un dato confidencial en el objetivo o deja una columna sensible, se compartiría al autorizarlo. La autorización no es autenticación. Faltan el registro de envíos y la validación del plan devuelto por la IA (Fase 3B.2).
 
 ## 7. Demo pública en Cloudflare Pages (commit `1fe248a`)
 

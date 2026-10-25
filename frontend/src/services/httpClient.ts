@@ -72,6 +72,11 @@ export class HttpClient {
     return (await response.json()) as T
   }
 
+  /** Para respuestas sin cuerpo (por ejemplo, 204). */
+  async empty(path: string, options?: RequestOptions): Promise<void> {
+    await this.send(path, options)
+  }
+
   async blob(path: string, options?: RequestOptions): Promise<{ blob: Blob; fileName: string | null }> {
     const response = await this.send(path, options)
     const disposition = response.headers.get('Content-Disposition') ?? ''

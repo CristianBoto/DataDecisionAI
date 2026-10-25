@@ -72,9 +72,19 @@ Cada tarea indica qué construir, dónde y cómo saber que está terminada. Conv
 
 ---
 
-## Fase 3B — IA real con frontera de datos (planificada)
+## Fase 3B — IA real con frontera de datos
 
-**Requisito previo:** implementar y probar la frontera de transmisión descripta en [SEGURIDAD.md](SEGURIDAD.md), sección 6.3 (denegación por defecto, contenido armado en el backend desde una lista blanca, autorización explícita por envío, clave solo en el backend, registro local, salida estructurada validada).
+**3B.1 (cerrada):** contrato de lista blanca, denegación por defecto, revisión y autorización de uso único, clave solo en el backend, demo pública aislada, sin llamadas externas ([SEGURIDAD.md](SEGURIDAD.md), sección 9).
+
+**3B.2 — Qué falta exactamente para conectar OpenAI:**
+
+1. Agregar el SDK oficial de OpenAI a `backend/requirements.txt` (dependencia justificada) y `OPENAI_MODEL` configurable en `backend/.env`.
+2. Implementar `OpenAIProvider` (con `implemented = True`) en `app/services/ai_gateway.py`: clave desde la configuración, tiempo máximo de espera, errores sin contenido sensible; usarlo solo si `AI_ENABLED=true` y hay clave.
+3. Instrucciones del sistema para la IA y **salida estructurada** con un esquema Pydantic: objetivos reconocidos, preguntas, relación entre fuentes (`independiente`, `comparar`, `concatenar`, `relacionar`) y operaciones de un catálogo cerrado.
+4. Validar la respuesta: solo columnas y alias autorizados, solo operaciones del catálogo; rechazar lo demás. Nunca ejecutar código devuelto por la IA.
+5. Registro local de cada envío (fecha, alias, cantidad de columnas, huella), **sin** objetivo ni nombres de columna.
+6. Mostrar en el asistente las preguntas y el plan propuesto, para que el usuario los confirme.
+7. Pruebas con un proveedor falso (contrato y validación) y una prueba manual con una clave de prueba y **datos sintéticos**.
 
 **Requisitos funcionales de la IA** (surgidos de la validación del asistente DEMO con dos fuentes reales):
 
@@ -87,6 +97,27 @@ Cada tarea indica qué construir, dónde y cómo saber que está terminada. Conv
 - Proponer **planes de análisis** que el usuario confirme antes de ejecutarlos.
 
 - **Listo cuando**: con SIACAM e indicadores provinciales, ante el pedido "evolución de importaciones por año y, por separado, indicadores provinciales, sin relacionarlos", la IA reconoce ambos objetivos, confirma que no relacionará las fuentes, pregunta por `PPRO` y propone dos planes independientes para aprobar.
+
+## Fase 3B.2 — Integración real con OpenAI (planificada, alcance reducido)
+
+**Objetivo:** que la IA comprenda objetivos sobre una o varias fuentes, haga preguntas aclaratorias y proponga planes para aprobar. Pandas sigue calculando; la IA no ejecuta nada.
+
+| Requisito | Cómo |
+|-----------|------|
+| Clave solo en el backend | `OPENAI_API_KEY` en `backend/.env`; nunca en `VITE_*` ni en el navegador (ya implementado en 3B.1) |
+| Modelo económico con razonamiento adecuado | `OPENAI_MODEL` configurable; elegir un modelo pequeño de la familia actual con salidas estructuradas, y validarlo con los casos de prueba (SIACAM + indicadores) |
+| Límites de tokens y presupuesto | Tope de tokens de salida por solicitud; tope de solicitudes por sesión; presupuesto mensual configurado también en el panel del proveedor |
+| Medición real del consumo | Registrar por envío los tokens de entrada y salida informados por la API (sin contenido) y mostrar el acumulado |
+| Envíos solo con autorización específica | Reutilizar la frontera de 3B.1: el `OpenAIProvider` reemplaza a `NotImplementedProvider` detrás de `authorize_and_send` |
+| Respuestas estructuradas y validadas | Esquema Pydantic: objetivos reconocidos, preguntas, relación entre fuentes (`independiente`, `comparar`, `concatenar`, `relacionar`) y operaciones de un catálogo cerrado; rechazar columnas o alias no autorizados |
+| Varias fuentes | Reconocer cada objetivo y respetar "analizar por separado" (caso de validación del autor) |
+| Preguntas y propuestas para aprobación | Mostrar preguntas y plan en el asistente; nada se calcula sin aprobación |
+| Sin ejecución de código | La IA nunca devuelve código ejecutable; Pandas ejecuta solo operaciones del catálogo |
+| Demo pública sin consumo | La demo no tiene cliente de IA ni backend: no puede consumir créditos |
+
+**Fuera de alcance:** pagos, autenticación empresarial, colas o infraestructura nueva.
+
+**Listo cuando:** con `AI_ENABLED=true` y una clave de prueba, el caso del autor (dos fuentes, análisis por separado, pedido de preguntar ante ambigüedades) produce preguntas sobre `PPRO` y los `NA`, dos planes independientes validados y un registro de consumo de tokens, sin datos fuera de la lista blanca.
 
 ## Próxima fase: confirmación humana de la interpretación (planificada)
 

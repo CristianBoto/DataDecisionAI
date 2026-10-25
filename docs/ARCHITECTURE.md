@@ -191,20 +191,37 @@ Ninguna operación se ejecuta sin un **plan aprobado por el usuario**. Las valid
 
 **Justificación.** Estos límites permiten controlar recursos, realizar pruebas reproducibles, mantener una complejidad razonable y terminar el proyecto dentro del alcance académico. La arquitectura separa la carga y administración de fuentes, el perfilado, el procesamiento estadístico y la interfaz; esa separación **facilita** futuras ampliaciones, pero **no garantiza escalabilidad ilimitada**. Ampliar las capacidades requeriría nuevas pruebas de rendimiento, memoria y concurrencia y, según el volumen, otras estrategias de procesamiento. **El límite de tres fuentes es una decisión de alcance y de seguridad operativa del MVP, no una incapacidad conceptual** para trabajar con más datasets.
 
-## Frontera de datos para la futura IA (diseño, no implementado)
+## Frontera de datos para la IA (Fase 3B.1: implementada sin llamadas externas)
+
+**Decisión central: Python/Pandas calcula; OpenAI interpretará objetivos y propondrá planes; el usuario confirma.**
 
 ```
-Navegador ──(nunca llama a OpenAI)──► FastAPI
-                                         │ AI_ENABLED=false por defecto
-                                         ▼
-                         Contenido armado en el backend desde una lista blanca
-                         (alias A/B/C, tipos, conteos redondeados; sin ejemplos ni filas)
-                                         │
-                         Vista previa exacta del envío ──► autorización del usuario (por envío)
-                                         │
-                                         ▼
-                                      OpenAI ──► plan estructurado (catálogo cerrado) ──► validación ──► Pandas
+Navegador (React)                              FastAPI (backend local)                      OpenAI
+─────────────────                              ───────────────────────                      ──────
+Catálogo de fuentes (sin valores)
+  └─ buildAIContext: alias A/B/C, columnas
+     revisadas, formato e interpretación,
+     objetivo editado, rango de tamaño opcional
+  └─ Panel "Revisá qué se compartiría":
+     ocultar / renombrar columnas, ver el JSON
+        │  POST /api/ai/requests                 Lista blanca Pydantic (extra="forbid")
+        └──────────────────────────────────────► rechaza archivos, filas, ejemplos,
+                                                 nombres de archivo, estadísticas (422)
+        ◄────────────── contenido validado + huella SHA-256 + vence en 5 min
+  └─ El usuario revisa y pulsa "Autorizar"
+        │  POST /api/ai/requests/{id}/authorize  AI_ENABLED=false → 403, se descarta
+        └──────────────────────────────────────► huella distinta → 409; vencida → 410
+                                                 uso único (consumida)
+                                                 proveedor sin red en 3B.1 → 501 ─ ─ ─ ✗ (Fase 3B.2)
 ```
+
+En la **demo pública** no existe el cliente de la frontera (`createDefaultAIGateway()` devuelve `null`): el panel solo muestra qué se enviaría.
+
+Archivos: `backend/app/schemas/ai_context.py` (contrato), `backend/app/services/ai_gateway.py` (autorización de uso único y proveedor), `backend/app/api/routes/ai.py` (endpoints), `frontend/src/lib/aiContext.ts` (contexto mínimo), `frontend/src/services/aiGateway.ts` (cliente) y `frontend/src/components/ai/AIContextReview.tsx` (revisión).
+
+**Dónde llega el JSON en esta fase.** El contexto revisado **sí viaja al backend FastAPI local** (`POST /api/ai/requests`) para que lo valide la lista blanca; **no sale hacia ningún proveedor externo**: no hay SDK, URL ni llamada a OpenAI en el código, y el proveedor de esta fase no tiene red.
+
+En la Fase 3B.2 el proveedor real reemplazará a `NotImplementedProvider` y su respuesta deberá validarse como plan estructurado antes de que Pandas ejecute algo.
 
 Auditoría y justificación de cada campo en [SEGURIDAD.md](SEGURIDAD.md), sección 6.
 

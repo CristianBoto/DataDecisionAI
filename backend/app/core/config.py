@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     max_upload_mb: int = 25
     # La clave de OpenAI vive SOLO en el backend. Nunca se envía al frontend.
     openai_api_key: str | None = None
+    # Envío a la IA externa: deshabilitado por defecto. Aun habilitado, cada
+    # envío requiere revisión y autorización explícita (Fase 3B.1).
+    ai_enabled: bool = False
 
     @field_validator("cors_origins", mode="before")
     @classmethod

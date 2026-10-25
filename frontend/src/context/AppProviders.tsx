@@ -3,7 +3,8 @@ import type { DataDecisionService } from '@/services'
 import { service as defaultService } from '@/services'
 import type { Dataset, DatasetProfile } from '@/types/domain'
 import { MAX_SOURCES } from '@/lib/datasetCatalog'
-import { ServiceContext } from './serviceContext'
+import type { AIGatewayClient } from '@/services/aiGateway'
+import { AIGatewayContext, defaultAIGateway, ServiceContext } from './serviceContext'
 import { AnalysisSessionContext, type AnalysisSessionState } from './sessionContext'
 
 const EMPTY_SESSION: AnalysisSessionState = { sources: [], projectId: null }
@@ -11,9 +12,11 @@ const EMPTY_SESSION: AnalysisSessionState = { sources: [], projectId: null }
 interface AppProvidersProps {
   children: ReactNode
   service?: DataDecisionService
+  /** Cliente de la frontera de IA; null = sin conexión (demo pública). */
+  aiGateway?: AIGatewayClient | null
 }
 
-export function AppProviders({ children, service = defaultService }: AppProvidersProps) {
+export function AppProviders({ children, service = defaultService, aiGateway = defaultAIGateway }: AppProvidersProps) {
   const [session, setSession] = useState<AnalysisSessionState>(EMPTY_SESSION)
 
   // Cambiar las fuentes implica empezar un proyecto nuevo.
@@ -53,7 +56,9 @@ export function AppProviders({ children, service = defaultService }: AppProvider
 
   return (
     <ServiceContext.Provider value={service}>
-      <AnalysisSessionContext.Provider value={value}>{children}</AnalysisSessionContext.Provider>
+      <AIGatewayContext.Provider value={aiGateway}>
+        <AnalysisSessionContext.Provider value={value}>{children}</AnalysisSessionContext.Provider>
+      </AIGatewayContext.Provider>
     </ServiceContext.Provider>
   )
 }

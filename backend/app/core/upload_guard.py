@@ -1,4 +1,4 @@
-"""Protección de las rutas de carga ANTES de leer el cuerpo de la solicitud.
+"""Protección de rutas sensibles (cargas e IA) ANTES de leer el cuerpo de la solicitud.
 
 Middleware ASGI puro (no BaseHTTPMiddleware) porque necesita envolver `receive`:
 
@@ -31,24 +31,30 @@ class UploadGuardMiddleware:
         self,
         app: ASGIApp,
         *,
-        paths: Iterable[str],
+        paths: Iterable[str] = (),
+        path_prefixes: Iterable[str] = (),
+        methods: Iterable[str] = ("POST",),
         max_body_bytes: int,
         allowed_origins: Iterable[str],
+        origin_message: str = "Origen no autorizado para cargar archivos.",
     ) -> None:
         self.app = app
         self.paths = frozenset(paths)
+        self.path_prefixes = tuple(path_prefixes)
+        self.methods = frozenset(methods)
         self.max_body_bytes = max_body_bytes
         self.allowed_origins = frozenset(allowed_origins)
+        self.origin_message = origin_message
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or scope["method"] != "POST" or scope["path"] not in self.paths:
+        if not self._applies(scope):
             await self.app(scope, receive, send)
             return
 
         headers = Headers(scope=scope)
         origin = headers.get("origin")
         if origin is not None and origin not in self.allowed_origins:
-            await JSONResponse({"detail": "Origen no autorizado para cargar archivos."}, status_code=403)(scope, receive, send)
+            await JSONResponse({"detail": self.origin_message}, status_code=403)(scope, receive, send)
             return
 
         declared = headers.get("content-length")
@@ -85,9 +91,18 @@ class UploadGuardMiddleware:
         if exceeded:
             await self._too_large(scope, receive, send)
 
+    def _applies(self, scope: Scope) -> bool:
+        if scope["type"] != "http" or scope["method"] not in self.methods:
+            return False
+        path = scope["path"]
+        return path in self.paths or any(path.startswith(prefix) for prefix in self.path_prefixes)
+
     async def _too_large(self, scope: Scope, receive: Receive, send: Send) -> None:
-        limit_mb = self.max_body_bytes // (1024 * 1024)
+        if self.max_body_bytes >= 1024 * 1024:
+            limit = f"{self.max_body_bytes // (1024 * 1024)} MB"
+        else:
+            limit = f"{self.max_body_bytes // 1024} KB"
         await JSONResponse(
-            {"detail": f"La solicitud supera el tamaño máximo permitido ({limit_mb} MB)."},
+            {"detail": f"La solicitud supera el tamaño máximo permitido ({limit})."},
             status_code=413,
         )(scope, receive, send)

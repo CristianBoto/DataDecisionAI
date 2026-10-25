@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { ArrowRight, Bot, Database, MessagesSquare, Sparkles } from 'lucide-react'
+import { ArrowRight, Bot, Database, MessagesSquare, ShieldCheck, Sparkles } from 'lucide-react'
+import { AIContextReview } from '@/components/ai/AIContextReview'
 import { ChatComposer } from '@/components/chat/ChatComposer'
 import { ChatMessage, TypingIndicator } from '@/components/chat/ChatMessage'
 import { ProposalSummaryCard } from '@/components/chat/ProposalSummaryCard'
@@ -14,7 +15,7 @@ import { FeasibilityBadge } from '@/components/ui/FeasibilityBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useConversation } from '@/hooks/useConversation'
-import { useService } from '@/hooks/useService'
+import { useAIGateway, useService } from '@/hooks/useService'
 
 const MODIFY_PREFIX = 'Quisiera modificar: '
 
@@ -22,7 +23,9 @@ export function AssistantPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { mode } = useService()
-  const { projectId, dataset, profile } = useAnalysisSession()
+  const { projectId, dataset, profile, sources } = useAnalysisSession()
+  const aiGateway = useAIGateway()
+  const [reviewOpen, setReviewOpen] = useState(false)
   const { messages, proposal, loading, sending, error, send, retry } = useConversation(projectId)
   const [draft, setDraft] = useState('')
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -89,6 +92,15 @@ export function AssistantPage() {
           Las respuestas siguen un guion fijo basado en palabras clave y en el perfil del dataset. No hay una IA real
           conectada todavía: se integrará con OpenAI desde el backend.
         </Alert>
+      )}
+
+      {reviewOpen && (
+        <AIContextReview
+          sources={sources}
+          initialObjective={[...messages].reverse().find((m) => m.role === 'user')?.content ?? ''}
+          gateway={aiGateway}
+          onClose={() => setReviewOpen(false)}
+        />
       )}
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -179,6 +191,18 @@ export function AssistantPage() {
                 <p className="text-xs text-slate-500">Las columnas se conocerán cuando el backend procese el archivo.</p>
               )}
             </div>
+          </Card>
+
+          <Card className="p-5">
+            <p className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+              <ShieldCheck className="size-4 text-blue-600" aria-hidden /> IA real y privacidad
+            </p>
+            <p className="mt-1 text-xs leading-relaxed text-slate-500">
+              Antes de conectar la IA real, revisá qué información mínima se compartiría. Nada se envía sin tu autorización.
+            </p>
+            <Button variant="outline" size="sm" className="mt-3 w-full" onClick={() => setReviewOpen(true)} disabled={reviewOpen}>
+              Revisar qué se enviaría a la IA
+            </Button>
           </Card>
 
           <Card className="p-5">

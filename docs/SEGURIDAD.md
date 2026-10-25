@@ -152,7 +152,7 @@ No alcanza con que el catálogo no tenga filas: **nombres de archivo y de column
 | Nombre del proyecto, mensajes y objetivo del usuario | `Project`, conversación | Variable: pueden contener cualquier dato | Solo el mensaje concreto que el usuario envía, mostrando antes qué sale |
 | Resultados agregados de Pandas | futuro | Medio | Solo los necesarios para interpretar, con autorización |
 
-**Diseño requerido antes de OpenAI (🔒, no implementado):**
+**Diseño requerido antes de OpenAI** (estado actualizado en la sección 9: puntos 1 a 4 implementados en la Fase 3B.1; 5 y 6 pendientes):
 
 1. **Denegar por defecto.** `AI_ENABLED=false` en `backend/.env`; sin clave o sin esa opción, ningún dato sale.
 2. **La clave solo en el backend.** `OPENAI_API_KEY` en `backend/.env` (`config.py:28`, sin valor por defecto, con prueba); el frontend nunca llama a OpenAI ni recibe la clave; ninguna variable `VITE_*` contiene secretos.
@@ -231,3 +231,54 @@ La causa **no fue confirmada** y la incidencia **no se declara resuelta**. Hipó
 - La frontera de transmisión de datos a OpenAI **todavía no está implementada** (requisitos en la sección 6.3).
 
 DataDecision AI es un MVP académico: **no es una solución empresarial certificada ni un sistema libre de vulnerabilidades.**
+
+
+## 9. Frontera de privacidad para la IA (Fase 3B.1)
+
+**Decisión central: Python/Pandas calcula; OpenAI interpretará objetivos y propondrá planes; el usuario confirma.** Esta fase prepara **qué** podría salir del sistema y **cómo** se autoriza, **sin ninguna llamada real a OpenAI**.
+
+**Dónde llega el JSON en esta fase.** El contexto revisado **sí viaja al backend FastAPI local** (`POST /api/ai/requests`) para que lo valide la lista blanca; **no sale hacia ningún proveedor externo**: no hay SDK, URL ni llamada a OpenAI en el código, y el proveedor de esta fase no tiene red.
+
+**Los metadatos también son datos.** Los nombres de columna y el objetivo escrito por el usuario pueden contener información sensible (por ejemplo, `diagnostico_medico` o "despidos de la planta Norte"). El backend valida su **forma**, no su **significado**: por eso el panel permite ocultarlos o editarlos y exige revisarlos antes de cada autorización. El sistema **no garantiza privacidad absoluta**; reduce y hace visible lo que podría compartirse.
+
+**Por qué estas tres decisiones.**
+
+- **Autorización individual** (una solicitud, 5 minutos, contenido exacto por huella SHA-256): una autorización general e indefinida dejaría de reflejar lo que la persona vio; si el contenido cambia, la decisión debe volver a tomarse.
+- **Minimización de metadatos** (alias en lugar de archivos, columnas elegibles y renombrables, tamaño solo por rango): la IA necesita la *estructura* para proponer un plan, no los registros ni las cifras exactas; compartir menos reduce lo que podría filtrarse.
+- **Validación en el backend** (lista blanca Pydantic): las comprobaciones de React se pueden saltear modificando el navegador; el backend es la última puerta antes de cualquier proveedor y no acepta nada fuera de lo permitido.
+
+### Qué puede compartirse (solo después de revisarlo y autorizarlo)
+
+| Dato | Condición |
+|------|-----------|
+| Alias de las fuentes (`A`, `B`, `C`) | Siempre en lugar del nombre del archivo |
+| Nombres de columna | Revisados por el usuario: puede ocultar cada columna o renombrarla |
+| Formato e interpretación estimada (y su confianza) | Por columna incluida |
+| Objetivo escrito por el usuario | Mostrado y editable antes de validar |
+| Rango de tamaño (`<1k`, `1k-10k`, `10k-100k`, `100k-1M`, `>1M`) | Solo si el usuario lo marca; nunca la cantidad exacta |
+
+### Qué está restringido (el backend lo rechaza con 422)
+
+Archivos CSV/XLSX, nombres de archivo, filas, vistas previas, ejemplos, valores individuales, conteos exactos, completitud, valores distintos, motivos de interpretación y observaciones. La restricción es una **lista blanca** (`backend/app/schemas/ai_context.py`, `extra="forbid"`): no depende de que el navegador "se porte bien".
+
+### Controles implementados
+
+| Control | Dónde |
+|---------|-------|
+| Lista blanca del contexto, máximo 3 fuentes con alias únicos, 250 columnas y 2.000 caracteres de objetivo | `app/schemas/ai_context.py` |
+| **Denegado por defecto** (`AI_ENABLED=false`); si está deshabilitado, la solicitud se descarta (no queda una autorización guardada) | `app/core/config.py`, `app/services/ai_gateway.py` |
+| Preparar → revisar → autorizar: la autorización vale para **una** solicitud, **5 minutos**, y solo para el contenido exacto mostrado (huella SHA-256 del JSON canónico) | `app/services/ai_gateway.py` |
+| Cualquier edición posterior invalida la solicitud preparada | `frontend/src/components/ai/AIContextReview.tsx` |
+| Máximo 20 solicitudes pendientes por proceso | `app/services/ai_gateway.py` |
+| Proveedor sin red en esta fase: responde 501 "No se envió nada" | `NotImplementedProvider` |
+| `OPENAI_API_KEY` solo en `backend/.env`; `/api/ai/status` informa si hay clave, **nunca su valor**; ninguna variable `VITE_*` | `app/api/routes/ai.py`, `.env.example` |
+| Mismo control de `Origin` que las cargas y cuerpo máximo de 64 KB en `/api/ai/*` (POST y DELETE) | `app/main.py`, `app/core/upload_guard.py` |
+| No se registra el contenido de las solicitudes | Prueba con captura de registros |
+| Demo pública aislada: sin cliente de la frontera | `frontend/src/services/aiGateway.ts` |
+
+### Limitaciones (aceptadas en esta fase)
+
+- **El backend no puede saber si un nombre de columna o el objetivo es confidencial**: valida la estructura, no el significado. La protección de esos textos depende de la revisión del usuario.
+- **La autorización no es autenticación:** cualquier persona con acceso al equipo y al navegador autorizado puede autorizar.
+- Las solicitudes preparadas viven en la memoria del proceso: se pierden al reiniciar y no se comparten entre procesos.
+- **Pendiente para la Fase 3B.2:** registro local de envíos (metadatos, sin contenido) y validación estructurada de la respuesta de la IA (plan con operaciones de un catálogo cerrado y solo columnas autorizadas). La IA no podrá ejecutar Python, modificar el backend ni alterar archivos originales.

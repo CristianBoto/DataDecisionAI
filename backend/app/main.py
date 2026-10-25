@@ -10,11 +10,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.upload_guard import UploadGuardMiddleware
+from app.services.ai_gateway import AIRequestStore, NotImplementedProvider
 from app.services.dataset_profiler import MAX_FILE_BYTES
 
 # Margen para el encabezado y los separadores de multipart sobre el límite del archivo.
 MULTIPART_OVERHEAD_BYTES = 1024 * 1024
 UPLOAD_PATHS = ("/api/datasets/profile",)
+AI_PATH_PREFIX = "/api/ai/"
+AI_MAX_BODY_BYTES = 64 * 1024
 
 
 def create_app() -> FastAPI:
@@ -25,6 +28,20 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=settings.app_version,
         description="API de DataDecision AI: datasets, asistente de requisitos, análisis e informes.",
+    )
+
+    # Frontera de IA: solicitudes preparadas en memoria y proveedor sin red (Fase 3B.1).
+    app.state.ai_store = AIRequestStore()
+    app.state.ai_provider = NotImplementedProvider()
+
+    # Mismo control de origen para la IA, con un cuerpo pequeño (solo metadatos revisados).
+    app.add_middleware(
+        UploadGuardMiddleware,
+        path_prefixes=(AI_PATH_PREFIX,),
+        methods=("POST", "DELETE"),
+        max_body_bytes=AI_MAX_BODY_BYTES,
+        allowed_origins=settings.cors_origins,
+        origin_message="Origen no autorizado para solicitudes de IA.",
     )
 
     # Control de origen y tamaño de las cargas, antes de leer el cuerpo.

@@ -1,6 +1,10 @@
 import { useContext } from 'react'
-import { ServiceContext } from '@/context/serviceContext'
+import { AIGatewayContext, ServiceContext } from '@/context/serviceContext'
 
 export function useService() {
   return useContext(ServiceContext)
+}
+
+export function useAIGateway() {
+  return useContext(AIGatewayContext)
 }

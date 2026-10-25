@@ -369,3 +369,70 @@ Ver la sección 14.
 | Build de producción en modo público (`VITE_DEMO_MODE=true`, sin perfilado con backend) | Correcta |
 
 **Prueba intermitente detectada y corregida (solo en la prueba).** En una de las ejecuciones completas falló `la pantalla libera al quitar y al reemplazar…`: la prueba esperaba ver el nombre del archivo nuevo y enseguida verificaba la liberación, pero la pantalla muestra ese nombre **mientras** el reemplazo se procesa. Bajo carga, la verificación llegaba antes de que terminara. No era un defecto de la aplicación. Se cambió la prueba para esperar a que termine el reemplazo; luego hubo **0 fallas en 8 ejecuciones** repetidas de las pruebas de pantalla y la suite completa pasó.
+
+## 15. Fase 3B.1 — Frontera de privacidad para la IA (✅ verificada, 25/10/2026)
+
+Cerrada en el commit de la Fase 3B.1. Datos **sintéticos** (incluido un archivo inventado `clientes_confidencial.csv` con CUIT falsos). **Ninguna llamada a OpenAI.**
+
+### Resultados
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **79 de 79** (52 anteriores + 27 en `test_ai_gateway.py`) |
+| Frontend (`npm test`) | **80 de 80** en 10 archivos (66 anteriores + 14 en `test/aiBoundary.test.tsx`) |
+| Lint y typecheck | Sin errores |
+| Build en modo público | Correcta; el paquete no contiene `api.openai.com` |
+| Regresiones | Ninguna: las pruebas anteriores pasaron sin modificarse |
+
+### Qué cubren las pruebas nuevas
+
+| Requisito | Backend | Frontend |
+|-----------|---------|----------|
+| Archivos originales fuera del contexto | 422 si llegan `file`, `fileName`, `rows`, `previewRows`, `rowCount` | El contexto y su vista no contienen nombre de archivo ni valores |
+| Filas, vistas previas y ejemplos no se transmiten | 422 para `sampleValues`, `examples`, `distinct` en columnas | Ni `ACME`, ni CUIT, ni saldos en el contenido ni en el cuerpo de la solicitud |
+| Solicitud no autorizada rechazada | Sin preparar → 404; huella alterada → 409; sin `confirm` → 422; IA deshabilitada → 403 y se descarta; cancelada → 404; vencida → 410; uso único | "Autorizar" solo aparece después de validar; editar invalida y cancela lo preparado |
+| Sin llamadas externas | Red bloqueada fuera del equipo en todas las pruebas (con una prueba que verifica el bloqueo); el proveedor por defecto responde 501 sin red | En la demo pública no existe el cliente; `fetch` no se llama; el cliente solo apunta a `/api/ai/*` del backend |
+| Una, dos o tres fuentes independientes | 1, 2 y 3 aceptadas; 4, alias repetido o fuera de A-C → 422 | Alias A, B y C; una fuente sin columnas autorizadas no se menciona |
+| Flujo DEMO | — | Cargar → asistente → respuesta → abrir la revisión, sin red |
+| Clave y registros | `/api/ai/status` informa si hay clave, nunca su valor; `AI_ENABLED` falso por defecto; el objetivo y los nombres de columna no aparecen en los registros | — |
+| Origen y tamaño | `Origin` externo o `null` → 403 en POST y DELETE; cuerpo > 64 KB → 413 | — |
+
+### Verificación manual en el navegador (ejecutada por el asistente)
+
+Con el backend local real (puerto alternativo) y perfilado activado: se cargaron `clientes_confidencial.csv` y `regiones.csv`, se continuó al asistente, se abrió la revisión, se ocultó la columna `cuit`, se editó el objetivo, se validó y se autorizó.
+
+- Solicitudes realizadas: dos perfilados, `GET /api/ai/status`, `POST /api/ai/requests` y `POST …/authorize`; todas al backend local.
+- El cuerpo enviado al backend contenía solo alias, columnas autorizadas (sin `cuit`), formatos, interpretaciones y el objetivo; ni nombres de archivo ni valores.
+- Respuesta: "La IA externa está deshabilitada (AI_ENABLED=false). No se envió nada."
+- El registro del servidor contenía solo rutas y códigos de estado.
+
+**Pendiente:** no se probó con `AI_ENABLED=true` en el servidor real (se cubrió con pruebas automáticas y un proveedor falso); la conexión real con OpenAI corresponde a la Fase 3B.2.
+
+
+### Validación manual del autor con datos reales (🗣️ comunicada)
+
+Evidencia aportada por el autor en la aplicación local; no reproducida por el asistente (los archivos no están en el repositorio).
+
+| Paso | Resultado observado |
+|------|---------------------|
+| Fuentes | A: `indicadores-provinciales.csv`; B: `impominerales-siacam.csv` (datos reales, en la aplicación local) |
+| Objetivo | *"Quiero analizar por separado la evolución de las importaciones de minerales por año y la evolución de los indicadores provinciales. No quiero relacionar ni unir los datasets. Si encontrás columnas ambiguas o posibles valores faltantes, preguntame antes de proponer cálculos."* — se incorporó al contexto mostrado |
+| Ocultar `PPRO` | Desapareció del JSON |
+| Renombrar `CIF` | El nuevo nombre apareció de inmediato en el JSON |
+| Validar contenido | El backend devolvió una huella SHA-256 generada correctamente, con vencimiento de 5 minutos y autorización de un solo uso |
+| Autorizar este envío | "La IA externa está deshabilitada (`AI_ENABLED=false`)"; no se envió nada a OpenAI |
+
+**Dónde llega el JSON en esta fase.** El contexto revisado **sí viaja al backend FastAPI local** (`POST /api/ai/requests`) para que lo valide la lista blanca; **no sale hacia ningún proveedor externo**: no hay SDK, URL ni llamada a OpenAI en el código, y el proveedor de esta fase no tiene red.
+
+### Revisión final de privacidad al cierre (✅ ejecutada por el asistente)
+
+| Comprobación | Evidencia |
+|--------------|-----------|
+| Lista blanca en el backend | `ConfigDict(extra="forbid")` en `app/schemas/ai_context.py`; pruebas con 8 tipos de campos rechazados |
+| Sin archivos, filas, vistas previas, ejemplos ni nombres de archivo | Pruebas de backend (422) y de frontend (contenido y cuerpo de la solicitud) |
+| Lo validado es lo revisado | El panel muestra el contenido **devuelto por el backend** y la autorización exige su huella exacta |
+| Las ediciones invalidan autorizaciones | `invalidate()` cancela lo preparado en cada cambio; prueba automática |
+| `AI_ENABLED=false` impide el envío | 403 antes de consumir la solicitud; prueba con proveedor falso que no recibe nada; validación manual del autor |
+| Demo pública sin API de IA | `createDefaultAIGateway()` devuelve `null` sin backend; prueba automática; build pública sin `api.openai.com` |
+| Sin llamadas reales a OpenAI | Búsqueda en `backend/app` y `frontend/src`: ningún SDK, importación ni URL de OpenAI; `requirements.txt` sin `openai` |
+| Claves fuera del frontend y de Git | Ninguna variable `VITE_*` con claves; `.env` y `.env.local` excluidos; `/api/ai/status` no devuelve la clave |
