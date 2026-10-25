@@ -17,11 +17,15 @@ Entorno de la verificación: Windows 11, Node 22.17.0, Python 3.12.9.
 | Frontend inicial (commit `797fdd7`) | 28 pruebas | 📄 28 casos `it(` en los archivos de prueba de ese commit |
 | Preparación para Cloudflare (commit `1fe248a`) | 29 pruebas | 📄 29 casos en ese commit (se agregó la prueba de "sin envío por red") |
 | Frontend al cierre de la integración React + Pandas (commit `7971702`) | 41 de 41 aprobadas, 7 archivos | ✅ ejecutada en esa etapa |
-| **Frontend actual (Fase 2: calidad de datos)** | **51 de 51 aprobadas**, 8 archivos | ✅ `npm test` (sección 9) |
+| Frontend al cierre de la Fase 2 (commit `106bb9d`) | 51 de 51 aprobadas, 8 archivos | ✅ ejecutada en esa etapa |
+| Frontend con la Fase 3A, antes del endurecimiento | 63 de 63 aprobadas, 9 archivos | ✅ (sección 10) |
+| **Frontend actual (Fase 3A + endurecimiento)** | **66 de 66 aprobadas**, 9 archivos | ✅ `npm test` (sección 12) |
 | Lint del frontend | Sin errores | ✅ `npm run lint` |
 | Build de producción del frontend | Correcta | ✅ `npm run build` |
 | Backend al cierre de la integración (commit `7971702`) | 15 de 15 aprobadas | ✅ ejecutada en esa etapa |
-| **Backend actual (Fase 2: calidad de datos)** | **26 de 26 aprobadas** (1 advertencia de librería) | ✅ `python -m pytest` (sección 9) |
+| Backend al cierre de la Fase 2 (commit `106bb9d`) | 26 de 26 aprobadas | ✅ ejecutada en esa etapa |
+| Backend con la Fase 3A, antes del endurecimiento | 29 de 29 aprobadas | ✅ (sección 10) |
+| **Backend actual (Fase 3A + endurecimiento)** | **52 de 52 aprobadas** (1 advertencia de librería) | ✅ `python -m pytest` (sección 12) |
 | Swagger con el dataset SIACAM: HTTP 200, 102.254 registros, 8 columnas | Informado como correcto | 🗣️ El archivo no está en el repositorio |
 | Integración local React + FastAPI + Pandas con `impominerales-siacam.csv` | 7,4 MB, 102.254 registros, 8 columnas, 0 duplicados, 100 % de completitud, "Perfil del backend" | 🗣️ Capturas del autor (sección 7) |
 | Errores del backend en el navegador | Mensaje 422 visible, sin vista previa sustituta | ✅ Prueba manual (sección 4) |
@@ -197,3 +201,171 @@ CSV sintético de 102.254 filas × 8 columnas (4,4 MB), medido en el equipo de d
 - DataDecision AI debe funcionar con **cualquier dataset tabular CSV/XLSX**. SIACAM es solo un caso de prueba real: **no se incorporan reglas específicas para sus columnas**, aunque eso implique que `PPRO` no se clasifique como código.
 - El perfilador **propone** interpretaciones y advertencias; no decide. La próxima fase incorporará un asistente que **consultará al usuario** cuando sean ambiguos el significado de una variable, los marcadores de ausencia o las necesidades del análisis (por ejemplo: "¿`PPRO` es un código o una cantidad?", "¿los `NA` de `ORIGEN` son datos faltantes o un código de país?").
 - **Tratamiento no destructivo:** las decisiones confirmadas se aplicarán después, al ejecutar el análisis con Pandas, sobre una copia en memoria. **Nunca se eliminan ni modifican automáticamente datos originales sin autorización.** Hoy no se aplica ningún tratamiento: los `NA` se informan y se conservan.
+
+
+## 10. Fase 3A — Varias fuentes por análisis (✅ verificada)
+
+Cerrada en el commit de la Fase 3A. Datos **sintéticos** en las pruebas automáticas; la validación con datos reales del autor está en la sección 13.
+
+### Resultados
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **29 de 29** (26 anteriores + 3 en `test_multiple_sources.py`), 1 advertencia de librería |
+| Frontend (`npm test`) | **63 de 63** en 9 archivos (51 anteriores + 12 en `test/multiSource.test.tsx`) |
+| Lint y build | Sin errores |
+| Regresiones | Ninguna: las 51 pruebas previas del frontend (incluidas las del flujo de un solo archivo) pasaron **sin modificarse** |
+
+### Qué cubren las pruebas nuevas
+
+| Caso | Dónde |
+|------|-------|
+| Tres archivos CSV/XLSX de estructuras distintas perfilados por separado con el mismo endpoint, sin datos cruzados | Backend |
+| Un archivo con error no afecta al siguiente; el mismo archivo da el mismo perfil | Backend |
+| Catálogo de 3 fuentes: alias, conteos, columna compartida (`region` = `Región`), estructura igual entre A y C, **sin valores reales** | Frontend |
+| Proyecto con 3 fuentes: referencias en orden, aviso del asistente, limitación en la propuesta y **perfiles originales sin cambios** | Frontend |
+| Compatibilidad: proyecto de una sola fuente igual que antes | Frontend |
+| Rechazo de más de 3 fuentes y de fuentes inexistentes | Frontend |
+| Carga simultánea de 2 archivos distintos, detalle de cada uno y envío de ambas fuentes al crear el proyecto | Frontend (pantalla) |
+| Quitar una fuente sin afectar a las demás; la zona de carga reaparece al bajar de 3 | Frontend (pantalla) |
+| 4 archivos (uno PDF): se toman 3, se informa el ignorado y el error del PDF queda en su fuente | Frontend (pantalla) |
+| Mismo archivo dos veces: rechazado | Frontend (pantalla) |
+| Reemplazo fallido con backend: se conserva la fuente anterior; perfilado **de a un archivo** (concurrencia máxima 1) | Frontend (pantalla) |
+| Reemplazo exitoso en la misma posición | Frontend (pantalla) |
+| Workspace: perfil de cada fuente por separado | Frontend (pantalla) |
+
+### Verificación manual en el navegador
+
+Frontend con perfilado real contra el backend local (puertos alternativos, sin tocar la configuración del autor). Se cargaron a la vez tres CSV sintéticos de estructuras distintas: `importaciones.csv` (400 filas, 4 columnas), `paises.csv` (3 filas; `NA` = Namibia) y `notas.csv` (30 filas).
+
+- Cada fuente mostró filas, columnas, completitud, posibles `NA` e interpretaciones; el detalle cambió al seleccionar cada una.
+- El catálogo señaló «PAIS» en las fuentes A y B como **posible relación no confirmada**; no se combinó nada.
+- Al continuar, el asistente DEMO avisó que recibió 2 fuentes más y que la propuesta usa solo la principal.
+- Diseño revisado a 1280 px y en un panel de 384 px.
+
+### Limitaciones y pendientes
+
+- La compatibilidad con un backend de proyectos real (`POST /api/projects` con `datasetIds`) no se pudo probar porque ese endpoint no existe todavía.
+- No se probó la carga simultánea de tres archivos cercanos a 25 MB.
+- No se repitió la prueba con SIACAM en modo multiarchivo.
+
+
+## 11. Auditoría de privacidad y flujo de datos (✅ verificada, 24/10/2026)
+
+Comprobaciones ejecutadas sobre la Fase 3A antes de su cierre, con **datos sintéticos**. No se modificó código funcional. Hallazgos y clasificación en [SEGURIDAD.md](SEGURIDAD.md), sección 6.
+
+| Comprobación | Método | Resultado |
+|--------------|--------|-----------|
+| Red y almacenamiento en la **demo pública** | Build con `VITE_DEMO_MODE=true` y `VITE_BACKEND_PROFILING=false`, servida localmente; se instrumentaron `fetch`, XHR, `sendBeacon` y `WebSocket`; se cargaron 3 archivos (uno llamado `clientes_confidencial.csv` con CUIT inventados), se quitó uno, se reemplazó otro y se continuó al asistente | **0 solicitudes**; registro de red del navegador: solo `index.html`, JS, CSS y fuente propios; `localStorage`, `sessionStorage`, cookies, IndexedDB, Cache Storage y service workers vacíos |
+| Recarga | Recargar en `/analisis/asistente` | Estado perdido ("Primero cargá un dataset"); ningún nombre ni valor del archivo en la página ni en la URL |
+| Red en **perfilado local** | Servidor de desarrollo con `VITE_BACKEND_PROFILING=true` contra un backend de prueba; 2 archivos | 2 POST a `/api/datasets/profile` del backend configurado, de a una, cada una con solo el campo `file`; almacenamiento vacío |
+| Registro del servidor | Salida de uvicorn durante la prueba | Solo IP, método, ruta y estado; sin nombres de archivo ni contenido |
+| URLs en la build | Análisis de `dist/` | Solo textos de librerías (documentación de React/Redux, espacios de nombres XML) y `localhost`; sin servicios de analítica |
+| Demo publicada | Lectura del HTML y cabeceras de https://datadecisionai.pages.dev | Un único script propio; sin `cloudflareinsights`, Zaraz ni GTM; sin `Content-Security-Policy`; con `nosniff` y `Referrer-Policy` |
+| Archivos temporales | Observación de `SpooledTemporaryFile` de Starlette en pruebas | 8 KB: en memoria. 3,2 MB y 40 MB: volcados a disco; en todos los casos cerrados (eliminados) al terminar |
+| Tamaño antes de recibir | Archivo de 40 MB | Recibido y volcado completo; luego HTTP 413 |
+| Memoria con CSV adversario | 24,8 MB, 62.000 filas × 200 columnas de un carácter; `tracemalloc` | Aceptado; pico ≈ 409 MB de memoria Python trazada; 37,8 s |
+| CORS | POST desde un origen externo | HTTP 200 procesado, sin `Access-Control-Allow-Origin` (la respuesta no es legible, pero el trabajo se hizo) |
+| Errores de codificación | CSV en UTF-16 | HTTP 422 con mensaje controlado |
+
+**Pendiente de verificación manual:** configuración del panel de Cloudflare (analítica u otras inyecciones que se activen después); comportamiento en navegadores distintos de Chromium; consumo real de memoria del proceso (RSS), que `tracemalloc` no mide por completo.
+
+
+## 12. Endurecimiento de la carga: B4, B5, B6 y F7 (✅ verificada)
+
+Cerrada en el commit de la Fase 3A. Datos **sintéticos**.
+
+### Resultados
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **52 de 52** (29 anteriores + 23 en `test_hardening.py`), 1 advertencia de librería |
+| Frontend (`npm test`) | **66 de 66** en 9 archivos (63 anteriores + 3 de liberación de fuentes) |
+| Lint y build | Sin errores |
+| Regresiones | Ninguna: las 29 pruebas previas del backend y las 63 del frontend pasaron sin modificarse |
+
+### Pruebas nuevas
+
+| Hallazgo | Casos |
+|----------|-------|
+| B6 Origen | Origen autorizado con encabezado CORS; sin `Origin` permitido; externo, `null` y puerto no autorizado → 403 sin ejecutar el perfilado; 403 sin leer ningún byte del cuerpo; puerto 5174 autorizado por defecto; `/api/health` no afectado |
+| B4 Tamaño | `Content-Length` excesivo → 413 sin leer el cuerpo; `Content-Length` inválido → 400; 32 MB sin `Content-Length` y con `Content-Length` falso → 413 tras leer como máximo el límite + 1 fragmento, con el temporal cerrado; archivo válido de ≈ 24 MB → 200 |
+| B5 Memoria | CSV adversario de 12,4 M celdas rechazado **sin llamar a `pd.read_csv`** y en menos de 10 s; límites de columnas y filas; saltos de línea entre comillas sin falsos rechazos; XLSX con exceso de celdas; bomba ZIP (5 MB reales, pocos KB comprimidos); XLSX con demasiados componentes; XLSX truncado y CSV binario → 422 sin traza; perfilado ejecutado fuera del bucle de eventos; 429 al superar la concurrencia y contador liberado tras éxito y error |
+| F7 Liberación | El perfil quitado deja de existir y no puede usarse para un proyecto; otras fuentes intactas; dataset usado por un proyecto se conserva; en la pantalla: reemplazo fallido no libera, reemplazo exitoso libera solo el anterior, quitar libera esa fuente |
+
+### Mediciones (antes → después)
+
+| Caso | Antes | Después |
+|------|-------|---------|
+| CSV adversario 24,8 MB, 12,4 M celdas | Aceptado; ≈ 409 MB; 37,8 s con el servidor bloqueado | **Rechazado en 0,6 s**; ≈ 124 MB (decodificación del texto) |
+| Dataset sintético tipo SIACAM (102.254 × 8) | 2,04 s | 2,13 s (sin cambios relevantes) |
+| Peor caso aceptado (≈ 5 M celdas, 10 MB) | — | ≈ 7,9 s; ≈ 183 MB de memoria Python trazada |
+| `/api/health` durante un perfilado de 8 s (uvicorn real) | Bloqueado | 8 respuestas, máximo 481 ms |
+| 40 MB por fragmentos sin `Content-Length` (uvicorn real) | Recibido completo, luego 413 | **413 en 0,7 s** |
+| `Origin: null` (uvicorn real) | Procesado (200) | **403** |
+
+**Limitaciones de la verificación:** `tracemalloc` no mide toda la memoria del proceso (RSS); no se probó con varios procesos de uvicorn; el recorrido con el archivo real SIACAM después de estos cambios queda pendiente de verificación manual del autor.
+
+
+## 13. Cierre de la Fase 3A: validación manual con dos datasets reales (🗣️ comunicada)
+
+**Evidencia aportada por el autor** (aplicación local React + FastAPI + Pandas). No fue reproducida por el asistente: los archivos no están en el repositorio.
+
+### Perfiles obtenidos
+
+| Aspecto | Fuente 1: `impominerales-siacam.csv` | Fuente 2: `indicadores-provinciales.csv` |
+|---------|--------------------------------------|------------------------------------------|
+| Filas / columnas | 102.254 / 8 | 15.874 / 14 |
+| Duplicados exactos | 0 | 0 |
+| Completitud (celdas no vacías) | 100 % | 100 % |
+| Posibles marcadores de ausencia | 12 | 45 |
+| Codificación | — | Windows-1252, identificada por el backend |
+| Procesamiento | Correcto | Correcto |
+
+### Funcionamiento con varias fuentes
+
+1. Ambos archivos se cargaron en un mismo análisis.
+2. Cada fuente conservó su estructura, estadísticas y perfil de calidad.
+3. Al seleccionar una fuente se mostraron sus propios datos, sin alterar la otra.
+4. Se quitó una fuente sin afectar a la otra y se volvió a incorporar.
+5. El catálogo informó que no hay columnas con nombres coincidentes entre ambos archivos.
+6. Los datasets no se unieron, concatenaron ni transformaron.
+7. El sistema permite hasta tres fuentes por análisis.
+
+### Asistente DEMO con las dos fuentes
+
+Mensaje del autor: *"Quiero analizar la evolución de las importaciones de minerales por año y, por separado, estudiar los indicadores provinciales. No quiero relacionar ambos datasets."*
+
+Respuesta del asistente: *"Entiendo tu objetivo. Las columnas numéricas que encontré son «PPRO», «CIF». Puedo incluir la evolución en el tiempo según «ANYO» y comparaciones por «ORIGEN», «PROCEDENC», «GRUPO». ¿Te sirve ese enfoque?"*
+
+| Correcto | Limitaciones observadas (defectos aceptados) |
+|----------|----------------------------------------------|
+| Propuso la evolución temporal con `ANYO` | No reconoció el objetivo independiente sobre los indicadores provinciales |
+| Identificó `CIF` como numérica pertinente | No confirmó la instrucción de mantener separados los análisis |
+| Propuso agrupaciones útiles sobre SIACAM | Incluyó `PPRO` entre las numéricas sin advertir que su significado es ambiguo |
+| Al inicio avisó que había una segunda fuente y que solo usaba la principal | Funciona con reglas y palabras clave, no con comprensión del lenguaje |
+| Se identificó como simulado y no afirmó haber unido archivos ni calculado nada conjunto | |
+
+**Decisión:** no se amplía el asistente DEMO con reglas nuevas (es una simulación provisional). Los requisitos para la IA real quedan en [NEXT_STEPS.md](NEXT_STEPS.md) (Fase 3B).
+
+### Incidencia observada
+
+**Incidencia intermitente de CORS (🗣️ comunicada por el autor, causa no confirmada).** Durante las pruebas locales el navegador informó errores de CORS desde `http://localhost:5174` hacia `http://127.0.0.1:8000/api/datasets/profile`. Luego el autor verificó: `GET /api/health` → 200; `OPTIONS` con `Origin: http://localhost:5174` → 200 con `Access-Control-Allow-Origin` correcto; `POST` sin archivo → 422 con cabecera CORS; `POST` con SIACAM desde curl → 200 con cabecera CORS; y cargas posteriores desde React exitosas con ambos archivos.
+
+La causa **no fue confirmada** y la incidencia **no se declara resuelta**. Hipótesis sin verificar, útiles para un próximo diagnóstico: (a) el backend no estaba en ejecución o se estaba reiniciando (`--reload`) en ese momento; (b) un error no controlado (500) se responde fuera de la capa CORS y el navegador lo muestra como error de CORS; (c) caché del navegador o un servidor anterior todavía en el puerto. Si se repite, conviene registrar en ese momento la consola de uvicorn y la pestaña Red del navegador (código de estado real). No se modificaron CORS ni los middlewares de forma especulativa.
+
+### Verificación automática al cierre (✅ ejecutada por el asistente, 25/10/2026)
+
+Ver la sección 14.
+
+## 14. Verificación final de la Fase 3A (✅ ejecutada por el asistente, 25/10/2026)
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **52 de 52** (1 advertencia de deprecación de la librería de pruebas) |
+| Frontend (`npm test`) | **66 de 66** en 9 archivos |
+| Lint (`npm run lint`) | Sin errores |
+| Typecheck (`tsc -b`) | Sin errores |
+| Build de producción en modo público (`VITE_DEMO_MODE=true`, sin perfilado con backend) | Correcta |
+
+**Prueba intermitente detectada y corregida (solo en la prueba).** En una de las ejecuciones completas falló `la pantalla libera al quitar y al reemplazar…`: la prueba esperaba ver el nombre del archivo nuevo y enseguida verificaba la liberación, pero la pantalla muestra ese nombre **mientras** el reemplazo se procesa. Bajo carga, la verificación llegaba antes de que terminara. No era un defecto de la aplicación. Se cambió la prueba para esperar a que termine el reemplazo; luego hubo **0 fallas en 8 ejecuciones** repetidas de las pruebas de pantalla y la suite completa pasó.

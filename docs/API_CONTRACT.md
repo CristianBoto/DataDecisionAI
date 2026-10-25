@@ -133,7 +133,13 @@ Lo usa el proveedor DEMO cuando `VITE_BACKEND_PROFILING=true`.
 { "name": "Análisis de ventas 2025", "datasetId": "ds_8f2a1c3b" }
 ```
 
-`201` → `Project` (con `status: "draft"` y `approvedPlan: null`). El backend crea también el primer mensaje del asistente (saludo basado en el perfil).
+Varias fuentes (opcional, máximo 3; la primera es la principal):
+
+```json
+{ "name": "Importaciones y países", "datasetId": "ds_a", "datasetIds": ["ds_a", "ds_b"] }
+```
+
+`201` → `Project` (con `status: "draft"` y `approvedPlan: null`; con varias fuentes incluye `datasetIds` y `datasets`). Las fuentes se **referencian**: no se unen ni se transforman. Errores: `422` más de 3 fuentes; `404` fuente inexistente. El backend crea también el primer mensaje del asistente (saludo basado en el perfil).
 
 ## 4. Consultar proyecto
 

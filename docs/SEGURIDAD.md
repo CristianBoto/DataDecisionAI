@@ -15,11 +15,11 @@
 **Backend**
 
 - CORS limitado a una lista explícita de orígenes (`CORS_ORIGINS`), sin credenciales.
-- Lectura del archivo por fragmentos, con corte a los 25 MB (HTTP 413).
+- Lectura del archivo por fragmentos, con corte a los 25 MB (HTTP 413). **Aclaración (auditoría, sección 6):** el corte ocurre después de que el servidor recibió la solicitud completa.
 - Límites de 250.000 filas y 250 columnas; límite de 60 MB descomprimidos para XLSX (protección ante archivos comprimidos maliciosos).
 - Rechazo de extensiones no admitidas, archivos vacíos, XLSX dañados y CSV con caracteres nulos (HTTP 422, mensajes sin rutas internas).
 - Lectura de todas las celdas **como texto**: no se evalúan fórmulas ni se convierten tipos automáticamente.
-- El archivo se procesa en memoria y **no se guarda**; no se eliminan duplicados ni se rellenan vacíos.
+- El archivo **no se persiste**: se procesa en memoria y no se eliminan duplicados ni se rellenan vacíos. **Aclaración (auditoría, sección 6):** los archivos de más de 1 MB pasan por un archivo temporal del sistema durante la solicitud, que se elimina al terminar.
 
 **Repositorio**
 
@@ -85,3 +85,149 @@ Las contras: requiere más memoria y procesamiento, y los modelos locales suelen
 | Pruebas de seguridad automatizadas | ❌ Pendiente |
 
 Plan de trabajo detallado en [NEXT_STEPS.md](NEXT_STEPS.md) (tareas 12 a 15) y [DEPLOYMENT.md](DEPLOYMENT.md).
+
+## 6. Auditoría de privacidad, seguridad y flujo de datos (24/10/2026, durante la Fase 3A)
+
+Auditoría acotada sobre el código real, antes de integrar OpenAI. Cada conclusión indica su evidencia; las comprobaciones usaron **solo datos sintéticos** (incluido un archivo `clientes_confidencial.csv` inventado) y ningún servicio externo. Detalle de las ejecuciones en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 11.
+
+**Clasificación:** ✅ control implementado y verificado · 🟡 control parcial · 🔴 riesgo o defecto detectado · 🔒 pendiente antes de OpenAI · 🔭 mejora futura fuera del alcance del MVP.
+
+### 6.1 Flujo de datos real
+
+```
+Archivo elegido (File, en memoria del navegador)
+  ├─ Demo pública (VITE_BACKEND_PROFILING sin definir):
+  │    CSV: se leen como máximo los primeros 2 MB (csv.ts:247, 262-263) → perfil local
+  │    XLSX: no se lee; perfil vacío ("pendiente de backend")
+  │    → sin solicitudes de red
+  └─ Perfilado local (VITE_BACKEND_PROFILING=true):
+       POST multipart, campo "file", un archivo por vez (backendProfile.ts:112-117)
+       → FastAPI 127.0.0.1 → Starlette lo recibe completo (≤1 MB en memoria, >1 MB en archivo temporal)
+       → Pandas en memoria → JSON (conteos, tipos, 3 ejemplos y 5 primeras filas por archivo) → navegador
+Perfil → sesión de React (sources[]) y mapas del proveedor DEMO → pantallas
+```
+
+| # | Hallazgo | Evidencia | Clase |
+|---|----------|-----------|-------|
+| F1 | Un único punto del frontend realiza solicitudes de red: `fetch` en `httpClient.ts:50`. Solo se instancia si `VITE_DEMO_MODE=false` o `VITE_BACKEND_PROFILING=true` (`services/index.ts:12-17`). | Búsqueda de `fetch`, `XMLHttpRequest`, `sendBeacon`, `WebSocket` en `src/` | ✅ |
+| F2 | Sin persistencia en el navegador: no se usan `localStorage`, `sessionStorage`, `IndexedDB`, cookies, Cache Storage ni service workers. | Búsqueda en `src/`; en el navegador, tras cargar, quitar y reemplazar 3 archivos: todos vacíos | ✅ |
+| F3 | Demo pública: **0 solicitudes** al cargar 3 archivos, quitar uno, reemplazar otro y continuar al asistente; solo se descargaron recursos propios (JS, CSS, fuente). | Instrumentación de `fetch`/XHR/`sendBeacon`/`WebSocket` + registro de red del navegador sobre la build pública | ✅ |
+| F4 | Perfilado local: exactamente **una POST por archivo**, secuenciales, solo al backend configurado, con un único campo `file`. | Instrumentación de `fetch` con 2 archivos | ✅ |
+| F5 | Sin telemetría ni analítica: la build no incluye URLs externas salvo textos de librerías (documentación, espacios de nombres XML); la demo publicada no tiene scripts inyectados (`cloudflareinsights`, Zaraz, GTM). Las fuentes tipográficas se sirven localmente. | Análisis de `dist/` y del HTML de https://datadecisionai.pages.dev | ✅ |
+| F6 | Al recargar o cerrar la pestaña se pierde todo (estado solo en memoria). La URL contiene solo la ruta: nunca nombres de archivo ni datos. | Recarga en `/analisis/asistente`: "Primero cargá un dataset"; ningún dato en el DOM | ✅ |
+| F7 | Al **quitar o reemplazar** una fuente, la sesión la descarta (`AppProviders.tsx:26-34`), pero el proveedor DEMO conserva su `Dataset` y su perfil (con ejemplos y primeras filas) en sus mapas hasta recargar: no existe ningún `.delete()` (`demoProvider.ts:62-63, 128-129`). No sale del navegador, pero contradice la expectativa de "quitar". | Lectura de código | 🔴 menor |
+| F8 | El frontend conserva por archivo: nombre, tamaño, fecha, formato y el perfil (conteos, tipos, interpretación, hasta 3 ejemplos por columna y 5-8 primeras filas). El objeto `File` no se guarda en el estado. | `SourceList.tsx` (`UploadItem`), `csv.ts:132, 217`, `backendProfile.ts:91-96` | ✅ (documentado) |
+| F9 | Una build hecha a mano con un `.env.local` que active `VITE_BACKEND_PROFILING` llevaría esa opción a la demo publicada. Cloudflare compila desde git, donde `.env.local` está excluido. | `.gitignore` (`*.local`); variables `VITE_*` se fijan en la compilación | 🟡 |
+| F10 | La demo publicada no envía `Content-Security-Policy`; sí `nosniff` y `Referrer-Policy`. Un CSP `connect-src 'self'` haría cumplir técnicamente "sin envío de datos" aunque se introdujera un error en el código. | Cabeceras de https://datadecisionai.pages.dev | 🔭 (recomendado) |
+
+### 6.2 Backend (`POST /api/datasets/profile`)
+
+| # | Hallazgo | Evidencia | Clase |
+|---|----------|-----------|-------|
+| B1 | Validaciones: extensión `.csv`/`.xlsx`, vacío, 25 MB, CSV con caracteres nulos, XLSX que no es ZIP o está dañado, 60 MB descomprimidos, 250.000 filas, 250 columnas; mensajes en español sin rutas internas. | `dataset_profiler.py:17-20, 31-40, 65-81, 116`; 26 pruebas | ✅ |
+| B2 | Todo se lee **como texto** (`dtype=str`); Excel se abre con `data_only=True` y `keep_links=False` (no evalúa fórmulas ni sigue vínculos externos). Python 3.12 incluye expat 2.6.4, con protección ante expansión de entidades XML. | `dataset_profiler.py:50, 81`; `pandas/io/excel/_openpyxl.py:571` | ✅ |
+| B3 | **Archivos temporales:** Starlette guarda en memoria hasta 1 MB y, por encima, escribe el archivo subido en un **archivo temporal del sistema**, que se elimina al cerrarse (`finally: await file.close()`). Por lo tanto, "no se guarda" significa *no se persiste*, pero sí existe una copia transitoria en disco durante la solicitud. | `starlette/formparsers.py:135, 218`; prueba: 8 KB en memoria, 3,2 MB y 40 MB volcados a disco y cerrados | 🟡 |
+| B4 | **Sin límite de tamaño antes de recibir:** la solicitud se recibe completa antes de ejecutar el endpoint; el corte de 25 MB ocurre después. Un archivo de 40 MB se escribió entero en el temporal antes del HTTP 413. | Prueba con 40 MB | 🔴 |
+| B5 | **Memoria y bloqueo:** los límites de filas y columnas se comprueban **después** de construir el DataFrame. Un CSV adversario de 24,8 MB (12,4 millones de celdas de un carácter, dentro de los límites) consumió ≈ 409 MB de memoria Python y 37,8 s. Como el endpoint es `async def` y llama a Pandas de forma síncrona, durante ese tiempo el servidor no atiende otras solicitudes. | `datasets.py:15, 26`; `dataset_profiler.py:116`; prueba con `tracemalloc` | 🔴 |
+| B6 | **CORS no es control de acceso:** bloquea que otro sitio *lea* la respuesta, pero una POST `multipart` es una solicitud "simple" sin verificación previa: el backend la **procesa** igual. Una página externa abierta en el mismo equipo podría hacer trabajar al backend local (por ejemplo, con el archivo de B5), sin poder leer el resultado. | Prueba: origen externo → HTTP 200 sin `Access-Control-Allow-Origin` | 🟡 |
+| B7 | Exposición: uvicorn escucha en `127.0.0.1` por defecto y así lo indican las guías; `/docs` y `/openapi.json` están disponibles. Sin autenticación: no debe exponerse en una red. | `README.md:125`, `DEPLOYMENT.md:131`; `/docs` → 200 | 🟡 (proporcional al MVP) |
+| B8 | Registros: el código no registra nada; uvicorn registra IP, método, ruta y estado, **sin** nombres de archivo ni contenido. Los errores devueltos no incluyen datos. | Búsqueda de `logging`/`print` en `app/`; registro del servidor durante la prueba | ✅ |
+| B9 | Varias cargas: cada solicitud es independiente y no comparte estado (3 pruebas). Sin límite de solicitudes simultáneas; el frontend las envía de a una. | `test_multiple_sources.py`; F4 | 🟡 |
+| B10 | Inyección de fórmulas (`=CMD…`): los valores se devuelven como texto y React los muestra escapados; el riesgo aparecerá recién al **exportar** a Excel/CSV. | Interfaz de exportación sin generación | 🔭 (al implementar exportaciones) |
+
+### 6.3 Contexto para la futura IA (`datasetCatalog.ts` y estructuras relacionadas)
+
+No alcanza con que el catálogo no tenga filas: **nombres de archivo y de columnas, esquemas, preguntas del usuario y estadísticas agregadas también pueden ser confidenciales** (por ejemplo, un archivo `despidos_2027.csv`, una columna `diagnostico_vih` o un conteo que revela la cantidad de empleados).
+
+| Campo | Dónde | Riesgo | ¿Enviar a OpenAI? |
+|-------|-------|--------|-------------------|
+| `fileName`, `Dataset.name` | catálogo, `Dataset` | Alto: suele describir el contenido o el cliente | **No.** Usar alias `A`, `B`, `C` |
+| Nombres de columna | catálogo, perfil | Medio-alto: revelan qué se registra | Solo con autorización; ofrecer ocultar o renombrar columnas |
+| `format`, `semanticType`, `semanticConfidence` | catálogo | Bajo | Sí, como mínimo necesario |
+| `rowCount`, `columnCount`, `distinct`, `missing`, `suspectedMissing`, `completeness`, `duplicateRows` | catálogo | Medio: cifras del negocio | Por defecto, redondeadas o en rangos; exactas solo si el usuario lo autoriza |
+| `sharedColumns`, `sameColumnSets` | catálogo | Igual que los nombres de columna | Con los nombres autorizados (o alias de columna) |
+| `sampleValues`, `previewRows` | perfil (no catálogo) | **Alto: datos reales** | **Nunca** de forma automática |
+| `semanticReason` | perfil | Medio: incluye rangos reales ("entre 2015 y 2024", `column_semantics.py:161-175`) | No |
+| `issues` (mensajes) | perfil | Medio: nombres de columna y conteos | No |
+| Nombre del proyecto, mensajes y objetivo del usuario | `Project`, conversación | Variable: pueden contener cualquier dato | Solo el mensaje concreto que el usuario envía, mostrando antes qué sale |
+| Resultados agregados de Pandas | futuro | Medio | Solo los necesarios para interpretar, con autorización |
+
+**Diseño requerido antes de OpenAI (🔒, no implementado):**
+
+1. **Denegar por defecto.** `AI_ENABLED=false` en `backend/.env`; sin clave o sin esa opción, ningún dato sale.
+2. **La clave solo en el backend.** `OPENAI_API_KEY` en `backend/.env` (`config.py:28`, sin valor por defecto, con prueba); el frontend nunca llama a OpenAI ni recibe la clave; ninguna variable `VITE_*` contiene secretos.
+3. **El backend arma el contenido a enviar**, a partir de una lista blanca de campos (modelo Pydantic con `extra="forbid"`): nunca reenvía lo que mande el navegador.
+4. **Autorización explícita por transmisión:** antes de cada envío, la interfaz muestra el contenido exacto (JSON legible) y el usuario lo aprueba; la aprobación no se extiende a envíos posteriores. Opciones para ocultar columnas o usar alias.
+5. **Registro local** de cada envío (fecha, campos y tamaño; no el contenido completo).
+6. **Salida estructurada:** la IA devuelve un plan (operaciones de un catálogo cerrado sobre columnas existentes), validado con un esquema; nunca código. **No se ejecuta código generado por la IA** ni puede modificar el backend.
+
+### 6.4 Por qué separar los cálculos de Pandas de la interpretación del modelo de lenguaje
+
+- **Exactitud:** un modelo de lenguaje predice texto; puede producir números plausibles pero incorrectos. Pandas calcula de forma determinista y reproducible.
+- **Verificabilidad:** cada cifra puede rastrearse hasta una operación de Pandas sobre columnas concretas y probarse con datos sintéticos de resultado conocido.
+- **Privacidad:** si la IA solo planifica e interpreta, no necesita las filas; el cálculo ocurre donde están los datos.
+- **Seguridad:** ejecutar código generado por un modelo permitiría acciones no previstas (leer archivos, llamar a la red). Un catálogo cerrado de operaciones acota lo que puede pasar.
+- **Responsabilidad:** el usuario aprueba un plan comprensible antes de que se calcule nada.
+
+### 6.5 Correcciones propuestas (no implementadas)
+
+| Prioridad | Corrección mínima | Resuelve |
+|-----------|-------------------|----------|
+| ✅ Implementado (sección 7) | Rechazar en un *middleware* las solicitudes a `/api/datasets/profile` con `Content-Length` mayor a ~26 MB, cortar la lectura real al superar el límite y rechazar un `Origin` que no esté en `CORS_ORIGINS`, antes de leer el cuerpo. | B4, B6 |
+| 🟡 Implementado, mitigación parcial (sección 7) | Límite de celdas calculado **antes** de Pandas; perfilado fuera del bucle de eventos; concurrencia limitada. | B5 |
+| ✅ Implementado (sección 7) | Método `discardDataset(id)`, invocado al quitar o reemplazar una fuente. | F7 |
+| 🔒 Antes de OpenAI | Los 6 puntos de 6.3. | 6.3 |
+| 🔭 Futuro | CSP en Cloudflare (`frontend/public/_headers` con `connect-src 'self'`); autenticación y HTTPS si se expone en red; límite de solicitudes; neutralizar fórmulas al exportar. | F10, B7, B10 |
+
+## 7. Endurecimiento mínimo de la carga (B4, B5, B6, F7)
+
+Corrige los hallazgos de la sección 6 con controles proporcionales a un MVP académico. Pruebas en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 12.
+
+| Hallazgo | Riesgo | Solución elegida y fundamento | Prueba | Estado |
+|----------|--------|-------------------------------|--------|--------|
+| **B4** Límite de tamaño tardío | Disco y ancho de banda: el servidor aceptaba y escribía en un temporal cualquier tamaño antes de rechazarlo | *Middleware* ASGI (`app/core/upload_guard.py`) en la ruta de carga: 413 inmediato si `Content-Length` supera 26 MB (25 MB + 1 MB de margen para multipart); además cuenta los **bytes reales** recibidos y corta la lectura al superar el límite aunque el encabezado falte o mienta. Starlette cierra y borra el temporal parcial. Encabezado inválido → 400. | 413 sin leer el cuerpo; 40 MB por fragmentos sin `Content-Length` y con `Content-Length` falso → 413 tras leer ≤ 27 MB y temporal cerrado; archivo válido de 24 MB aceptado; servidor real: 413 en 0,7 s | ✅ |
+| **B5** Memoria y bloqueo | Un CSV de 25 MB con 12,4 M celdas usaba ≈ 409 MB y bloqueaba el servidor 37,8 s | (1) **Límite de celdas** (5 M; SIACAM ≈ 0,8 M) además de filas y columnas, verificado **antes** de Pandas: en CSV con `csv.reader` incremental (o una cota rápida por cantidad de líneas); en XLSX contando filas por flujo con `openpyxl` en solo lectura. (2) XLSX: se descomprime **de verdad** con tope de 60 MB (no se confía en los tamaños declarados) y máximo 1.000 componentes. (3) Pandas corre en un **hilo** (`run_in_threadpool`), no en el bucle de eventos. (4) Máximo **2 perfilados simultáneos**; el exceso recibe 429 (sin colas). | Caso adversario rechazado en 0,6 s sin llamar a Pandas; filas/columnas/celdas en CSV y XLSX; bomba ZIP de 5 MB comprimida en pocos KB; saltos de línea entre comillas sin falsos rechazos; perfilado fuera del bucle; 429 y liberación del contador; servidor real: `/api/health` respondió durante un perfilado de 8 s (máx. 481 ms) | 🟡 mitigado, no eliminado |
+| **B6** Origen no controlado | Una página externa podía hacer procesar archivos al backend local | El mismo *middleware* rechaza con 403, **antes de leer el cuerpo**, toda carga con `Origin` fuera de `CORS_ORIGINS` (incluido `null`). Sin `Origin` (curl, pruebas) se permite. Se agregó el puerto 5174 a los orígenes locales por defecto. Va dentro de CORS para que sus errores sean legibles por el frontend autorizado. | 403 para externo, `null` y puerto no autorizado sin ejecutar el perfilado ni leer el cuerpo; 200 sin `Origin`; otras rutas no afectadas; servidor real: `Origin: null` → 403 | ✅ (no es autenticación) |
+| **F7** Fuentes retenidas en memoria | Perfiles con ejemplos y primeras filas quedaban en memoria tras quitarlos | `discardDataset(id)` en el contrato del servicio: el proveedor DEMO borra el dataset y su perfil al **quitar**, **reemplazar** o **empezar de nuevo**; no libera los que usa un proyecto ya creado. El proveedor HTTP no tiene nada que liberar (el backend no guarda). | Liberación efectiva (el perfil deja de existir); otras fuentes intactas; reemplazo fallido no libera nada; dataset en uso por un proyecto se conserva | ✅ |
+
+**Riesgos residuales (no eliminados):**
+
+- **Recursos:** el peor archivo aceptado (≈ 5 M celdas) tarda ≈ 8 s y usa ≈ 180 MB de memoria Python trazada; con 2 perfilados simultáneos, ≈ 2 veces eso. Es una **mitigación**: un usuario local puede seguir ocupando el servidor con cargas repetidas dentro de los límites.
+- **Archivo temporal (B3):** las cargas válidas de más de 1 MB siguen pasando por un archivo temporal del sistema durante la solicitud (hasta ≈ 26 MB), que se elimina al terminar.
+- **Origen:** el control depende del encabezado `Origin` que envían los navegadores; un programa local puede omitirlo. Por eso no es autenticación.
+- **Pandas y openpyxl** siguen siendo responsables de leer el contenido; los límites acotan el tamaño, no garantizan la ausencia de fallas en esas librerías.
+- **Concurrencia:** el contador vale por proceso; con varios procesos de uvicorn el límite se multiplica.
+
+**Controles dejados fuera deliberadamente (proporcionalidad del MVP):** autenticación y HTTPS (la API escucha solo en `127.0.0.1`), límite de solicitudes por cliente, colas de trabajo, cuotas de memoria del proceso, aislamiento en contenedores, antivirus de archivos y CSP en la demo publicada (recomendado como mejora).
+
+
+## 8. Estado de seguridad al cierre de la Fase 3A
+
+**Controles vigentes (implementados y con pruebas automáticas):**
+
+| Control | Dónde |
+|---------|-------|
+| Rechazo temprano de cargas excesivas por `Content-Length` y por bytes reales recibidos | `app/core/upload_guard.py` |
+| Restricción del `Origin` en las cargas desde el navegador (incluido `null`) | `app/core/upload_guard.py`, `CORS_ORIGINS` |
+| Límites de 250.000 filas, 250 columnas y 5.000.000 de celdas antes de Pandas | `app/services/dataset_profiler.py` |
+| XLSX: descompresión real con tope, máximo de componentes y conteo por flujo | `app/services/dataset_profiler.py` |
+| Perfilado fuera del bucle de eventos y máximo 2 simultáneos por proceso | `app/api/routes/datasets.py` |
+| Liberación de datasets quitados o reemplazados en el proveedor DEMO | `frontend/src/services/demoProvider.ts` |
+| Exclusión de `.env`, `.env.local`, claves, datos y archivos generados | `.gitignore` |
+
+Estos controles **no interfirieron** con archivos válidos: SIACAM (102.254 × 8) e indicadores provinciales (15.874 × 14) se procesaron correctamente según la validación manual del autor (PRUEBAS, sección 13), y un dataset sintético tipo SIACAM mantiene su tiempo de perfilado (≈ 2,1 s).
+
+**Incidencia intermitente de CORS (🗣️ comunicada por el autor, causa no confirmada).** Durante las pruebas locales el navegador informó errores de CORS desde `http://localhost:5174` hacia `http://127.0.0.1:8000/api/datasets/profile`. Luego el autor verificó: `GET /api/health` → 200; `OPTIONS` con `Origin: http://localhost:5174` → 200 con `Access-Control-Allow-Origin` correcto; `POST` sin archivo → 422 con cabecera CORS; `POST` con SIACAM desde curl → 200 con cabecera CORS; y cargas posteriores desde React exitosas con ambos archivos.
+
+La causa **no fue confirmada** y la incidencia **no se declara resuelta**. Hipótesis sin verificar, útiles para un próximo diagnóstico: (a) el backend no estaba en ejecución o se estaba reiniciando (`--reload`) en ese momento; (b) un error no controlado (500) se responde fuera de la capa CORS y el navegador lo muestra como error de CORS; (c) caché del navegador o un servidor anterior todavía en el puerto. Si se repite, conviene registrar en ese momento la consola de uvicorn y la pestaña Red del navegador (código de estado real). No se modificaron CORS ni los middlewares de forma especulativa.
+
+**Límites que permanecen (aceptados en el MVP):**
+
+- No existe autenticación de usuarios.
+- CORS y la validación de `Origin` **no equivalen a autenticación**.
+- Los archivos válidos de más de 1 MB pueden pasar por almacenamiento temporal durante la solicitud.
+- Los controles de memoria **mitigan** el agotamiento de recursos, pero no lo eliminan.
+- La demo pública (solo navegador, sin red) y el backend local (recibe archivos) tienen **alcances distintos**.
+- La frontera de transmisión de datos a OpenAI **todavía no está implementada** (requisitos en la sección 6.3).
+
+DataDecision AI es un MVP académico: **no es una solución empresarial certificada ni un sistema libre de vulnerabilidades.**

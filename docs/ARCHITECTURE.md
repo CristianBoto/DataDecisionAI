@@ -140,6 +140,74 @@ Archivo ──► dataset_profiler.py (lectura como texto, límites)
 - **Política compartida de faltantes:** la lista de marcadores existe en Python y en TypeScript (vista previa local); una prueba verifica que sean iguales.
 - **Compatibilidad:** los campos nuevos son opcionales en el adaptador.
 
+## Varias fuentes por análisis (Fase 3A)
+
+```
+Archivo A ─┐                                   ┌─► perfil A ─┐
+Archivo B ─┼─► de a uno ─► POST /api/datasets/profile ─► perfil B ─┼─► sesión: sources[] (máx. 3) ─► catálogo (esquemas, sin valores)
+Archivo C ─┘   (mismo endpoint)                 └─► perfil C ─┘                │
+                                                                                └─► createProject({ datasetId, datasetIds })
+```
+
+- Cada archivo es una **fuente independiente**; el backend no cambió y no hay estado compartido entre perfiles.
+- La sesión guarda `sources[]`; `dataset`/`profile` siguen existiendo como la fuente principal (la primera), por compatibilidad con las pantallas de una sola fuente.
+- `lib/datasetCatalog.ts` arma el catálogo: alias A/B/C, conteos, formato e interpretación de columnas, faltantes y pistas de relación (mismo nombre normalizado, misma estructura). No incluye ejemplos ni filas.
+- Límites: 3 archivos, 25 MB por archivo, 60 MB entre todos, perfilado secuencial, sin persistencia.
+- **No hay uniones, concatenaciones ni transformaciones.**
+
+### Operaciones previstas para IA 1 (no implementadas)
+
+| Operación que podrá proponer IA 1 | Ejemplo | Validaciones previas obligatorias |
+|-----------------------------------|---------|-----------------------------------|
+| Analizar una fuente individualmente | Evolución mensual en `importaciones.csv` | Las de la Fase 2 (tipos, marcadores) confirmadas por el usuario |
+| Comparar fuentes independientes | Indicadores de 2024 frente a 2025, cada uno calculado por separado | Que las métricas sean comparables (mismas unidades y definiciones) |
+| Concatenar tablas compatibles | Apilar `ventas_2024.csv` y `ventas_2025.csv` | Mismas columnas y tipos; columna que identifique el origen; duplicados entre fuentes |
+| Relacionar tablas mediante claves confirmadas | Unir importaciones con un maestro de países por `PAIS` | Clave confirmada por el usuario; unicidad de la clave en la tabla maestra; granularidad de cada tabla; cardinalidad (1:1, 1:N, N:M); conteo de filas antes y después para detectar multiplicación de registros; claves sin correspondencia |
+
+Ninguna operación se ejecuta sin un **plan aprobado por el usuario**. Las validaciones las hace Pandas, no la IA, y el resultado se aplica sobre copias en memoria: los archivos originales no se modifican.
+
+## Principio arquitectónico central
+
+**DataDecision AI separa el procesamiento estadístico de la inteligencia artificial.**
+
+- **Python y Pandas** realizan los cálculos y el procesamiento verificable.
+- **La futura IA** interpreta objetivos, formula preguntas y propone planes de análisis.
+- **El usuario** confirma las decisiones relevantes.
+- Las operaciones se ejecutarán mediante **mecanismos estructurados y validados** (un catálogo cerrado de operaciones), no mediante la ejecución arbitraria de código generado por IA.
+- Los **archivos originales no se modifican** automáticamente.
+- La transmisión a servicios externos debe estar restringida por **minimización de datos y autorización explícita**.
+
+> La política de transmisión hacia OpenAI es un **requisito de arquitectura pendiente de implementación y verificación**, no una capacidad terminada.
+
+## Límites del MVP y escalabilidad
+
+| Límite inicial | Valor |
+|----------------|-------|
+| Datasets por análisis | 3 |
+| Tamaño por archivo | 25 MB |
+| Tamaño combinado | 60 MB |
+| Celdas por archivo para el perfilado | 5.000.000 (además de 250.000 filas y 250 columnas) |
+| Motor de procesamiento | Python y Pandas, en el equipo o servidor propio |
+
+**Justificación.** Estos límites permiten controlar recursos, realizar pruebas reproducibles, mantener una complejidad razonable y terminar el proyecto dentro del alcance académico. La arquitectura separa la carga y administración de fuentes, el perfilado, el procesamiento estadístico y la interfaz; esa separación **facilita** futuras ampliaciones, pero **no garantiza escalabilidad ilimitada**. Ampliar las capacidades requeriría nuevas pruebas de rendimiento, memoria y concurrencia y, según el volumen, otras estrategias de procesamiento. **El límite de tres fuentes es una decisión de alcance y de seguridad operativa del MVP, no una incapacidad conceptual** para trabajar con más datasets.
+
+## Frontera de datos para la futura IA (diseño, no implementado)
+
+```
+Navegador ──(nunca llama a OpenAI)──► FastAPI
+                                         │ AI_ENABLED=false por defecto
+                                         ▼
+                         Contenido armado en el backend desde una lista blanca
+                         (alias A/B/C, tipos, conteos redondeados; sin ejemplos ni filas)
+                                         │
+                         Vista previa exacta del envío ──► autorización del usuario (por envío)
+                                         │
+                                         ▼
+                                      OpenAI ──► plan estructurado (catálogo cerrado) ──► validación ──► Pandas
+```
+
+Auditoría y justificación de cada campo en [SEGURIDAD.md](SEGURIDAD.md), sección 6.
+
 ## Minimización de datos (decisión de diseño, pendiente de implementación)
 
 ```

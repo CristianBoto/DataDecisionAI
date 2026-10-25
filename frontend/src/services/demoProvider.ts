@@ -12,9 +12,11 @@ import { profileCsvFile } from '@/lib/csv'
 import { validateDatasetFile } from '@/lib/fileValidation'
 import { getExportOption } from '@/lib/exportFormats'
 import { appConfig } from '@/lib/config'
+import { MAX_SOURCES } from '@/lib/datasetCatalog'
 import { createDemoDataset, createDemoProfile, createDemoResults } from '@/mocks/demoDataset'
 import {
   buildGreeting,
+  buildMultiSourceNote,
   buildProposal,
   createInitialState,
   replyAfterApproval,
@@ -135,24 +137,58 @@ export function createDemoService(options: DemoServiceOptions = {}): DataDecisio
       return wait(dataset)
     },
 
+    discardDataset(datasetId) {
+      const usedByProject = [...projects.values()].some(({ project }) =>
+        (project.datasetIds ?? [project.datasetId]).includes(datasetId),
+      )
+      if (usedByProject) return
+      datasets.delete(datasetId)
+      profiles.delete(datasetId)
+    },
+
     getDatasetProfile(datasetId) {
       const profile = profiles.get(datasetId)
       if (!profile) return Promise.reject(new ApiError('No se encontró el perfil del dataset.', { status: 404, code: 'not_found' }))
       return wait(profile, delayMs / 2)
     },
 
-    createProject({ name, datasetId }) {
+    createProject({ name, datasetId, datasetIds }) {
       const dataset = datasets.get(datasetId)
       const profile = profiles.get(datasetId)
       if (!dataset || !profile) return Promise.reject(new ApiError('El dataset indicado no existe.', { status: 404, code: 'not_found' }))
       if (name.trim().length < 3) return Promise.reject(new ApiError('El nombre del proyecto debe tener al menos 3 caracteres.', { status: 422 }))
 
+      // Fuentes: la principal primero, sin repetidos. Se referencian, no se combinan.
+      const ids = [...new Set([datasetId, ...(datasetIds ?? [])])]
+      if (ids.length > MAX_SOURCES) {
+        return Promise.reject(new ApiError(`Un análisis admite hasta ${MAX_SOURCES} fuentes.`, { status: 422, code: 'too_many_sources' }))
+      }
+      const sources = ids.map((id) => datasets.get(id))
+      if (sources.some((d) => d === undefined)) {
+        return Promise.reject(new ApiError('Una de las fuentes indicadas no existe.', { status: 404, code: 'not_found' }))
+      }
+
       const now = new Date().toISOString()
-      const project: Project = { id: createId('prj'), name: name.trim(), datasetId, dataset, status: 'draft', createdAt: now, updatedAt: now, approvedPlan: null }
+      const project: Project = {
+        id: createId('prj'),
+        name: name.trim(),
+        datasetId,
+        dataset,
+        datasetIds: ids,
+        datasets: sources as Dataset[],
+        status: 'draft',
+        createdAt: now,
+        updatedAt: now,
+        approvedPlan: null,
+      }
       const greeting = buildGreeting(dataset, profile)
+      const multiSourceNote = buildMultiSourceNote(dataset, project.datasets!.slice(1))
       projects.set(project.id, {
         project,
-        messages: [message('assistant', greeting.content, 'text', { suggestions: greeting.suggestions })],
+        messages: [
+          message('assistant', greeting.content, 'text', { suggestions: greeting.suggestions }),
+          ...(multiSourceNote ? [message('assistant', multiSourceNote, 'notice')] : []),
+        ],
         proposal: null,
         state: createInitialState(),
       })
@@ -205,6 +241,7 @@ export function createDemoService(options: DemoServiceOptions = {}): DataDecisio
         record.proposal = buildProposal({
           projectId,
           dataset,
+          otherSources: record.project.datasets?.slice(1),
           profile,
           intent: state.intent,
           objectiveText: state.objectiveText,

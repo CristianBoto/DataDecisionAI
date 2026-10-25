@@ -72,6 +72,22 @@ Cada tarea indica qué construir, dónde y cómo saber que está terminada. Conv
 
 ---
 
+## Fase 3B — IA real con frontera de datos (planificada)
+
+**Requisito previo:** implementar y probar la frontera de transmisión descripta en [SEGURIDAD.md](SEGURIDAD.md), sección 6.3 (denegación por defecto, contenido armado en el backend desde una lista blanca, autorización explícita por envío, clave solo en el backend, registro local, salida estructurada validada).
+
+**Requisitos funcionales de la IA** (surgidos de la validación del asistente DEMO con dos fuentes reales):
+
+- Reconocer **todos** los objetivos solicitados en un mismo mensaje.
+- Comprender cuándo varias fuentes deben analizarse **de forma independiente**.
+- Distinguir entre **comparar, concatenar, relacionar y analizar por separado**.
+- **Preguntar** cuando falte información o haya ambigüedad.
+- **No** tratar automáticamente todo campo numérico como variable cuantitativa (por ejemplo, `PPRO`).
+- **No inventar** estadísticas ni conclusiones.
+- Proponer **planes de análisis** que el usuario confirme antes de ejecutarlos.
+
+- **Listo cuando**: con SIACAM e indicadores provinciales, ante el pedido "evolución de importaciones por año y, por separado, indicadores provinciales, sin relacionarlos", la IA reconoce ambos objetivos, confirma que no relacionará las fuentes, pregunta por `PPRO` y propone dos planes independientes para aprobar.
+
 ## Próxima fase: confirmación humana de la interpretación (planificada)
 
 - El perfilador ya propone tipo semántico, confianza, motivo y marcadores sospechosos; **no decide**.

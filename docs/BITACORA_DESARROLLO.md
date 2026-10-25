@@ -17,6 +17,10 @@ Autor: Damián Boto. Documento de base para la exposición final.
 | 6. Publicación de la demo en https://datadecisionai.pages.dev | Captura de Cloudflare provista por el autor (comunicada); respuesta HTTP 200 comprobada el 24/10/2026 |
 | 6b. Prueba local con el dataset real `impominerales-siacam.csv` (102.254 registros) | Capturas del autor (comunicada); ver [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 7 |
 | 6c. Fase 2: calidad y confiabilidad del dataset (faltantes, tipos semánticos) | Commit de cierre de la Fase 2; validación con SIACAM aportada por el autor (sección 6c) |
+| 6d. Fase 3A: varias fuentes por análisis (hasta 3 archivos, sin uniones) | Commit de cierre de la Fase 3A; ver sección 6d |
+| 6e. Auditoría de privacidad, seguridad y flujo de datos antes de OpenAI | Documentada en SEGURIDAD.md (sección 6); sin cambios de código |
+| 6f. Endurecimiento mínimo de la carga (B4, B5, B6, F7) | Commit de cierre de la Fase 3A; ver sección 6f |
+| 6g. Cierre de la Fase 3A con dos datasets reales | Validación manual del autor; ver sección 6g |
 | 7. Decisión de minimización de datos para la IA | Registrada en [SEGURIDAD.md](SEGURIDAD.md) y [ARCHITECTURE.md](ARCHITECTURE.md); implementación pendiente |
 
 ---
@@ -169,6 +173,124 @@ El autor cargó `impominerales-siacam.csv` en la aplicación local con la versi�
 - El perfilador **propone** interpretaciones y advertencias; no decide. La próxima fase incorporará un asistente que **consultará al usuario** cuando sean ambiguos el significado de una variable, los marcadores de ausencia o las necesidades del análisis (por ejemplo: "¿`PPRO` es un código o una cantidad?", "¿los `NA` de `ORIGEN` son datos faltantes o un código de país?").
 - **Tratamiento no destructivo:** las decisiones confirmadas se aplicarán después, al ejecutar el análisis con Pandas, sobre una copia en memoria. **Nunca se eliminan ni modifican automáticamente datos originales sin autorización.** Hoy no se aplica ningún tratamiento: los `NA` se informan y se conservan.
 
+## 6d. Fase 3A — Varias fuentes por análisis
+
+**Decisión.** DataDecision AI debe admitir varios datasets tabulares en un mismo análisis, sin especializarse en ningún dominio. En el MVP se permiten **hasta tres archivos** CSV/XLSX, cargados juntos o de a uno.
+
+**Qué se implementó.**
+
+- La pantalla de carga acepta varios archivos (selección múltiple o arrastre). Cada archivo es una **fuente** independiente con su nombre, filas, columnas, completitud, posibles `NA` e interpretaciones, y puede **quitarse o reemplazarse** sin afectar a las demás. Si un reemplazo falla, se conserva el archivo anterior.
+- **Sin lógica nueva en el backend:** cada archivo se perfila con el mismo `POST /api/datasets/profile` (o con la vista previa local en la demo pública).
+- **Controles de memoria:** máximo 3 archivos, 25 MB por archivo, 60 MB entre todos, **perfilado secuencial** (un archivo por vez, en el navegador y en el backend), rechazo del mismo archivo repetido. Nada se persiste.
+- **Catálogo estructurado** (`lib/datasetCatalog.ts`): resume el esquema de cada fuente (alias A/B/C, filas, columnas, formato, interpretación, faltantes, posibles `NA`) y agrega **pistas**: columnas con el mismo nombre normalizado y fuentes con la misma estructura. **No incluye valores reales** (ni ejemplos ni filas), en línea con la política de minimización de datos. Es la entrada prevista para la futura IA 1.
+- **Proyecto con varias fuentes:** `CreateProjectInput.datasetIds` y `Project.datasets` son opcionales; con una sola fuente todo funciona como antes.
+- **Asistente DEMO honesto:** avisa que recibió otras fuentes y que la propuesta usa solo la principal; la propuesta lo registra como limitación.
+- **Workspace:** la sección de datos permite ver el perfil de cada fuente por separado.
+- **No se une, concatena ni transforma ningún archivo.**
+
+**Por qué así.** Separar *cargar y describir* de *combinar* evita el error más costoso al trabajar con varias tablas: unir por una clave que no es única y multiplicar registros sin advertirlo. Primero el sistema muestra qué hay; la combinación se propondrá después, con validaciones y aprobación.
+
+### Preparación para la futura IA 1 (documentado, no implementado)
+
+| Operación que podrá proponer IA 1 | Ejemplo | Validaciones previas obligatorias |
+|-----------------------------------|---------|-----------------------------------|
+| Analizar una fuente individualmente | Evolución mensual en `importaciones.csv` | Las de la Fase 2 (tipos, marcadores) confirmadas por el usuario |
+| Comparar fuentes independientes | Indicadores de 2024 frente a 2025, cada uno calculado por separado | Que las métricas sean comparables (mismas unidades y definiciones) |
+| Concatenar tablas compatibles | Apilar `ventas_2024.csv` y `ventas_2025.csv` | Mismas columnas y tipos; columna que identifique el origen; duplicados entre fuentes |
+| Relacionar tablas mediante claves confirmadas | Unir importaciones con un maestro de países por `PAIS` | Clave confirmada por el usuario; unicidad de la clave en la tabla maestra; granularidad de cada tabla; cardinalidad (1:1, 1:N, N:M); conteo de filas antes y después para detectar multiplicación de registros; claves sin correspondencia |
+
+Ninguna operación se ejecuta sin un **plan aprobado por el usuario**. Las validaciones las hace Pandas, no la IA, y el resultado se aplica sobre copias en memoria: los archivos originales no se modifican.
+
+### Limitaciones de la Fase 3A
+
+- El asistente DEMO y los resultados usan **solo la fuente principal**; las demás se describen pero no se analizan.
+- Las columnas compartidas se detectan **por nombre**: columnas equivalentes con nombres distintos (`PAIS` y `COD_PAIS`) no se sugieren, y columnas con el mismo nombre pueden no ser relacionables.
+- Al recargar la página se pierden las fuentes (estado en memoria, igual que antes).
+- El endpoint HTTP `POST /api/projects` con `datasetIds` está documentado en el contrato, pero el backend de proyectos todavía no existe.
+- La pantalla de carga es más compleja; se verificó en navegador a 1280 px y en un panel angosto de 384 px, no en dispositivos reales.
+
+## 6e. Auditoría de privacidad y flujo de datos antes de OpenAI
+
+**Por qué ahora.** Integrar un modelo de lenguaje externo cambia el riesgo: por primera vez, información derivada de los datos podría salir del equipo. Antes de hacerlo se auditó qué datos existen, dónde quedan y quién los recibe, sobre el código real y con comprobaciones ejecutadas (no solo lectura).
+
+**Resultado principal.** El flujo actual cumple lo que promete en lo esencial: la demo pública no hace **ninguna** solicitud de red con los archivos ni guarda nada en el navegador, y el perfilado local envía exactamente un archivo por solicitud al backend propio, sin telemetría. Se encontraron, en cambio, debilidades del backend que conviene corregir antes de usar archivos reales grandes:
+
+- El servidor recibe la solicitud completa (y la escribe en un archivo temporal) antes de aplicar el límite de 25 MB.
+- Un CSV adversario de 25 MB puede consumir ≈ 400 MB y bloquear el servidor ≈ 38 s, porque los límites de filas y columnas se comprueban después de leerlo y Pandas corre en el bucle de eventos.
+- CORS impide leer respuestas desde otros sitios, pero no impide que el backend procese sus solicitudes.
+
+También se corrigieron dos afirmaciones imprecisas de [SEGURIDAD.md](SEGURIDAD.md) ("no se guarda" y el momento del corte de 25 MB).
+
+**Aprendizaje.** "No encontré llamadas a OpenAI" no prueba que algo sea seguro: hay que observar el tráfico real, el almacenamiento y el comportamiento ante entradas adversarias. Y la confidencialidad no depende solo de las filas: nombres de archivo y de columnas, preguntas y estadísticas agregadas también revelan información. Por eso la integración con OpenAI se diseñó como **denegada por defecto**, con contenido armado por el backend desde una lista blanca y autorización explícita por cada envío.
+
+Detalle de hallazgos, clasificación y correcciones propuestas: [SEGURIDAD.md](SEGURIDAD.md), sección 6.
+
+## 6f. Endurecimiento mínimo de la carga
+
+**Problema.** La auditoría (6e) mostró que el backend aceptaba solicitudes de cualquier tamaño antes de rechazarlas, que un CSV de 25 MB bien construido podía ocupar ≈ 400 MB y bloquear el servidor ≈ 38 s, que cualquier sitio abierto en el navegador podía hacer procesar archivos al backend local, y que las fuentes quitadas seguían en memoria.
+
+**Solución y fundamento.**
+
+- **Controlar antes de leer.** Un *middleware* ASGI valida el origen y el tamaño declarado sin tocar el cuerpo, y cuenta los bytes reales para no depender de un encabezado que puede faltar o mentir. Es la forma más barata de rechazar: no se gasta disco ni memoria en algo que se va a descartar.
+- **Limitar por celdas, no solo por megabytes.** El costo en memoria de Pandas depende de la cantidad de celdas, no del peso del archivo: 25 MB pueden ser 0,8 M celdas (SIACAM) o 12 M. Por eso se cuentan filas y columnas antes de crear el DataFrame, de forma incremental.
+- **No confiar en lo declarado por un ZIP.** Un XLSX es un ZIP; sus tamaños declarados pueden falsearse. Se descomprime contando bytes reales, con tope.
+- **No bloquear el servidor.** Pandas es síncrono: se ejecuta en un hilo, y como máximo dos perfilados a la vez. No se agregaron colas ni infraestructura.
+- **Liberar al quitar.** Lo que el usuario quita deja de existir también en la memoria del proveedor DEMO.
+
+**Resultado.** El caso adversario pasa de 409 MB y 37,8 s a un rechazo en 0,6 s; un dataset tipo SIACAM sigue tardando ≈ 2,1 s; el servidor responde a otras solicitudes mientras perfila. **El riesgo de agotamiento de recursos queda mitigado, no eliminado**: dentro de los límites, un archivo puede tardar ≈ 8 s y usar ≈ 180 MB.
+
+**Aprendizaje.** La seguridad proporcional consiste en elegir pocos controles baratos que cortan los peores casos medidos, y dejar escrito qué queda afuera y por qué.
+
+## 6g. Cierre de la Fase 3A: dos datasets reales, decisiones de alcance y principio central
+
+### Qué se validó y cómo
+
+| Tipo de evidencia | Contenido |
+|-------------------|-----------|
+| **Implementado** | Hasta 3 fuentes por análisis; catálogo de esquemas sin valores; endurecimiento B4, B5, B6 y F7 |
+| **Probado automáticamente** | 52 pruebas de backend y 66 de frontend, lint, typecheck y build (PRUEBAS, sección 14) |
+| **Verificado manualmente por el autor** | `impominerales-siacam.csv` (102.254 × 8, 12 posibles `NA`) e `indicadores-provinciales.csv` (15.874 × 14, 45 posibles `NA`, Windows-1252) cargados juntos, cada uno con su propio perfil; quitar y volver a agregar; sin columnas coincidentes; sin uniones (PRUEBAS, sección 13) |
+| **Defectos observados** | El asistente DEMO no reconoció el segundo objetivo ni la instrucción de mantener separados los análisis, y listó `PPRO` como numérica sin advertir su ambigüedad. Incidencia intermitente de CORS con causa no confirmada |
+| **Limitaciones aceptadas** | Asistente simulado por reglas; sin autenticación; mitigación (no eliminación) del agotamiento de recursos; archivo temporal transitorio |
+| **Funcionalidades futuras** | IA real (Fase 3B) con frontera de datos, análisis sobre varias fuentes con validación de claves, cálculos y gráficos reales |
+
+### Decisión sobre el asistente DEMO
+
+No se agregan reglas nuevas: el asistente es una **simulación provisional** y su limitación está identificada. Agregar reglas para este caso aumentaría la complejidad sin acercarse a la comprensión real que requiere el problema. Los requisitos para la IA real son:
+
+- Reconocer **todos** los objetivos solicitados en un mismo mensaje.
+- Comprender cuándo varias fuentes deben analizarse **de forma independiente**.
+- Distinguir entre **comparar, concatenar, relacionar y analizar por separado**.
+- **Preguntar** cuando falte información o haya ambigüedad.
+- **No** tratar automáticamente todo campo numérico como variable cuantitativa (por ejemplo, `PPRO`).
+- **No inventar** estadísticas ni conclusiones.
+- Proponer **planes de análisis** que el usuario confirme antes de ejecutarlos.
+
+### Decisión académica sobre escalabilidad
+
+| Límite inicial | Valor |
+|----------------|-------|
+| Datasets por análisis | 3 |
+| Tamaño por archivo | 25 MB |
+| Tamaño combinado | 60 MB |
+| Celdas por archivo para el perfilado | 5.000.000 (además de 250.000 filas y 250 columnas) |
+| Motor de procesamiento | Python y Pandas, en el equipo o servidor propio |
+
+**Justificación.** Estos límites permiten controlar recursos, realizar pruebas reproducibles, mantener una complejidad razonable y terminar el proyecto dentro del alcance académico. La arquitectura separa la carga y administración de fuentes, el perfilado, el procesamiento estadístico y la interfaz; esa separación **facilita** futuras ampliaciones, pero **no garantiza escalabilidad ilimitada**. Ampliar las capacidades requeriría nuevas pruebas de rendimiento, memoria y concurrencia y, según el volumen, otras estrategias de procesamiento. **El límite de tres fuentes es una decisión de alcance y de seguridad operativa del MVP, no una incapacidad conceptual** para trabajar con más datasets.
+
+### Principio arquitectónico central
+
+**DataDecision AI separa el procesamiento estadístico de la inteligencia artificial.**
+
+- **Python y Pandas** realizan los cálculos y el procesamiento verificable.
+- **La futura IA** interpreta objetivos, formula preguntas y propone planes de análisis.
+- **El usuario** confirma las decisiones relevantes.
+- Las operaciones se ejecutarán mediante **mecanismos estructurados y validados** (un catálogo cerrado de operaciones), no mediante la ejecución arbitraria de código generado por IA.
+- Los **archivos originales no se modifican** automáticamente.
+- La transmisión a servicios externos debe estar restringida por **minimización de datos y autorización explícita**.
+
+> La política de transmisión hacia OpenAI es un **requisito de arquitectura pendiente de implementación y verificación**, no una capacidad terminada.
+
 ## 7. Demo pública en Cloudflare Pages (commit `1fe248a`)
 
 - Configuración documentada en [DEPLOYMENT.md](DEPLOYMENT.md): carpeta `frontend`, `npm run build`, salida `dist`, `VITE_DEMO_MODE=true`.
@@ -223,6 +345,9 @@ El motivo es de confianza: una organización no debería subir datos sensibles a
 | Puerto 5173 ocupado por Docker/WSL; Vite usó 5174 y CORS lo rechazaba. | Variable de entorno `CORS_ORIGINS` temporal, sin cambiar código. | La configuración externa al código permite adaptar cada entorno de forma segura. |
 | Backend y navegador contaban distinto `NA`, `null` o `-`; un 100 % de completitud podía ocultarlos. | Política única: solo la celda vacía es faltante; los marcadores se informan como sospechosos; prueba que compara ambas listas. | Las métricas de calidad necesitan un criterio explícito y compartido. |
 | Columnas numéricas como años o códigos podían sumarse como cantidades. | Tipo semántico con confianza y motivo, separado del formato. | El tipo técnico no dice qué significa un dato; inferirlo exige mostrar la duda. |
+| Analizar varias tablas puede multiplicar registros si se unen por una clave no única. | Fase 3A: cargar y describir cada fuente por separado; ninguna unión sin validación de claves, granularidad y cardinalidad, y sin aprobación. | Con varias fuentes, el riesgo principal está en la combinación, no en la lectura. |
+| La documentación afirmaba que los archivos "no se guardan" y que el corte de 25 MB era inmediato. | La auditoría mostró el archivo temporal de Starlette y el corte posterior; se corrigió la documentación y se propusieron controles. | Las afirmaciones de seguridad deben verificarse ejecutando, no solo leyendo el código propio. |
+| El costo de memoria de Pandas no depende del peso del archivo sino de la cantidad de celdas. | Límite de celdas verificado antes de crear el DataFrame (CSV incremental, XLSX por flujo). | Medir el peor caso cambia qué conviene limitar. |
 | Integrar todo el backend de una vez era difícil de verificar. | Opción independiente `VITE_BACKEND_PROFILING`. | Integrar de a una pieza permite probar cada cambio. |
 
 ## 11. Funcionalidades implementadas y pendientes
@@ -234,6 +359,8 @@ El motivo es de confianza: una organización no debería subir datos sensibles a
 - Vista previa local de CSV sin enviar el archivo por la red.
 - Perfilado real de CSV y XLSX con FastAPI + Pandas (`POST /api/datasets/profile`), sin guardar el archivo.
 - Política explícita de faltantes y marcadores sospechosos, coherente entre backend y navegador.
+- Hasta tres fuentes por análisis, perfiladas por separado, con catálogo estructurado de esquemas (sin uniones), validado por el autor con dos datasets reales.
+- Endurecimiento de la carga: tamaño, origen, límites de celdas, XLSX, perfilado en hilo y concurrencia limitada.
 - Interpretación semántica estimada de columnas con confianza y motivo, validada por el autor con SIACAM (con la limitación observada en `PPRO`).
 - Integración opcional de la pantalla de carga con ese perfilado.
 - Asistente DEMO con propuesta versionada, viabilidad y aprobación obligatoria.
@@ -251,6 +378,7 @@ El motivo es de confianza: una organización no debería subir datos sensibles a
 - Despliegue del backend (la demo pública del frontend ya está publicada).
 - Implementación y pruebas de la política de minimización de datos y de la autorización explícita.
 - Asistente que consulte al usuario ante variables, marcadores de ausencia o necesidades de análisis ambiguos, y aplicación no destructiva de sus decisiones en Pandas (próxima fase).
+- Propuestas de IA 1 que usen varias fuentes (comparar, concatenar, relacionar) con validación de claves, granularidad y cardinalidad antes de ejecutarlas.
 - Controles de seguridad empresarial (ver [SEGURIDAD.md](SEGURIDAD.md)).
 
 La hoja de ruta completa está en [NEXT_STEPS.md](NEXT_STEPS.md).

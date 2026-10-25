@@ -9,6 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.core.config import get_settings
+from app.core.upload_guard import UploadGuardMiddleware
+from app.services.dataset_profiler import MAX_FILE_BYTES
+
+# Margen para el encabezado y los separadores de multipart sobre el límite del archivo.
+MULTIPART_OVERHEAD_BYTES = 1024 * 1024
+UPLOAD_PATHS = ("/api/datasets/profile",)
 
 
 def create_app() -> FastAPI:
@@ -19,6 +25,16 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=settings.app_version,
         description="API de DataDecision AI: datasets, asistente de requisitos, análisis e informes.",
+    )
+
+    # Control de origen y tamaño de las cargas, antes de leer el cuerpo.
+    # Se agrega antes que CORS para quedar "adentro": sus errores llevan los
+    # encabezados CORS y el frontend autorizado puede mostrarlos.
+    app.add_middleware(
+        UploadGuardMiddleware,
+        paths=UPLOAD_PATHS,
+        max_body_bytes=MAX_FILE_BYTES + MULTIPART_OVERHEAD_BYTES,
+        allowed_origins=settings.cors_origins,
     )
 
     # CORS para que el frontend de Vite (localhost:5173) pueda llamar a la API en desarrollo.

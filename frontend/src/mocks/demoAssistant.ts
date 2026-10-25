@@ -284,9 +284,25 @@ export function replyAfterApproval(dataset: Dataset): ScriptedReply {
 // Construcción de la propuesta
 // ---------------------------------------------------------------------------
 
+/**
+ * Aviso para análisis con varias fuentes: el guion DEMO trabaja solo con la
+ * principal y no combina archivos (eso requerirá un plan validado).
+ */
+export function buildMultiSourceNote(primary: Dataset, others: Dataset[]): string | null {
+  if (others.length === 0) return null
+  const names = others.map((d) => `«${d.fileName}»`).join(', ')
+  return (
+    `También recibí ${others.length === 1 ? 'otra fuente' : `${others.length} fuentes más`}: ${names}. ` +
+    `En esta versión DEMO la propuesta usa solo «${primary.fileName}». Comparar, concatenar o relacionar fuentes ` +
+    'requerirá un plan validado en una próxima fase; no se unió ni modificó ningún archivo.'
+  )
+}
+
 interface ProposalInput {
   projectId: string
   dataset: Dataset
+  /** Otras fuentes del análisis (no se usan en la propuesta DEMO). */
+  otherSources?: Dataset[]
   profile: DatasetProfile
   intent: DemoIntent
   objectiveText: string
@@ -438,6 +454,10 @@ export function buildProposal(input: ProposalInput): AnalysisProposal {
     projectId: input.projectId,
     version: input.version,
     ...base,
+    limitations: [
+      ...base.limitations,
+      ...[buildMultiSourceNote(input.dataset, input.otherSources ?? [])].filter((note): note is string => note !== null),
+    ],
     objective: input.objectiveText
       ? `${base.objective} (Pedido original: «${input.objectiveText.trim()}»)`
       : base.objective,

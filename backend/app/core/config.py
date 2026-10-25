@@ -14,10 +14,17 @@ class Settings(BaseSettings):
     app_version: str = "0.1.0"
     environment: str = "development"
 
+    # Orígenes del frontend local autorizados (CORS y carga de archivos).
     # Lista separada por comas en el .env, por ejemplo:
     # CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+    # 5174 se incluye porque Vite lo usa cuando 5173 está ocupado.
     cors_origins: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5174",
+        ]
     )
 
     # Configuración futura (todavía no se usa).

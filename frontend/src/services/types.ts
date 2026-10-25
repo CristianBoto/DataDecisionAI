@@ -35,6 +35,12 @@ export interface DataDecisionService {
   /** Solo disponible en modo DEMO: carga el dataset ficticio de ejemplo. */
   loadDemoDataset(): Promise<Dataset>
   getDatasetProfile(datasetId: string): Promise<DatasetProfile>
+  /**
+   * Libera un dataset que el usuario quitó o reemplazó (y su perfil) de la
+   * memoria del proveedor, sin afectar a otras fuentes. Si un proyecto ya
+   * creado lo usa, se conserva para no romper ese proyecto.
+   */
+  discardDataset(datasetId: string): void
 
   // Proyectos
   createProject(input: CreateProjectInput): Promise<Project>

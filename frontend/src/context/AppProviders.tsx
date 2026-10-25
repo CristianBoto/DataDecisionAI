@@ -2,10 +2,11 @@ import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import type { DataDecisionService } from '@/services'
 import { service as defaultService } from '@/services'
 import type { Dataset, DatasetProfile } from '@/types/domain'
+import { MAX_SOURCES } from '@/lib/datasetCatalog'
 import { ServiceContext } from './serviceContext'
 import { AnalysisSessionContext, type AnalysisSessionState } from './sessionContext'
 
-const EMPTY_SESSION: AnalysisSessionState = { dataset: null, profile: null, projectId: null }
+const EMPTY_SESSION: AnalysisSessionState = { sources: [], projectId: null }
 
 interface AppProvidersProps {
   children: ReactNode
@@ -15,9 +16,21 @@ interface AppProvidersProps {
 export function AppProviders({ children, service = defaultService }: AppProvidersProps) {
   const [session, setSession] = useState<AnalysisSessionState>(EMPTY_SESSION)
 
-  const setDataset = useCallback((dataset: Dataset, profile: DatasetProfile) => {
-    // Un dataset nuevo implica empezar un proyecto nuevo.
-    setSession({ dataset, profile, projectId: null })
+  // Cambiar las fuentes implica empezar un proyecto nuevo.
+  const addSource = useCallback((dataset: Dataset, profile: DatasetProfile) => {
+    setSession((current) => ({
+      sources: [...current.sources, { dataset, profile }].slice(0, MAX_SOURCES),
+      projectId: null,
+    }))
+  }, [])
+  const replaceSource = useCallback((datasetId: string, dataset: Dataset, profile: DatasetProfile) => {
+    setSession((current) => ({
+      sources: current.sources.map((s) => (s.dataset.id === datasetId ? { dataset, profile } : s)),
+      projectId: null,
+    }))
+  }, [])
+  const removeSource = useCallback((datasetId: string) => {
+    setSession((current) => ({ sources: current.sources.filter((s) => s.dataset.id !== datasetId), projectId: null }))
   }, [])
   const setProjectId = useCallback((projectId: string) => {
     setSession((current) => ({ ...current, projectId }))
@@ -25,8 +38,17 @@ export function AppProviders({ children, service = defaultService }: AppProvider
   const reset = useCallback(() => setSession(EMPTY_SESSION), [])
 
   const value = useMemo(
-    () => ({ ...session, setDataset, setProjectId, reset }),
-    [session, setDataset, setProjectId, reset],
+    () => ({
+      ...session,
+      dataset: session.sources[0]?.dataset ?? null,
+      profile: session.sources[0]?.profile ?? null,
+      addSource,
+      replaceSource,
+      removeSource,
+      setProjectId,
+      reset,
+    }),
+    [session, addSource, replaceSource, removeSource, setProjectId, reset],
   )
 
   return (

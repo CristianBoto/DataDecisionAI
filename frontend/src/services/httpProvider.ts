@@ -45,6 +45,10 @@ export function createHttpService(baseUrl: string): DataDecisionService {
       )
     },
 
+    discardDataset() {
+      // El backend no guarda datasets en esta versión: no hay nada que liberar.
+    },
+
     getDatasetProfile: (datasetId) =>
       http.json<DatasetProfile>(`/api/datasets/${id(datasetId)}/profile`),
 

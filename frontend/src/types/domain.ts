@@ -113,8 +113,12 @@ export type ProjectStatus =
 export interface Project {
   id: string
   name: string
+  /** Fuente principal (compatibilidad con proyectos de una sola fuente). */
   datasetId: string
   dataset: Dataset
+  /** Todas las fuentes del análisis, en orden; la primera es la principal. Máximo 3. */
+  datasetIds?: string[]
+  datasets?: Dataset[]
   status: ProjectStatus
   createdAt: string
   updatedAt: string
@@ -124,7 +128,10 @@ export interface Project {
 
 export interface CreateProjectInput {
   name: string
+  /** Fuente principal. */
   datasetId: string
+  /** Opcional: todas las fuentes (incluida la principal). Las fuentes no se unen ni se transforman. */
+  datasetIds?: string[]
 }
 
 // ---------------------------------------------------------------------------
