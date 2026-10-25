@@ -436,3 +436,145 @@ Evidencia aportada por el autor en la aplicación local; no reproducida por el a
 | Demo pública sin API de IA | `createDefaultAIGateway()` devuelve `null` sin backend; prueba automática; build pública sin `api.openai.com` |
 | Sin llamadas reales a OpenAI | Búsqueda en `backend/app` y `frontend/src`: ningún SDK, importación ni URL de OpenAI; `requirements.txt` sin `openai` |
 | Claves fuera del frontend y de Git | Ninguna variable `VITE_*` con claves; `.env` y `.env.local` excluidos; `/api/ai/status` no devuelve la clave |
+
+
+## 16. Revisión obligatoria de datos y privacidad (✅ verificada, 25/10/2026)
+
+Cambios incluidos en el commit de cierre del recorrido (validados además por el autor, sección 20). Datos **sintéticos**.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **83 de 83** (79 anteriores + 4 sobre los campos de revisión) |
+| Frontend (`npm test`) | **89 de 89** en 11 archivos (80 anteriores, 3 de ellas adaptadas al nuevo paso, + 9 en `test/reviewFlow.test.tsx`) |
+| Lint, typecheck y build pública | Sin errores |
+
+**Pruebas adaptadas (no debilitadas).** Tres pruebas del recorrido anterior (carga → asistente) ahora completan la revisión con un ayudante compartido (`test/reviewHelpers.ts`); una prueba de campos del contexto incluye `user_corrected` y `missing_markers`.
+
+### Qué cubren las pruebas nuevas
+
+| Requisito | Prueba |
+|-----------|--------|
+| No se llega a la conversación sin revisión | Sin fuentes: "Primero cargá tus datos"; con fuentes y sin confirmar: "Primero revisá tus datos" con enlace a la revisión |
+| Revisión completa | Sin objetivo no se confirma ni se crea el proyecto |
+| Las correcciones se conservan | Formato, significado y decisión sobre `NA` aparecen en el contexto (`user_corrected: true`) y siguen disponibles en el asistente; el objetivo llega precargado al editor |
+| Elegir y renombrar actualiza el contexto | Columna oculta y renombrada en el JSON y en lo que se enviaría a validar; sin nombre de archivo ni valores |
+| Editar después de confirmar | Vuelve a exigir la confirmación |
+| Archivos originales intactos | El perfil es idéntico antes y después de corregir; los `001` y los `NA` siguen en las filas |
+| Una, dos o tres fuentes | Una tabla por fuente (A, B, C), contexto con las tres y proyecto con todas |
+| Demo pública sin OpenAI | Sin cliente de IA y sin ninguna solicitud de red en todo el recorrido |
+| Backend | Acepta `integer`/`decimal`, `user_corrected` y `missing_markers`; rechaza valores de marcadores, decisiones inexistentes y formatos técnicos de Pandas |
+
+**Incidencia de prueba resuelta.** Una prueba falló de forma consistente al ejecutarse junto con otras: las navegaciones de React Router se aplican como *transiciones* y, llamadas fuera de `act()`, la URL cambiaba antes de que se renderizara la pantalla. Se envolvieron en `act()`; luego 3 ejecuciones seguidas sin fallas. En la aplicación real la protección funcionaba (verificado con la prueba aislada).
+
+**Verificación en el navegador (asistente).** Build pública: carga de dos CSV, paso a la revisión, corrección de una columna; el resumen y la tabla reflejaron el cambio y **no hubo solicitudes de red**.
+
+
+## 17. Corrección de navegación del recorrido (✅ verificada, 25/10/2026)
+
+Cambios incluidos en el commit de cierre del recorrido (validados además por el autor, sección 20). **Problema detectado por el autor** en la validación manual: desde el asistente no había forma clara de volver a la revisión y el encabezado no era navegable.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Frontend (`npm test`) | **96 de 96** en 12 archivos (89 anteriores + 7 en `test/wizardNavigation.test.tsx`) |
+| Backend (`python -m pytest`) | **83 de 83** (sin cambios en el backend) |
+| Lint, typecheck y build pública | Sin errores |
+
+| Requisito | Prueba |
+|-----------|--------|
+| Requisitos de cada paso | `stepAccess`: sin fuentes solo "Cargar"; con fuentes, "Revisar"; con revisión confirmada, todos |
+| Estados visuales y accesibilidad | Paso activo con `aria-current="step"`; bloqueados sin enlace, con `aria-disabled` y motivo; un paso completado se abre con **Enter** desde el teclado |
+| Navegación hacia atrás | Asistente → «Volver a revisar datos» → «Volver a cargar datos» |
+| Preservación del estado | Se conservan la corrección de significado, la columna no compartida, el objetivo, las dos fuentes y el mensaje de la conversación; al continuar sin cambios no se crea otro proyecto |
+| Invalidación | Una modificación quita el aviso de "ya confirmada", bloquea "Conversar" en el encabezado y exige confirmar (se crea un nuevo proyecto) |
+| Bloqueo hacia adelante por URL | Sin datos: revisar, conversar y confirmar bloqueados; con revisión invalidada: conversar y confirmar muestran "Primero revisá tus datos" |
+| Autorizaciones de IA | Salir de la revisión con una solicitud validada la cancela en el backend; al volver hay que validar de nuevo; nunca se llama a autorizar |
+
+
+## 18. Una sola pantalla de configuración y autorización por mensaje (✅ verificada, 25/10/2026)
+
+Cambios incluidos en el commit de cierre del recorrido (validados además por el autor, sección 20). **Mejora detectada por el autor** en las pruebas manuales: controles de privacidad duplicados entre el paso 2 y el asistente.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Frontend (`npm test`) | **101 de 101** en 13 archivos (96 anteriores, 3 adaptadas, + 5 en `test/assistantCompact.test.tsx`) |
+| Backend (`python -m pytest`) | **84 de 84** (83 anteriores, 1 adaptada, + 1 sobre autorización por mensaje) |
+| Lint, typecheck y build pública | Sin errores |
+
+| Requisito | Prueba |
+|-----------|--------|
+| El paso 2 conserva la configuración completa | Formato, significado, `NA`, columnas, nombres, objetivo y JSON siguen allí; al volver desde el asistente las decisiones están aplicadas |
+| El paso 3 solo muestra un resumen | Tarjeta "Datos revisados" con fuentes y columnas autorizadas por fuente; **ningún** selector, casilla, campo de objetivo ni JSON de configuración; un único control para volver |
+| Navegación sin pérdida | «Modificar configuración de datos» lleva al paso 2 con las decisiones y el objetivo |
+| Invalidación | Modificar una variable exige confirmar de nuevo |
+| Autorización individual | El contenido incluye el mensaje y solo las columnas autorizadas; cambiar el mensaje cancela lo validado; autorizar es de un solo uso; en el backend la huella de un mensaje no sirve para otro (409) |
+| Asistente DEMO | «Enviar» sigue respondiendo y no valida ni autoriza nada |
+| Demo pública | Sin sección de envío a la IA y sin solicitudes de red |
+
+**Verificación en el navegador (asistente).** Build pública: el paso 3 muestra la tarjeta compacta con "2 de 3 columnas autorizadas" para la fuente con una columna excluida y el chat debajo, sin formularios duplicados.
+
+
+## 19. Ajustes de experiencia en el paso 3 (✅ verificada, 25/10/2026)
+
+Cambios incluidos en el commit de cierre del recorrido (validados además por el autor, sección 20). **Problemas detectados por el autor** en las pruebas manuales:
+- los botones de validación solo eran visibles con el zoom de Chrome al 67 %;
+- el rechazo con la IA deshabilitada era confuso;
+- el objetivo aparecía precargado en el chat sin explicación.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Frontend (`npm test`) | **108 de 108** en 13 archivos (101 anteriores, 2 adaptadas, + 7 nuevas en `test/assistantCompact.test.tsx`) |
+| Backend (`python -m pytest`) | **84 de 84** (sin cambios en el backend) |
+| Lint, typecheck y build pública | Sin errores |
+
+| Requisito | Prueba |
+|-----------|--------|
+| Aviso de prueba con IA deshabilitada | Antes de validar se informa que no habrá respuesta de IA ni envío de datos |
+| Estado final tras el rechazo 403 | «Prueba finalizada. La IA está deshabilitada y no se envió ningún dato.»; sin botones para repetir ese envío; `authorize` se llama una sola vez |
+| Rechazo 501 | Estado final propio, sin envío |
+| Se conserva todo | La conversación previa, el mensaje escrito, el objetivo y el resumen de la revisión siguen intactos |
+| Otro mensaje, otro envío | Al cambiar el texto desaparece el resultado y vuelve «Validar este mensaje» |
+| Panel compacto | Las acciones están antes del JSON; el JSON tiene altura máxima, scroll y foco de teclado; el panel está fuera de la tarjeta de altura fija |
+| Objetivo inicial | Llega precargado con la indicación «Tu objetivo está preparado…», no se envía solo, se puede editar y la indicación desaparece al enviar o al borrar el texto |
+| Lenguaje simple | La ayuda del objetivo aclara que no hace falta explicar cálculos, gráficos ni reportes |
+| DEMO frente a OpenAI | Bajo el chat: «"Enviar" conversa con el asistente DEMO… No usa OpenAI.»; «Enviar» no valida ni autoriza nada |
+
+**Verificación en el navegador.** Frontend con perfilado por backend y backend local propio, con la IA deshabilitada:
+
+| Tamaño | Resultado |
+|--------|-----------|
+| 1366×768 (100 %) | El JSON queda limitado a 192 px y los botones se alcanzan con el scroll normal de la página |
+| 1093×614 (equivale a 1366×768 al 125 %) | El panel completo (título, aviso, botón y JSON) entra en pantalla, sin scroll horizontal |
+| 375×812 (móvil) | Botones antes del JSON, sin desbordes ni scroll horizontal |
+
+El flujo real validar → autorizar contra el backend terminó en «Prueba finalizada…», con el mensaje del chat conservado. El zoom se simuló con el tamaño de ventana equivalente; no se probó con el zoom de Chrome.
+
+
+## 20. Validación manual del autor: recorrido de revisión y conversación (25/10/2026)
+
+**Evidencia aportada por el autor**, en su navegador local y con capturas. No la ejecutaron las herramientas de desarrollo; se registra tal como la informó.
+
+| Comprobación del autor | Resultado informado |
+|------------------------|---------------------|
+| Revisión de datos de dos fuentes | Correcta |
+| Corrección del significado estadístico de una variable | Correcta |
+| Selección de columnas autorizadas para la IA | Correcta |
+| Objetivo del análisis escrito en el paso 2 | Correcto |
+| Objetivo precargado en el chat del paso 3, sin enviarse | Correcto |
+| Resumen compacto de las dos fuentes revisadas | Correcto |
+| Sin formulario duplicado dentro del asistente | Correcto |
+| Diferenciación entre el asistente DEMO y la autorización para OpenAI | Correcta |
+| Estado final de una prueba con `AI_ENABLED=false`, informando que no se transmitieron datos | Correcto |
+| Navegación y presentación general | Correctas según las capturas aportadas |
+
+**Cómo se distingue de las otras verificaciones:**
+
+| Tipo | Quién | Dónde |
+|------|-------|-------|
+| Evidencia visual manual | Autor | Esta sección |
+| Pruebas automatizadas (Vitest, pytest), lint, typecheck y build | Herramientas de desarrollo | Secciones 16 a 19 y el cierre de abajo |
+| Verificación en el navegador y de red (tamaños de pantalla, flujo validar → autorizar contra el backend local, demo pública sin solicitudes) | Herramientas de desarrollo | Secciones 18 y 19 |
+
+La evidencia del autor no incluye inspección de red. Que no se transmitieron datos a OpenAI lo respaldan:
+- el estado final que muestra la interfaz;
+- el rechazo del backend (`AI_ENABLED=false` → 403);
+- `NotImplementedProvider`, que no hace llamadas externas (sección 15).

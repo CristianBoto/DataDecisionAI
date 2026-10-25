@@ -16,11 +16,20 @@ import type { DatasetCatalog } from './datasetCatalog'
 
 export type SizeRange = '<1k' | '1k-10k' | '10k-100k' | '100k-1M' | '>1M'
 
+/** Formato que el usuario puede confirmar o corregir (más preciso que "numérico"). */
+export type FormatChoice = 'integer' | 'decimal' | 'text' | 'date' | 'boolean'
+/** Qué hacer más adelante con los marcadores como "NA". Se registra; no se aplica ahora. */
+export type MarkerDecision = 'pending' | 'treat_as_missing' | 'valid_value'
+
 export interface AIColumnContext {
   name: string
-  format: ColumnType
+  format: ColumnType | FormatChoice
   semantic_type: SemanticType | null
   semantic_confidence: SemanticConfidence | null
+  /** true si el usuario corrigió el formato o el significado sugeridos. */
+  user_corrected: boolean
+  /** Solo si la columna tiene posibles marcadores de ausencia (sin enviar sus valores). */
+  missing_markers: MarkerDecision | null
 }
 
 export interface AISourceContext {
@@ -32,13 +41,26 @@ export interface AISourceContext {
 export interface AIContextPayload {
   version: 1
   objective: string
+  /** Mensaje concreto del chat que se autorizaría enviar (solo en la autorización por mensaje). */
+  message?: string
   sources: AISourceContext[]
 }
 
+/**
+ * Decisiones del usuario sobre una columna. Se guardan en el estado del
+ * análisis para las fases siguientes; NO modifican el archivo ni el perfil.
+ */
 export interface ColumnReview {
+  /** Compartir la columna con la IA. */
   include: boolean
-  /** Nombre que se enviaría (por defecto, el original). */
+  /** Nombre que se enviaría a la IA (por defecto, el original). No cambia los datos. */
   name: string
+  /** Corrección del formato; null = se acepta lo detectado por Pandas. */
+  format?: FormatChoice | null
+  /** Corrección del significado estadístico; null = se acepta la sugerencia. */
+  semanticType?: SemanticType | null
+  /** Decisión sobre marcadores como "NA"; null si la columna no los tiene. */
+  markers?: MarkerDecision | null
 }
 
 export interface SourceReview {
@@ -73,23 +95,40 @@ export function defaultReview(catalog: DatasetCatalog): SourceReview[] {
   return catalog.sources.map((source) => ({
     alias: source.alias,
     includeSize: false,
-    columns: Object.fromEntries(source.columns.map((c) => [c.name, { include: true, name: c.name }])),
+    columns: Object.fromEntries(
+      source.columns.map((c) => [
+        c.name,
+        { include: true, name: c.name, format: null, semanticType: null, markers: c.suspectedMissing > 0 ? 'pending' : null },
+      ]),
+    ),
   }))
 }
 
-export function buildAIContext(catalog: DatasetCatalog, objective: string, review: SourceReview[]): AIContextPayload {
+export function buildAIContext(
+  catalog: DatasetCatalog,
+  objective: string,
+  review: SourceReview[],
+  message?: string,
+): AIContextPayload {
   const sources = catalog.sources
     .slice(0, 3)
     .map((source): AISourceContext | null => {
       const sourceReview = review.find((r) => r.alias === source.alias)
       const columns = source.columns
         .filter((c) => sourceReview?.columns[c.name]?.include ?? false)
-        .map((c) => ({
-          name: (sourceReview?.columns[c.name]?.name ?? c.name).trim() || c.name,
-          format: c.format,
-          semantic_type: c.semanticType ?? null,
-          semantic_confidence: c.semanticConfidence ?? null,
-        }))
+        .map((c) => {
+          const decision = sourceReview?.columns[c.name]
+          const corrected = Boolean(decision?.format || decision?.semanticType)
+          return {
+            name: (decision?.name ?? c.name).trim() || c.name,
+            format: decision?.format ?? c.format,
+            semantic_type: decision?.semanticType ?? c.semanticType ?? null,
+            // Si el usuario corrigió, la confianza automática ya no aplica.
+            semantic_confidence: corrected ? null : (c.semanticConfidence ?? null),
+            user_corrected: corrected,
+            missing_markers: decision?.markers ?? null,
+          }
+        })
       if (columns.length === 0) return null // una fuente sin columnas autorizadas no se menciona
       return {
         alias: source.alias as AISourceContext['alias'],
@@ -99,7 +138,8 @@ export function buildAIContext(catalog: DatasetCatalog, objective: string, revie
     })
     .filter((s): s is AISourceContext => s !== null)
 
-  return { version: 1, objective: objective.trim(), sources }
+  const text = message?.trim()
+  return text ? { version: 1, objective: objective.trim(), message: text, sources } : { version: 1, objective: objective.trim(), sources }
 }
 
 /** Motivo por el que todavía no se puede preparar la solicitud, o null. */

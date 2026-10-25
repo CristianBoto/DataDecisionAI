@@ -1,4 +1,5 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
@@ -29,6 +30,29 @@ const sizes: Record<Size, string> = {
   lg: 'h-12 gap-2 rounded-xl px-6 text-base',
 }
 
+const base =
+  'inline-flex shrink-0 items-center justify-center font-medium whitespace-nowrap transition-colors duration-150'
+
+/** Enlace con aspecto de botón: un único elemento enfocable (sin anidar <a> y <button>). */
+export function LinkButton({
+  to,
+  variant = 'outline',
+  size = 'md',
+  icon,
+  children,
+  className,
+}: { to: string; variant?: Variant; size?: Size; icon?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <Link
+      to={to}
+      className={cn(base, variants[variant], sizes[size], 'focus-visible:ring-4 focus-visible:ring-blue-200 focus-visible:outline-none', className)}
+    >
+      {icon}
+      {children}
+    </Link>
+  )
+}
+
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { variant = 'primary', size = 'md', loading = false, icon, iconRight, className, children, disabled, type = 'button', ...props },
   ref,
@@ -40,7 +64,8 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={cn(
-        'inline-flex shrink-0 items-center justify-center font-medium whitespace-nowrap transition-colors duration-150 disabled:cursor-not-allowed',
+        base,
+        'disabled:cursor-not-allowed',
         variants[variant],
         sizes[size],
         className,

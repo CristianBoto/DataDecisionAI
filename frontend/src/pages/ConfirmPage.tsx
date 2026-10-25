@@ -44,7 +44,7 @@ function Empty({ children }: { children: ReactNode }) {
 export function ConfirmPage() {
   const navigate = useNavigate()
   const service = useService()
-  const { projectId } = useAnalysisSession()
+  const { projectId, sources, reviewConfirmed } = useAnalysisSession()
   const proposal = useAsync(
     () => (projectId ? service.getCurrentProposal(projectId) : Promise.resolve(null)),
     [projectId, service],
@@ -52,6 +52,21 @@ export function ConfirmPage() {
   const [acknowledged, setAcknowledged] = useState(false)
   const [approving, setApproving] = useState(false)
   const [approveError, setApproveError] = useState<string | null>(null)
+
+  if (sources.length > 0 && (!reviewConfirmed || !projectId)) {
+    return (
+      <EmptyState
+        icon={<ClipboardCheck className="size-6" />}
+        title="Primero revisá tus datos"
+        description="Para confirmar un plan hace falta la revisión de datos confirmada y una conversación con el asistente."
+        action={
+          <Link to="/analisis/revisar">
+            <Button>Ir a la revisión</Button>
+          </Link>
+        }
+      />
+    )
+  }
 
   if (!projectId) {
     return (
@@ -106,7 +121,7 @@ export function ConfirmPage() {
       <PageHeader
         eyebrow={
           <>
-            <Badge tone="blue">Paso 3 de 3</Badge>
+            <Badge tone="blue">Paso 4 de 4</Badge>
             <FeasibilityBadge value={p.feasibility} />
             {p.isDemo && <DemoBadge label="Propuesta simulada" />}
           </>

@@ -1,5 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { completeReview, goToReview } from './reviewHelpers'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { AppProviders } from '@/context/AppProviders'
 import { buildDatasetCatalog, MAX_SOURCES, normalizeColumnName } from '@/lib/datasetCatalog'
@@ -121,7 +122,8 @@ describe('pantalla de carga con varias fuentes', () => {
     await user.click(screen.getByRole('button', { name: 'Ver detalle de ventas_2024.csv' }))
     expect(screen.getByText(/Detalle de «ventas_2024.csv»/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /Continuar con el asistente/ }))
+    await goToReview(user)
+    await completeReview(user)
     await waitFor(() => expect(router.state.location.pathname).toBe('/analisis/asistente'))
     const input = createProject.mock.calls[0][0]
     expect(input.datasetIds).toHaveLength(2)

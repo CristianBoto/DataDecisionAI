@@ -6,6 +6,7 @@ import { AssistantPage } from '@/pages/AssistantPage'
 import { ConfirmPage } from '@/pages/ConfirmPage'
 import { HomePage } from '@/pages/HomePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { ReviewPage } from '@/pages/ReviewPage'
 import { UploadPage } from '@/pages/UploadPage'
 import { DatasetPage } from '@/pages/workspace/DatasetPage'
 import { ExportPage } from '@/pages/workspace/ExportPage'
@@ -22,6 +23,8 @@ export const routes: RouteObject[] = [
     element: <WizardLayout />,
     children: [
       { path: 'cargar', element: <UploadPage /> },
+      // Paso obligatorio: sin revisión confirmada no se llega al asistente.
+      { path: 'revisar', element: <ReviewPage /> },
       { path: 'asistente', element: <AssistantPage /> },
       { path: 'confirmar', element: <ConfirmPage /> },
     ],

@@ -22,6 +22,11 @@ Autor: Damián Boto. Documento de base para la exposición final.
 | 6f. Endurecimiento mínimo de la carga (B4, B5, B6, F7) | Commit de cierre de la Fase 3A; ver sección 6f |
 | 6g. Cierre de la Fase 3A con dos datasets reales | Validación manual del autor; ver sección 6g |
 | 6h. Fase 3B.1: frontera de privacidad y autorización para la IA (sin llamadas externas) | Commit de cierre de la Fase 3B.1; validación manual del autor con dos datasets reales |
+| 6i. Reorganización del recorrido: revisión obligatoria de datos y privacidad antes del asistente | Incluido en el commit de cierre del recorrido de revisión y conversación; ver sección 6i |
+| 6j. Corrección de navegación del recorrido (volver atrás y bloqueo hacia adelante) | Incluido en el commit de cierre del recorrido de revisión y conversación; problema detectado en la validación manual del autor |
+| 6k. Una sola pantalla de configuración de datos y autorización por mensaje | Incluido en el commit de cierre del recorrido de revisión y conversación; mejora detectada en las pruebas manuales del autor |
+| 6l. Ajustes de experiencia en el paso 3: panel de autorización, IA deshabilitada y objetivo inicial | Incluido en el commit de cierre del recorrido de revisión y conversación; problemas detectados en las pruebas manuales del autor |
+| 6m. Cierre del recorrido: validación manual del autor | Incluido en el commit de cierre del recorrido de revisión y conversación; evidencia aportada por el autor |
 | 7. Decisión de minimización de datos para la IA | Registrada en [SEGURIDAD.md](SEGURIDAD.md) y [ARCHITECTURE.md](ARCHITECTURE.md); implementación pendiente |
 
 ---
@@ -318,6 +323,89 @@ No se agregan reglas nuevas: el asistente es una **simulación provisional** y s
 - **Validación en el backend** (lista blanca Pydantic): las comprobaciones de React se pueden saltear modificando el navegador; el backend es la última puerta antes de cualquier proveedor y no acepta nada fuera de lo permitido.
 
 **Limitaciones.** El sistema valida estructura, no significado: si el usuario escribe un dato confidencial en el objetivo o deja una columna sensible, se compartiría al autorizarlo. La autorización no es autenticación. Faltan el registro de envíos y la validación del plan devuelto por la IA (Fase 3B.2).
+
+## 6i. Revisión obligatoria antes de conversar
+
+**Decisión.** Antes de conectar OpenAI se reorganizó el recorrido: **cargar → revisar datos y privacidad → conversar → confirmar el plan**. La revisión pasó de ser un panel opcional dentro del asistente a un paso obligatorio previo.
+
+**Qué se hizo (reutilizando lo existente).**
+
+- Pantalla `/analisis/revisar` con una tabla por fuente (perfilador y catálogo existentes): formato y significado detectados, con la opción de aceptarlos o corregirlos; decisión sobre marcadores como `NA` (decidir más adelante, tratar como faltante, valor válido), sin eliminarlos.
+- El componente de privacidad de la Fase 3B.1 (`AIContextReview`) se integró en modo controlado: columnas a compartir, nombres solo para la IA, objetivo y JSON exacto.
+- Las decisiones se guardan en el estado del análisis (`session.review`) para las fases siguientes; el contexto para la IA las incluye (`user_corrected`, `missing_markers`) y la lista blanca del backend se amplió solo con valores cerrados.
+- El asistente exige la revisión confirmada y recibe el objetivo precargado, sin enviarlo solo.
+- Cambiar las fuentes o editar la revisión después de confirmarla invalida la confirmación.
+
+**Fundamento académico.**
+
+- **Calidad de datos:** un análisis es tan bueno como la interpretación de sus variables. Confirmar que `codigo` es un identificador y no una cantidad, o que un `NA` es un valor válido, evita sumar códigos o perder registros antes de calcular.
+- **Supervisión humana:** el perfilador propone y la persona decide. Las sugerencias se aceptan por defecto y solo se corrige lo necesario, para que la revisión no se convierta en un formulario interminable.
+- **Minimización de información:** en el mismo paso se elige qué columnas conocerá la IA y con qué nombre, y se ve el JSON exacto. La revisión ocurre **antes** de cualquier conversación, no después.
+- **Separación entre formato y significado:** el formato físico (entero, decimal, texto, fecha, sí/no) y el significado estadístico (cuantitativa, categórica, código, temporal, texto libre) se revisan por separado. Un código puede tener formato numérico y significado de identificador.
+
+**Límites deliberados.** No es un editor de datasets: no hay conversiones, limpieza ni uniones; las decisiones se registran pero todavía no se aplican. El formato elegido no se verifica contra los valores (por ejemplo, marcar "entero" una columna con decimales) y en la demo pública, sin backend, no hay interpretación semántica automática para corregir.
+
+## 6j. Corrección de navegación del recorrido
+
+**Problema detectado (validación manual del autor).** Con la revisión obligatoria, al entrar al asistente no había una forma clara de volver a `/analisis/revisar`, y los pasos del encabezado no eran navegables. Para corregir una interpretación, un `NA` o una columna autorizada, el usuario quedaba atrapado.
+
+**Corrección.**
+
+- **Requisitos en un solo lugar** (`lib/wizardSteps.ts`): cargar siempre; revisar, con al menos una fuente; conversar y confirmar, con la revisión confirmada y el proyecto creado. Lo usan el encabezado y las pantallas.
+- **Encabezado navegable:** los pasos alcanzados son enlaces (accesibles con teclado, con foco visible); el activo se marca con `aria-current="step"`; los bloqueados no son enlaces, muestran un candado y explican el motivo (también para lectores de pantalla).
+- **Botones claros:** «Volver a revisar datos» en el asistente y «Volver a cargar datos» en la revisión, como enlaces con aspecto de botón (un único elemento enfocable).
+- **Se conserva todo al retroceder:** fuentes, perfiles, decisiones, objetivo, columnas autorizadas y la conversación. Si la revisión no cambió, «Continuar con el asistente» vuelve a la **misma** conversación sin crear otro proyecto.
+- **Invalidación:** modificar una revisión confirmada exige confirmarla de nuevo (se avisa que la conversación empezará otra vez con las decisiones actualizadas).
+- **Bloqueo hacia adelante también por URL:** conversar y confirmar muestran "Primero revisá tus datos" si falta la confirmación.
+- **Autorizaciones de IA:** salir de la revisión cancela en el backend cualquier solicitud preparada; volver atrás no crea ni reutiliza permisos.
+
+**Aprendizaje.** Un paso obligatorio sin retorno claro convierte un control de calidad en un obstáculo. La supervisión humana necesita poder corregir en cualquier momento, sin perder trabajo y sin saltear los controles.
+
+## 6k. Una sola pantalla de configuración y autorización por mensaje
+
+**Problema (pruebas manuales del autor).** Había dos lugares para revisar la información: el paso 2 completo y, en el asistente, otro panel grande con las mismas columnas, campos editables y JSON. Era redundante y podía confundir sobre dónde modificar los datos.
+
+**Decisión.** La configuración de datos se edita **solo en el paso 2**. El paso 3 se concentra en conversar y muestra una tarjeta compacta: "Datos revisados", cantidad de fuentes, columnas autorizadas por fuente, el aviso de que nada se envía automáticamente a OpenAI y un único botón **«Modificar configuración de datos»** (reemplaza a «Volver a revisar datos», para no duplicar controles).
+
+**Dos acciones distintas:**
+
+| Acción | Qué autoriza | Qué NO autoriza |
+|--------|--------------|-----------------|
+| **A. Confirmar la revisión** (paso 2) | Continuar al asistente con esa configuración de datos | Ninguna transmisión a OpenAI |
+| **B. Autorizar un envío** (paso 3, por mensaje) | Enviar **ese** mensaje con **ese** contexto, una vez, durante 5 minutos | Mensajes siguientes, ni el mismo mensaje modificado |
+
+Para la acción B se preparó una experiencia compacta bajo el chat (solo con backend): el contenido exacto (contexto revisado + texto del mensaje), «Validar este mensaje», «Autorizar este envío» y «Cancelar». El botón «Enviar» sigue respondiendo con el asistente DEMO local y no valida ni autoriza nada por su cuenta.
+
+**Cómo se evitó duplicar lógica.** El flujo validar → autorizar → invalidar se extrajo a un único hook (`useAIAuthorization`), que usan la pantalla de revisión y la autorización por mensaje. El hook cancela lo validado cuando cambia el contenido (contexto o mensaje) y al salir de la pantalla. El backend agregó a la lista blanca un campo `message` opcional; cada mensaje tiene su propia huella.
+
+**Garantías que se mantienen.** El asistente no tiene selectores: no puede cambiar en silencio formatos ni significados confirmados. Modificar la configuración invalida la confirmación. La demo pública no tiene cliente de IA.
+
+## 6l. Ajustes de experiencia en el paso 3
+
+Tres problemas detectados por el autor en las pruebas manuales del paso 3 «Conversar».
+
+**1. Botones de validación fuera de la vista.** Al abrir «Enviar a la IA real (requiere autorización)», el JSON empujaba «Validar este mensaje» hacia abajo; hubo que bajar el zoom de Chrome al 67 % para encontrarlo.
+- *Causa:* el panel estaba dentro de la tarjeta del chat, que tiene altura fija y recorta su contenido (`overflow-hidden`); al abrirse, achicaba los mensajes y los botones quedaban fuera de la tarjeta.
+- *Corrección:* el panel pasó debajo de la tarjeta del chat. Dentro del panel, las acciones van antes del JSON, y el JSON tiene una altura máxima (`min(12rem, 30vh)`) con scroll propio y foco de teclado. En la pantalla de revisión, el JSON también se limitó a `min(24rem, 50vh)`.
+
+**2. Autorización con la IA deshabilitada.** Validar → autorizar → rechazo del backend (`AI_ENABLED=false`) y el formulario volvía al inicio, como si hubiera que repetir el proceso.
+- *Corrección:* con la IA deshabilitada, el panel avisa antes de empezar: *Prueba de autorización … no habrá respuesta de IA ni se enviará ningún dato.* Tras el rechazo, queda un estado final: **«Prueba finalizada. La IA está deshabilitada y no se envió ningún dato.»** Sin botones para repetir ese mismo envío, y aclarando que la conversación y las decisiones se conservan. El rechazo 501 (conexión no implementada) tiene su propio estado final.
+- *Garantías que no cambiaron:* la autorización sigue siendo de un solo uso (se descarta antes de la llamada) y el backend sigue rechazando. El resultado queda asociado al contenido exacto: un mensaje distinto es otro envío y vuelve a pedir validación. No se borra la conversación, el objetivo, las fuentes ni las decisiones.
+
+**3. Objetivo precargado sin explicación.** El objetivo escrito en «¿Qué necesitás analizar?» aparecía en el chat sin aviso.
+- *Corrección:* se mantiene la precarga, sin envío automático, con la indicación **«Tu objetivo está preparado. Enviá para comenzar la conversación.»** También se aclara que se puede editar. La indicación desaparece al enviar el primer mensaje o si se borra el texto.
+- En la revisión, la ayuda pide escribir el objetivo con palabras propias, sin explicar cálculos, gráficos ni reportes.
+- Se diferencian los dos envíos: bajo el chat, *«Enviar» conversa con el asistente DEMO, en este equipo. No usa OpenAI*. La autorización para OpenAI tiene su propio panel, con otro color e ícono.
+
+**Sin cambios:** no se implementó OpenAI ni se agregó infraestructura, y el backend no cambió.
+
+## 6m. Cierre del recorrido: validación manual del autor
+
+El autor probó en su navegador local el recorrido completo de las secciones 6i a 6l y aportó capturas. El detalle está en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 20.
+
+Esa evidencia visual es **del autor** y se registra aparte de las pruebas automatizadas y de las verificaciones en el navegador hechas con las herramientas de desarrollo (secciones 16 a 19).
+
+Con esto se cierra la etapa de experiencia de usuario previa a la IA real. La siguiente es la Fase 3B.2 (OpenAI con límites de consumo y respuestas estructuradas); después vienen el motor de cálculo con Pandas, los tableros y los reportes PDF.
 
 ## 7. Demo pública en Cloudflare Pages (commit `1fe248a`)
 

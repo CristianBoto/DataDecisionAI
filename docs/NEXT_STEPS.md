@@ -98,6 +98,15 @@ Cada tarea indica qué construir, dónde y cómo saber que está terminada. Conv
 
 - **Listo cuando**: con SIACAM e indicadores provinciales, ante el pedido "evolución de importaciones por año y, por separado, indicadores provinciales, sin relacionarlos", la IA reconoce ambos objetivos, confirma que no relacionará las fuentes, pregunta por `PPRO` y propone dos planes independientes para aprobar.
 
+## Recorrido con revisión obligatoria (implementado y validado por el autor)
+
+Cargar → **revisar datos y privacidad** → conversar → confirmar. Las decisiones de la revisión (formato, significado, marcadores, columnas y nombres para la IA, objetivo) quedan en el estado del análisis. Para 3B.2 esto implica:
+
+- La IA recibirá en el contexto las correcciones del usuario (`user_corrected`) y su decisión sobre marcadores (`missing_markers`).
+- **Cada mensaje** a la IA real necesitará su propia autorización; la confirmación de la revisión no es un permiso permanente.
+- El punto de conexión en la interfaz ya existe: el panel «Enviar a la IA real» (`MessageAuthorization`) y el hook `useAIAuthorization`. Hoy terminan en «Prueba finalizada…» (403/501); en 3B.2 ese estado final se reemplaza por la respuesta estructurada y validada de la IA, sin cambiar la autorización de un solo uso.
+- Pendiente para la fase de cálculo: aplicar las decisiones en Pandas sobre copias (por ejemplo, tratar `NA` como faltante solo donde el usuario lo indicó).
+
 ## Fase 3B.2 — Integración real con OpenAI (planificada, alcance reducido)
 
 **Objetivo:** que la IA comprenda objetivos sobre una o varias fuentes, haga preguntas aclaratorias y proponga planes para aprobar. Pandas sigue calculando; la IA no ejecuta nada.

@@ -74,10 +74,43 @@ Red interna de la organización
 
 ## Flujo funcional
 
-1. **Carga** (`/analisis/cargar`): validación preliminar (extensión, tamaño). Para CSV se calcula una vista previa local real; para Excel se espera al backend.
-2. **Asistente** (`/analisis/asistente`): IA 1 conversa, detecta información faltante y genera una **propuesta** versionada.
-3. **Confirmación** (`/analisis/confirmar`): resumen de objetivo, indicadores, gráficos, datos, limitaciones y viabilidad. Solo con aprobación explícita se crea el **plan aprobado** y se ejecuta el análisis.
-4. **Workspace** (`/proyectos/:id`): indicadores, gráficos, hallazgos con nivel de evidencia, panel del asistente, dataset y exportación.
+1. **Carga** (`/analisis/cargar`): hasta 3 fuentes; validación preliminar y perfil (local o con Pandas).
+2. **Revisión obligatoria** (`/analisis/revisar`): por fuente, formato y significado (aceptar o corregir), decisión sobre marcadores como `NA`, columnas a compartir con la IA y su nombre, objetivo del análisis y JSON exacto. Al confirmar se crea el proyecto.
+3. **Asistente** (`/analisis/asistente`): solo con la revisión confirmada; el objetivo llega precargado (no se envía solo). Con `AI_ENABLED=false` se usa el asistente DEMO, sin transmisión a OpenAI.
+4. **Confirmación** (`/analisis/confirmar`): resumen de objetivo, indicadores, gráficos, datos, limitaciones y viabilidad. Solo con aprobación explícita se crea el **plan aprobado** y se ejecuta el análisis.
+5. **Workspace** (`/proyectos/:id`): indicadores, gráficos, hallazgos con nivel de evidencia, panel del asistente, dataset y exportación.
+
+### Revisión obligatoria de datos y privacidad
+
+```
+sources[] (perfiles, intactos) ──► ReviewPage
+                                    ├─ ColumnInterpretationReview (por fuente): formato · significado · marcadores
+                                    └─ AIContextReview (controlado): columnas a compartir · nombre para la IA · objetivo · JSON
+                                          │
+                     session.review = { objective, sources: SourceReview[] }   ← decisiones del usuario
+                     session.reviewConfirmed = true  (cualquier cambio posterior lo vuelve a false)
+                                          │
+                                 createProject ──► asistente (exige reviewConfirmed)
+```
+
+- Las decisiones (`ColumnReview.format`, `semanticType`, `markers`, `include`, `name`) se guardan aparte: **no** modifican archivos, perfiles ni valores. Las aplicará Pandas, sobre copias, en las fases siguientes.
+- El contexto para la IA incorpora las correcciones (`user_corrected`, `missing_markers`) y sigue pasando por la lista blanca del backend; confirmar la revisión **no** autoriza envíos: cada mensaje a la IA real requerirá su propia autorización.
+- Cambiar las fuentes o editar la revisión después de confirmarla invalida la confirmación y el proyecto preparado.
+- **Una sola pantalla de configuración:** los datos se configuran solo en el paso 2. El asistente muestra `DataReviewSummary` (estado, fuentes y columnas autorizadas) y `MessageAuthorization` (autorización de cada mensaje, solo con backend). Ambos flujos de autorización usan `hooks/useAIAuthorization.ts`.
+
+| Acción | Qué autoriza | Qué NO autoriza |
+|--------|--------------|-----------------|
+| **A. Confirmar la revisión** (paso 2) | Continuar al asistente con esa configuración de datos | Ninguna transmisión a OpenAI |
+| **B. Autorizar un envío** (paso 3, por mensaje) | Enviar **ese** mensaje con **ese** contexto, una vez, durante 5 minutos | Mensajes siguientes, ni el mismo mensaje modificado |
+
+- **Navegación:** `lib/wizardSteps.ts` define los requisitos de cada paso. El encabezado enlaza solo los pasos alcanzados; volver atrás conserva todo el estado, y avanzar (también escribiendo la URL) exige los requisitos. Salir de la revisión cancela cualquier solicitud de IA preparada.
+
+**Fundamento académico.**
+
+- **Calidad de datos:** un análisis es tan bueno como la interpretación de sus variables. Confirmar que `codigo` es un identificador y no una cantidad, o que un `NA` es un valor válido, evita sumar códigos o perder registros antes de calcular.
+- **Supervisión humana:** el perfilador propone y la persona decide. Las sugerencias se aceptan por defecto y solo se corrige lo necesario, para que la revisión no se convierta en un formulario interminable.
+- **Minimización de información:** en el mismo paso se elige qué columnas conocerá la IA y con qué nombre, y se ve el JSON exacto. La revisión ocurre **antes** de cualquier conversación, no después.
+- **Separación entre formato y significado:** el formato físico (entero, decimal, texto, fecha, sí/no) y el significado estadístico (cuantitativa, categórica, código, temporal, texto libre) se revisan por separado. Un código puede tener formato numérico y significado de identificador.
 
 La regla central: **sin plan aprobado no hay resultados** (lo controlan el proveedor y el `WorkspaceLayout`).
 

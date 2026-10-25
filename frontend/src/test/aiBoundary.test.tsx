@@ -1,5 +1,6 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { completeReview, goToReview } from './reviewHelpers'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { AIContextReview } from '@/components/ai/AIContextReview'
 import { AppProviders } from '@/context/AppProviders'
@@ -44,7 +45,7 @@ describe('contexto mínimo para la IA', () => {
       sources: [{ alias: 'A', size_range: null, columns: expect.any(Array) }],
     })
     expect(payload.sources[0].columns.map((c) => Object.keys(c).sort())).toEqual(
-      Array(3).fill(['format', 'name', 'semantic_confidence', 'semantic_type']),
+      Array(3).fill(['format', 'missing_markers', 'name', 'semantic_confidence', 'semantic_type', 'user_corrected']),
     )
   })
 
@@ -145,9 +146,13 @@ describe('revisión y autorización', () => {
     expect(await screen.findByText(/Huella SHA-256/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Autorizar este envío' }))
-    expect(await screen.findByText(/No se envió nada/)).toBeInTheDocument()
+    expect(await screen.findByText('Prueba finalizada. La IA está deshabilitada y no se envió ningún dato.')).toBeInTheDocument()
     expect(gateway.authorize).toHaveBeenCalledWith('req1', 'a'.repeat(64))
-    // Uso único: para otro envío hay que volver a validar.
+    // Uso único y estado final: no se invita a repetir el mismo envío.
+    expect(screen.queryByRole('button', { name: 'Autorizar este envío' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Validar contenido' })).not.toBeInTheDocument()
+    // Un contenido distinto es otro envío: vuelve a requerir validación.
+    await user.type(screen.getByLabelText('Objetivo que se compartiría'), ' por región')
     expect(screen.getByRole('button', { name: 'Validar contenido' })).toBeInTheDocument()
   })
 
@@ -195,17 +200,18 @@ describe('flujo DEMO con la revisión de privacidad', () => {
       </AppProviders>,
     )
     await user.upload(screen.getByTestId('file-input'), files.clientes())
-    await user.click(await screen.findByRole('button', { name: /Continuar con el asistente/ }))
+    await goToReview(user)
+    await completeReview(user)
     await waitFor(() => expect(router.state.location.pathname).toBe('/analisis/asistente'))
 
     // Se espera el saludo (mientras carga, el editor está deshabilitado) y se usa una sugerencia.
     await user.click(await screen.findByRole('button', { name: 'Quiero un resumen general de mis datos' }))
     expect(await screen.findByText(/Entiendo tu objetivo/)).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Revisar qué se enviaría a la IA' }))
-    const panel = screen.getByRole('region', { name: 'Revisión de privacidad para la IA' })
-    expect(within(panel).getByLabelText('Objetivo que se compartiría')).toHaveValue('Quiero un resumen general de mis datos')
-    expect(within(panel).getByTestId('ai-payload-preview').textContent).not.toContain('ACME')
+    // En el asistente hay un resumen compacto; sin backend no hay autorización de envíos.
+    expect(screen.getByRole('region', { name: 'Resumen de la revisión de datos' })).toHaveTextContent('Datos revisados')
+    expect(screen.queryByText(/Enviar a la IA real/)).not.toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('ACME')
     expect(fetchSpy).not.toHaveBeenCalled()
     fetchSpy.mockRestore()
   })

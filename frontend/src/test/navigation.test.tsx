@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { completeReview, goToReview } from './reviewHelpers'
 import { createMemoryRouter, RouterProvider } from 'react-router-dom'
 import { AppProviders } from '@/context/AppProviders'
 import { routes } from '@/routes'
@@ -49,7 +50,8 @@ describe('navegación', () => {
     expect(screen.getByRole('columnheader', { name: /region/ })).toBeInTheDocument()
     expect(screen.getByText('Estimación local preliminar')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: /Continuar con el asistente/ }))
+    await goToReview(user)
+    await completeReview(user)
     await waitFor(() => expect(router.state.location.pathname).toBe('/analisis/asistente'))
     expect(await screen.findByText(/Revisé la vista previa de «ventas.csv»/)).toBeInTheDocument()
   })

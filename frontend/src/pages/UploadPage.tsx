@@ -48,14 +48,14 @@ export function UploadPage() {
   )
   const [activeKey, setActiveKey] = useState<string | null>(items[0]?.key ?? null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [projectName, setProjectName] = useState(session.dataset ? `Análisis de ${session.dataset.name}` : '')
+  const [projectName, setProjectName] = useState(
+    session.projectName || (session.dataset ? `Análisis de ${session.dataset.name}` : ''),
+  )
   const [nameTouched, setNameTouched] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [createError, setCreateError] = useState<string | null>(null)
 
   const usesBackendProfiling = service.profiling === 'backend'
   const uploading = items.some((i) => i.status === 'uploading')
-  const busy = uploading || creating
+  const busy = uploading
   const nameError = validateProjectName(projectName)
   const readyItems = items.filter((i) => i.status === 'ready')
   const hasErrors = items.some((i) => i.status === 'error')
@@ -82,7 +82,6 @@ export function UploadPage() {
 
   async function handleFiles(files: File[]) {
     setNotice(null)
-    setCreateError(null)
     const slots = MAX_SOURCES - items.length
     if (slots <= 0) {
       setNotice(`Un análisis admite hasta ${MAX_SOURCES} archivos. Quitá uno para agregar otro.`)
@@ -203,25 +202,13 @@ export function UploadPage() {
     setNameTouched(false)
   }
 
-  async function handleContinue(event: FormEvent) {
+  /** El proyecto se crea recién al confirmar la revisión obligatoria (paso 2). */
+  function handleContinue(event: FormEvent) {
     event.preventDefault()
     setNameTouched(true)
     if (!session.dataset || nameError || uploading) return
-    setCreating(true)
-    setCreateError(null)
-    try {
-      const project = await service.createProject({
-        name: projectName.trim(),
-        datasetId: session.dataset.id,
-        datasetIds: session.sources.map((s) => s.dataset.id),
-      })
-      session.setProjectId(project.id)
-      navigate('/analisis/asistente')
-    } catch (err) {
-      setCreateError(getErrorMessage(err))
-    } finally {
-      setCreating(false)
-    }
+    session.setProjectName(projectName.trim())
+    navigate('/analisis/revisar')
   }
 
   const showDemoSample = service.mode === 'demo' && !items.some((i) => i.isDemo)
@@ -229,7 +216,7 @@ export function UploadPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow={<Badge tone="blue">Paso 1 de 3</Badge>}
+        eyebrow={<Badge tone="blue">Paso 1 de 4</Badge>}
         title="Cargá tu dataset"
         description={`Subí hasta ${MAX_SOURCES} archivos CSV o Excel con datos en forma de tabla: una fila por registro y una columna por variable. Cada archivo se analiza por separado.`}
       />
@@ -380,15 +367,8 @@ export function UploadPage() {
                 {hasErrors && (
                   <p className="text-xs text-slate-500">Los archivos con error no se incluirán en el análisis.</p>
                 )}
-                {createError && <Alert tone="error">{createError}</Alert>}
-                <Button
-                  type="submit"
-                  className="w-full"
-                  loading={creating}
-                  disabled={uploading}
-                  iconRight={<ArrowRight className="size-4" />}
-                >
-                  Continuar con el asistente
+                <Button type="submit" className="w-full" disabled={uploading} iconRight={<ArrowRight className="size-4" />}>
+                  Continuar con la revisión
                 </Button>
                 <Button variant="ghost" className="w-full" icon={<RefreshCw className="size-4" />} disabled={busy} onClick={handleResetAll}>
                   Empezar de nuevo

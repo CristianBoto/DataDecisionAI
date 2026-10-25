@@ -15,9 +15,12 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-ValueFormat = Literal["numeric", "text", "date", "boolean", "unknown"]
+# "integer" y "decimal" solo aparecen cuando el usuario corrige el formato detectado.
+ValueFormat = Literal["numeric", "integer", "decimal", "text", "date", "boolean", "unknown"]
 SemanticType = Literal["quantitative", "categorical", "identifier", "temporal", "text", "unknown"]
 Confidence = Literal["high", "medium", "low"]
+# Decisión del usuario sobre marcadores como "NA" (se registra; no se aplica todavía).
+MarkerDecision = Literal["pending", "treat_as_missing", "valid_value"]
 # Tamaño aproximado, solo si el usuario lo incluye: nunca la cantidad exacta.
 SizeRange = Literal["<1k", "1k-10k", "10k-100k", "100k-1M", ">1M"]
 
@@ -36,6 +39,10 @@ class ColumnContext(_Strict):
     format: ValueFormat
     semantic_type: SemanticType | None = None
     semantic_confidence: Confidence | None = None
+    # El usuario corrigió el formato o el significado sugeridos.
+    user_corrected: bool = False
+    # Presente solo si la columna tiene posibles marcadores de ausencia; nunca sus valores.
+    missing_markers: MarkerDecision | None = None
 
     @field_validator("name")
     @classmethod
@@ -54,6 +61,8 @@ class SourceContext(_Strict):
 class AIContext(_Strict):
     version: Literal[1] = 1
     objective: str = Field(min_length=3, max_length=MAX_OBJECTIVE_CHARS)
+    # Mensaje del chat que se autoriza enviar (cada mensaje requiere su propia autorización).
+    message: str | None = Field(default=None, min_length=1, max_length=MAX_OBJECTIVE_CHARS)
     sources: list[SourceContext] = Field(min_length=1, max_length=MAX_SOURCES)
 
     @model_validator(mode="after")

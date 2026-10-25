@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Ban, ShieldCheck, X } from 'lucide-react'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
@@ -6,15 +6,25 @@ import { Button } from '@/components/ui/Button'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { buildAIContext, contextProblem, defaultReview, MAX_OBJECTIVE_CHARS, NEVER_SENT, type SourceReview } from '@/lib/aiContext'
 import { buildDatasetCatalog, type AnalysisSource } from '@/lib/datasetCatalog'
-import { getErrorMessage } from '@/services'
-import type { AIGatewayClient, AIStatus, PreparedAIRequest } from '@/services/aiGateway'
+import { useAIAuthorization } from '@/hooks/useAIAuthorization'
+import type { AIGatewayClient } from '@/services/aiGateway'
 
 interface AIContextReviewProps {
   sources: AnalysisSource[]
-  initialObjective: string
   /** null en la demo pública: no existe conexión alguna. */
   gateway: AIGatewayClient | null
-  onClose: () => void
+  onClose?: () => void
+  /** Modo no controlado (panel del asistente): valores iniciales. */
+  initialObjective?: string
+  initialReview?: SourceReview[]
+  /** Modo controlado (pantalla de revisión): el estado vive en la sesión del análisis. */
+  objective?: string
+  onObjectiveChange?: (objective: string) => void
+  review?: SourceReview[]
+  onReviewChange?: (review: SourceReview[]) => void
+  objectiveLabel?: string
+  /** Integrado en una página: sin botón de cerrar ni "Cancelar". */
+  embedded?: boolean
 }
 
 /**
@@ -22,32 +32,36 @@ interface AIContextReviewProps {
  * Nada se transmite automáticamente: el usuario edita el contenido, el backend
  * lo valida contra una lista blanca y solo después puede autorizar ESE envío.
  */
-export function AIContextReview({ sources, initialObjective, gateway, onClose }: AIContextReviewProps) {
+export function AIContextReview({
+  sources,
+  gateway,
+  onClose,
+  initialObjective = '',
+  initialReview,
+  objective: objectiveProp,
+  onObjectiveChange,
+  review: reviewProp,
+  onReviewChange,
+  objectiveLabel = 'Objetivo que se compartiría',
+  embedded = false,
+}: AIContextReviewProps) {
   const catalog = useMemo(() => buildDatasetCatalog(sources), [sources])
-  const [objective, setObjective] = useState(initialObjective)
-  const [review, setReview] = useState<SourceReview[]>(() => defaultReview(catalog))
-  const [status, setStatus] = useState<AIStatus | null>(null)
-  const [prepared, setPrepared] = useState<PreparedAIRequest | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [result, setResult] = useState<{ tone: 'info' | 'error'; text: string } | null>(null)
-
+  const [ownObjective, setOwnObjective] = useState(initialObjective)
+  const [ownReview, setOwnReview] = useState<SourceReview[]>(() => initialReview ?? defaultReview(catalog))
+  const objective = objectiveProp ?? ownObjective
+  const review = reviewProp ?? ownReview
+  const setObjective = (value: string) => (onObjectiveChange ? onObjectiveChange(value) : setOwnObjective(value))
+  const setReview = (update: (current: SourceReview[]) => SourceReview[]) => {
+    const next = update(review)
+    if (onReviewChange) onReviewChange(next)
+    else setOwnReview(next)
+  }
   const payload = useMemo(() => buildAIContext(catalog, objective, review), [catalog, objective, review])
   const problem = contextProblem(payload)
-
-  useEffect(() => {
-    if (!gateway) return
-    gateway.status().then(setStatus, () => setStatus(null))
-  }, [gateway])
-
-  /** Cualquier cambio invalida lo preparado: hay que volver a revisar. */
-  function invalidate() {
-    if (prepared && gateway) void gateway.cancel(prepared.request_id).catch(() => undefined)
-    setPrepared(null)
-    setResult(null)
-  }
+  // Cualquier cambio del contenido invalida lo validado (lo resuelve el hook).
+  const { status, prepared, busy, result, prepare, authorize, cancel } = useAIAuthorization(gateway, payload)
 
   function updateColumn(alias: string, column: string, changes: Partial<{ include: boolean; name: string }>) {
-    invalidate()
     setReview((current) =>
       current.map((r) =>
         r.alias === alias ? { ...r, columns: { ...r.columns, [column]: { ...r.columns[column], ...changes } } } : r,
@@ -56,36 +70,12 @@ export function AIContextReview({ sources, initialObjective, gateway, onClose }:
   }
 
   async function handlePrepare() {
-    if (!gateway || problem) return
-    setBusy(true)
-    setResult(null)
-    try {
-      setPrepared(await gateway.prepare(payload))
-    } catch (err) {
-      setResult({ tone: 'error', text: getErrorMessage(err) })
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function handleAuthorize() {
-    if (!gateway || !prepared) return
-    setBusy(true)
-    try {
-      await gateway.authorize(prepared.request_id, prepared.payload_sha256)
-      setResult({ tone: 'info', text: 'Envío autorizado y realizado.' })
-    } catch (err) {
-      // 403 (IA deshabilitada) o 501 (Fase 3B.2 pendiente): el backend explica que no se envió nada.
-      setResult({ tone: 'info', text: getErrorMessage(err) })
-    } finally {
-      setPrepared(null) // la autorización es de uso único
-      setBusy(false)
-    }
+    if (!problem) await prepare()
   }
 
   function handleCancel() {
-    invalidate()
-    onClose()
+    cancel()
+    onClose?.()
   }
 
   const shown = prepared?.payload ?? payload
@@ -97,9 +87,11 @@ export function AIContextReview({ sources, initialObjective, gateway, onClose }:
         title="Revisá qué se compartiría con la IA"
         description="Nada se envía automáticamente. Elegí qué columnas compartir, revisá el objetivo y mirá el contenido exacto antes de autorizar."
         actions={
-          <button type="button" onClick={handleCancel} aria-label="Cerrar revisión" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100">
-            <X className="size-4" aria-hidden />
-          </button>
+          !embedded && (
+            <button type="button" onClick={handleCancel} aria-label="Cerrar revisión" className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100">
+              <X className="size-4" aria-hidden />
+            </button>
+          )
         }
       />
       <div className="grid gap-6 p-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -119,20 +111,21 @@ export function AIContextReview({ sources, initialObjective, gateway, onClose }:
 
           <div>
             <label htmlFor="ai-objective" className="text-sm font-semibold text-slate-900">
-              Objetivo que se compartiría
+              {objectiveLabel}
             </label>
             <textarea
               id="ai-objective"
               value={objective}
               maxLength={MAX_OBJECTIVE_CHARS}
-              onChange={(e) => {
-                invalidate()
-                setObjective(e.target.value)
-              }}
+              onChange={(e) => setObjective(e.target.value)}
               rows={3}
+              placeholder="Ej.: Quiero saber qué productos se venden más en cada región"
               className="mt-1.5 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-100 focus:outline-none"
             />
-            <p className="mt-1 text-xs text-slate-400">Quitá nombres, cifras u otros datos que no quieras compartir.</p>
+            <p className="mt-1 text-xs text-slate-400">
+              Escribilo con tus palabras, una sola vez: no hace falta explicar cálculos, gráficos ni reportes. Quitá
+              nombres, cifras u otros datos que no quieras compartir.
+            </p>
           </div>
 
           {catalog.sources.map((source) => {
@@ -169,10 +162,9 @@ export function AIContextReview({ sources, initialObjective, gateway, onClose }:
                   <input
                     type="checkbox"
                     checked={sourceReview?.includeSize ?? false}
-                    onChange={(e) => {
-                      invalidate()
+                    onChange={(e) =>
                       setReview((current) => current.map((r) => (r.alias === source.alias ? { ...r, includeSize: e.target.checked } : r)))
-                    }}
+                    }
                   />
                   Compartir solo un rango de tamaño (por ejemplo, «10k-100k» filas)
                 </label>
@@ -196,7 +188,7 @@ export function AIContextReview({ sources, initialObjective, gateway, onClose }:
           <p className="text-sm font-semibold text-slate-900">
             {prepared ? 'Contenido validado por el backend' : 'Contenido exacto que se enviaría'}
           </p>
-          <pre data-testid="ai-payload-preview" className="scrollbar-thin max-h-96 overflow-auto rounded-xl bg-navy-950 p-3 text-[11px] leading-relaxed text-slate-100">
+          <pre data-testid="ai-payload-preview" tabIndex={0} aria-label="Contenido exacto en formato JSON" className="scrollbar-thin max-h-[min(24rem,50vh)] overflow-auto rounded-xl bg-navy-950 p-3 text-[11px] leading-relaxed text-slate-100">
             {JSON.stringify(shown, null, 2)}
           </pre>
           {prepared && (
@@ -207,18 +199,20 @@ export function AIContextReview({ sources, initialObjective, gateway, onClose }:
           {problem && <Alert tone="warning">{problem}</Alert>}
           {result && <Alert tone={result.tone}>{result.text}</Alert>}
           <div className="flex flex-wrap gap-2">
-            {!prepared ? (
+            {result?.final ? null : !prepared ? (
               <Button onClick={() => void handlePrepare()} disabled={!gateway || !!problem} loading={busy}>
                 Validar contenido
               </Button>
             ) : (
-              <Button onClick={() => void handleAuthorize()} loading={busy}>
+              <Button onClick={() => void authorize()} loading={busy}>
                 Autorizar este envío
               </Button>
             )}
-            <Button variant="ghost" onClick={handleCancel} disabled={busy}>
-              Cancelar
-            </Button>
+            {!embedded && (
+              <Button variant="ghost" onClick={handleCancel} disabled={busy}>
+                Cancelar
+              </Button>
+            )}
           </div>
         </div>
       </div>

@@ -144,9 +144,12 @@ def test_prepared_payload_is_exactly_the_whitelisted_content():
     client, _ = make_client()
     prepared = prepare(client, context(source("A"), source("B"))).json()
     payload = prepared["payload"]
-    assert set(payload) == {"version", "objective", "sources"}
+    assert set(payload) == {"version", "objective", "message", "sources"}
+    assert payload["message"] is None  # solo presente en la autorización de un mensaje
     assert set(payload["sources"][0]) == {"alias", "columns", "size_range"}
-    assert set(payload["sources"][0]["columns"][0]) == {"name", "format", "semantic_type", "semantic_confidence"}
+    assert set(payload["sources"][0]["columns"][0]) == {
+        "name", "format", "semantic_type", "semantic_confidence", "user_corrected", "missing_markers",
+    }
     assert prepared["payload_sha256"] == payload_hash(AIContext.model_validate(payload))
     assert prepared["ai_enabled"] is False and prepared["external_calls_implemented"] is False
 
@@ -249,3 +252,46 @@ def test_request_content_is_not_logged(caplog):
         authorize(client, prepared)
     logged = caplog.text
     assert "despidos" not in logged and "diagnostico_medico" not in logged
+
+
+# --- Decisiones de la revisión obligatoria ------------------------------------
+
+def test_user_review_decisions_are_accepted_without_values():
+    client, _ = make_client()
+    col = {
+        "name": "codigo", "format": "integer", "semantic_type": "identifier",
+        "semantic_confidence": None, "user_corrected": True, "missing_markers": "valid_value",
+    }
+    response = prepare(client, context(source("A", col, {"name": "monto", "format": "decimal"})))
+    assert response.status_code == 201
+    sent = response.json()["payload"]["sources"][0]["columns"]
+    assert sent[0]["user_corrected"] is True and sent[0]["missing_markers"] == "valid_value"
+    assert sent[1]["user_corrected"] is False and sent[1]["missing_markers"] is None
+
+
+@pytest.mark.parametrize("bad", [
+    {"missing_markers": ["NA", "N/A"]},   # valores de marcadores: no se aceptan
+    {"missing_markers": "borrar"},        # decisión inexistente
+    {"format": "float64"},                # formato técnico de Pandas
+])
+def test_review_fields_only_accept_closed_values(bad):
+    client, _ = make_client()
+    col = {"name": "codigo", "format": "text", **bad}
+    assert prepare(client, context(source("A", col))).status_code == 422
+
+
+def test_each_message_needs_its_own_authorization():
+    provider = FakeProvider()
+    client, _ = make_client(ai_enabled=True, provider=provider)
+    first = prepare(client, {**context(), "message": "¿Cómo evolucionó el CIF por año?"}).json()
+    second = prepare(client, {**context(), "message": "¿Y por país?"}).json()
+    assert first["payload_sha256"] != second["payload_sha256"]
+    # La autorización del primer mensaje no sirve para el segundo.
+    wrong = client.post(
+        f"/api/ai/requests/{second['request_id']}/authorize",
+        json={"payload_sha256": first["payload_sha256"], "confirm": True},
+        headers=ORIGIN,
+    )
+    assert wrong.status_code == 409
+    assert authorize(client, first).status_code == 200
+    assert provider.received == [first["payload"]]
