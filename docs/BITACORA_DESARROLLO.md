@@ -31,6 +31,7 @@ Autor: Damián Boto. Documento de base para la exposición final.
 | 6o. Error 404 al cargar datasets con `VITE_DEMO_MODE=false` | Cambios sin confirmar; error detectado por el autor en la primera prueba de integración de la Fase 3B.2 |
 | 6p. Primeras llamadas reales, plan aprobado en «Confirmar» y autorización por conversación | Cambios sin confirmar; problemas detectados por el autor en las primeras pruebas reales |
 | 6q. Fase 4A — Motor de análisis real con Python y Pandas | Cambios sin confirmar |
+| 6r. Fase 4B — Dashboard interactivo con resultados reales | Cambios sin confirmar |
 | 7. Decisión de minimización de datos para la IA | Registrada en [SEGURIDAD.md](SEGURIDAD.md) y [ARCHITECTURE.md](ARCHITECTURE.md); implementación pendiente |
 
 ---
@@ -550,6 +551,32 @@ Se comprobó en pruebas automáticas y en la aplicación.
 **Problemas encontrados.**
 - **Heredocs del shell:** volvieron a fallar con algunos contenidos. Se usaron scripts escritos como archivos.
 - **Tiempo de una prueba:** con la suite completa en paralelo, la prueba de punta a punta del plan aprobado superó el límite de 5 s de Vitest. Era un tiempo agotado, no un fallo de aserción. Se le dio un límite de 15 s.
+
+## 6r. Fase 4B — Dashboard interactivo con resultados reales (sin confirmar)
+
+**Objetivo.** Ver los resultados de Pandas como un dashboard (indicadores, gráficos, tablas, unidades y avisos), sin inventar números ni mostrar gráficos ficticios en el modo local.
+
+**Inspección.**
+- El proyecto ya usaba Recharts en `ChartCard`, con vista de gráfico o de tabla, tooltip, leyenda y una paleta validada.
+- Se reutilizó con extensiones mínimas, sin agregar otra librería:
+  - unidad en tooltips y tablas;
+  - títulos de ejes;
+  - gráfico de torta;
+  - tres colores más para series adicionales (los tres primeros no cambian);
+  - opción de dibujar sin animación.
+- El motor (Fase 4A) no se modificó.
+
+**Implementación.**
+- `lib/dashboard.ts`: funciones puras que transforman la respuesta del motor y eligen las visualizaciones.
+- `AnalysisResults.tsx`: ahora es el dashboard, con una sección por fuente.
+- `AnalysisExecution.tsx`: estado de carga y llevar la vista al dashboard al terminar.
+- Explicación técnica completa en [ARCHITECTURE.md](ARCHITECTURE.md), sección "Dashboard de resultados reales".
+
+**Problemas encontrados en la verificación del navegador.**
+- **Líneas sin dibujar:** las líneas quedaban detenidas al comienzo de la animación de Recharts (`stroke-dasharray` de 6 px). Los gráficos de resultados ahora se dibujan sin animación, así siempre se ven completos. Los de la demo no cambian.
+- **Sin desplazamiento automático:** el desplazamiento suave hacia el dashboard no se producía en el navegador integrado. Se usa desplazamiento inmediato, que además respeta a quien reduce las animaciones.
+- **Barra que tapaba el dashboard en móvil:** la barra "Propuesta confirmada" seguía fija abajo y tapaba parte del dashboard. Después de confirmar queda estática, y la ejecución y el dashboard aparecen debajo de ella.
+- **Gráfico pedido imposible:** cuando el plan pide un gráfico que no se puede construir, la operación conserva su visualización estándar y el aviso lo dice explícitamente. Así no hay un reemplazo silencioso ni se pierde el gráfico de esa operación.
 
 ## 7. Demo pública en Cloudflare Pages (commit `1fe248a`)
 

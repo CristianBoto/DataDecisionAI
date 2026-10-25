@@ -111,9 +111,10 @@ Cargar → **revisar datos y privacidad** → conversar → confirmar. Las decis
 
 Los planes aprobados se ejecutan con Pandas sobre los archivos reenviados al confirmar. Ver [ARCHITECTURE.md](ARCHITECTURE.md), sección "Motor de análisis con Pandas".
 
-**Siguiente (4B):**
-- gráficos dinámicos a partir de las tablas de resultados (ya incluyen dimensiones, medidas y los gráficos sugeridos por el plan);
-- informe PDF descargable;
+**Fase 4B (implementada):** dashboard con indicadores, gráficos de Recharts y tablas a partir de los resultados reales. Ver [ARCHITECTURE.md](ARCHITECTURE.md), sección "Dashboard de resultados reales".
+
+**Siguiente (4C):**
+- informe PDF descargable del dashboard (los gráficos de resultados ya se dibujan sin animación);
 - elección del período (mes o año) y operaciones pendientes del catálogo (desvío, ranking, correlación);
 - persistencia de planes aprobados y resultados.
 

@@ -140,19 +140,19 @@ describe('«Ejecutar análisis» (motor Pandas)', () => {
     expect(ai.authorize.mock.calls.length).toBe(iaCalls) // ejecutar no consulta a la IA
 
     const results = await screen.findByRole('region', { name: 'Resultados: Ventas por mes y sector' })
-    const monthly = within(results).getByRole('group', { name: /Serie temporal · Ventas totales por mes/ })
+    const monthly = within(results).getByRole('group', { name: /^Resultado: Serie temporal · Ventas totales por mes/ })
     expect(monthly).toHaveTextContent('2026-01')
     expect(monthly).toHaveTextContent('23.000 ARS')
     expect(monthly).toHaveTextContent('27.500 ARS')
     expect(monthly).toHaveTextContent('32.000 ARS')
     expect(monthly).toHaveTextContent('fecha (mes)')
-    const bySector = within(results).getByRole('group', { name: /Agrupación · Ventas totales por sector/ })
+    const bySector = within(results).getByRole('group', { name: /^Resultado: Agrupación · Ventas totales por sector/ })
     expect(bySector).toHaveTextContent('Tecnologia')
     expect(bySector).toHaveTextContent('54.000 ARS')
     expect(bySector).toHaveTextContent('28.500 ARS')
-    expect(within(results).getByRole('group', { name: /Suma · Total general/ })).toHaveTextContent('82.500 ARS')
+    expect(within(results).getByRole('group', { name: /^Resultado: Suma · Total general/ })).toHaveTextContent('82.500 ARS')
     // Operación incompatible: se informa, no se reemplaza.
-    const failed = within(results).getByRole('group', { name: /correlation|Correlación/ })
+    const failed = within(results).getByRole('group', { name: /^Resultado: .*(correlation|Correlación)/ })
     expect(failed).toHaveTextContent('No se pudo calcular: La operación «correlation» todavía no está disponible')
     expect(within(results).getByText('Parcial')).toBeInTheDocument()
     expect(screen.getByText('La IA no participó del cálculo ni recibió los datos.')).toBeInTheDocument()

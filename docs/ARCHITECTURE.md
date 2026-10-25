@@ -408,3 +408,80 @@ Funciones auxiliares:
 - **Números ambiguos:** `15.000` se interpreta como quince mil (separador de miles), porque es la convención local.
 - **Unidades:** solo las que indica el usuario. El motor no las convierte ni las deduce.
 - **Gráficos y PDF:** los resultados ya incluyen los gráficos sugeridos por el plan aprobado, pero todavía se muestran como tablas. Los gráficos y el PDF quedan para la etapa siguiente.
+
+
+## Dashboard de resultados reales (Fase 4B)
+
+**La IA propone, Pandas calcula, React visualiza.** El dashboard no calcula ni consulta a la IA: transforma el JSON del motor en indicadores, gráficos y tablas.
+
+### Qué componente recibe los resultados de Pandas
+
+```
+POST /api/analysis/execute ──► ExecutionResponse (JSON del motor)
+        │
+        ▼
+AnalysisExecution.tsx      guarda la respuesta en la sesión (analysisRun) y, al terminar, lleva la vista al dashboard
+        │
+        ▼
+AnalysisResults.tsx        llama a buildDashboard(run) y dibuja una sección por fuente
+        │
+        ▼
+lib/dashboard.ts           funciones puras: resultados → KPI, gráficos (formato Chart de Recharts), avisos y tablas
+        │
+        ▼
+ChartCard.tsx (Recharts)   gráfico con tooltip, leyenda, títulos de ejes y unidad, más vista de tabla con los valores exactos
+```
+
+### Cómo se transforman en datos de Recharts (`lib/dashboard.ts`)
+
+El motor devuelve cada operación como una tabla: `dimensions` (por ejemplo, `["fecha", "sector"]`), `measures` (por ejemplo, suma de `ventas` en ARS) y `rows` (`keys` + `values`). Recharts necesita una lista de objetos con una clave para el eje X y una por serie.
+
+- **Una dimensión** (`operationCharts`): cada fila del motor es un punto, por ejemplo `{ x: "2026-01", s0: 23000 }`. Cada medida es una serie (`s0`, `s1`…).
+- **Dos dimensiones:** la segunda se **pivota** como series. `["2026-01","Tecnologia"] → 15000` y `["2026-01","Indumentaria"] → 8000` pasan a ser `{ x: "2026-01", s0: 8000, s1: 15000 }`, con una serie por sector.
+  - Cada celda es **exactamente** un valor del motor, buscado por sus dos claves: no se suma ni se repite nada.
+  - Las pruebas verifican que la suma de las series de cada mes coincide con el total mensual del motor (23.000, 27.500, 32.000) y que cada serie suma su total por sector (54.000 y 28.500).
+- **Sin dimensiones:** el valor único es un **indicador** (`kpisFor`), por ejemplo 82.500 ARS.
+- **Unidades:**
+  - las medidas se agrupan por unidad (`measuresByUnit`): nunca se mezclan, por ejemplo, ARS y kg en un mismo eje;
+  - la unidad aparece en el título del eje Y, en los tooltips y en la tabla del gráfico;
+  - la participación (`share_pct`) se ve en la tabla y en la torta, no como otra serie.
+- **Sin animación:** los gráficos de resultados se dibujan completos de inmediato (`animated: false`), así ningún valor queda a medio trazar; también servirá para la exportación en la Fase 4C.
+
+### Cómo se eligen las visualizaciones
+
+1. **Primero, los gráficos que pidió el plan aprobado** (`plan.charts`). Para cada uno se busca una operación calculada con los mismos ejes (`matches`) y se comprueba si el tipo es compatible (`incompatibility`):
+   - **líneas:** requiere una dimensión temporal (mes o año);
+   - **barras:** una o dos dimensiones;
+   - **torta:** una sola dimensión, de 2 a 6 grupos, valores no negativos con total positivo, y no promedios ni medianas (no son partes de un total);
+   - **indicador:** un único valor;
+   - **dispersión, caja e histograma:** necesitan los datos fila a fila, y el motor devuelve resultados agregados, así que **no se construyen**.
+
+   Si un gráfico pedido no se puede construir, se muestra un aviso en «Gráficos no generados» con el motivo. **No se fabrica otro gráfico en su lugar**: la operación solo conserva su visualización estándar, y el aviso lo dice.
+2. **Después, las demás operaciones con resultados** (`autoType`):
+   - temporal → líneas;
+   - categórica → barras;
+   - más de dos dimensiones → solo tabla.
+
+   Se genera **un gráfico por operación**, no todos los tipos.
+3. **Límites de legibilidad:** con más de 30 categorías en barras o más de 6 series, se muestra solo la tabla, con una explicación.
+4. **Errores y estados:**
+   - las operaciones que fallaron se listan con su motivo;
+   - un plan sin resultados muestra un aviso, sin gráficos ni indicadores;
+   - si ningún plan tiene resultados, aparece "Sin resultados para mostrar";
+   - mientras se calcula, se ve "Calculando con Pandas…".
+
+### Varias fuentes
+
+`buildDashboard` agrupa los planes por `source_alias`. Hay **una sección por fuente** ("Fuente A · ventas.csv · 6 filas"), con sus propios indicadores, gráficos y tablas. Nunca se combinan cifras de fuentes distintas.
+
+### Demo pública
+
+La demo usa sus propios resultados de ejemplo, marcados como ficticios (franja "Demo pública"), y no tiene motor ni dashboard de resultados reales. En el modo local no se usa ningún número de demostración: todo sale del motor.
+
+### Limitaciones
+
+- Gráficos que necesitan datos fila a fila (dispersión, caja, histograma) no disponibles: el motor solo devuelve agregados.
+- No se puede elegir el período (mes o año) ni filtrar desde el dashboard.
+- Torta solo si el plan la pide y las proporciones son válidas.
+- Los resultados viven en la sesión: se pierden al recargar.
+- Exportación a PDF: Fase 4C.

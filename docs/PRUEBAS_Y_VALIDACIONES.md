@@ -755,3 +755,41 @@ Cambios sin confirmar. **Sin llamadas reales a OpenAI ni consumo.** El motor se 
 - se cargó el CSV obligatorio, se aprobó el plan, se confirmó y se pulsó «Ejecutar análisis» con la unidad ARS;
 - la aplicación mostró 2026-01: 23.000 ARS, 2026-02: 27.500 ARS y 2026-03: 32.000 ARS; Indumentaria: 28.500 ARS y Tecnologia: 54.000 ARS; total: 82.500 ARS, con 6 filas usadas;
 - el registro del backend muestra un solo `POST /api/analysis/execute`, y el navegador no hizo solicitudes fuera del equipo.
+
+
+## 25. Fase 4B — Dashboard con resultados reales (✅ verificada, 25/10/2026)
+
+Cambios sin confirmar. **Sin llamadas reales a OpenAI ni consumo.** Las pruebas usan la respuesta **real** del motor Pandas (`test/fixtures/dashboardResponse.json`, generada con `analysis_engine.py` para el CSV obligatorio y una fuente B independiente).
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Frontend (`npm test`) | **151 de 151** en 17 archivos, dos ejecuciones seguidas (139 anteriores, + 12 en `test/dashboard.test.tsx`; 4 selectores adaptados en `analysisExecution.test.tsx`) |
+| Backend (`python -m pytest`) | **169 de 169** (sin cambios en el backend) |
+| Lint, typecheck y build pública | Sin errores |
+
+| Requisito | Prueba |
+|-----------|--------|
+| Los gráficos usan resultados reales del motor | Datos del gráfico idénticos a las filas del motor |
+| Evolución mensual por sector | Líneas (tipo pedido por el plan) con una serie por sector: enero 8.000 y 15.000, febrero 9.500 y 18.000, marzo 11.000 y 21.000, en ARS |
+| Sin duplicar al combinar agrupaciones | La suma de las series de cada mes da 23.000, 27.500 y 32.000 (el total mensual del motor). Cada serie suma su total: 54.000 y 28.500 |
+| Total mensual, comparación e indicador | Líneas con 23.000, 27.500 y 32.000. Torta pedida por el plan con 28.500 y 54.000. Indicador "Suma de ventas" de 82.500 ARS |
+| Selección según el plan | Se muestran solo los gráficos que corresponden (dos de líneas y una torta). La dispersión pedida no se fabrica: se explica |
+| Torta solo con proporciones válidas | Con promedios o valores negativos no se construye, y se explica por qué |
+| Líneas pedidas sobre categorías | No se construyen; se explica y la operación conserva sus barras estándar |
+| Unidades | ARS y kg en gráficos separados; unidad en el eje, los tooltips y las tablas |
+| Demasiadas categorías | Con 40 grupos, solo la tabla y una explicación |
+| Fuentes independientes | Secciones "Fuente A · ventas.csv · 6 filas" y "Fuente B · siacam.csv · 3 filas". B muestra solo sus valores (150 y 70 USD, en barras como pidió el plan) y A no contiene cifras de B |
+| Errores parciales | La operación inválida se muestra con su motivo y el plan queda "Parcial" |
+| Sin resultados | Avisos "Sin resultados para mostrar" y "Este plan no produjo resultados para mostrar", sin gráficos |
+| Sin solicitudes inesperadas | Mostrar el dashboard no llama a `fetch` (ni a OpenAI); ejecutar no llama a la IA |
+| Demo pública | Pruebas anteriores de la demo sin cambios y build pública sin motor |
+
+**Verificación en el navegador.** Motor Pandas **real** y proveedor de IA **falso** (sin red ni OpenAI); frontend con `VITE_DEMO_MODE=false`; CSV obligatorio con la unidad ARS:
+- **Escritorio (1.366 px):**
+  - indicador de 82.500 ARS;
+  - tres gráficos: la evolución mensual por sector, en líneas, con leyenda (Indumentaria y Tecnologia) y ejes «fecha (mes)» y «ARS»; la torta de participación; y el total mensual;
+  - tablas detalladas;
+  - sin desplazamiento horizontal.
+- **Móvil (375 px), carga nueva:** los gráficos ocupan el ancho del contenedor, sin desplazamiento horizontal.
+- **Tras ejecutar:** el dashboard queda a la vista.
+- **Problemas detectados y corregidos:** las líneas quedaban sin dibujar por la animación; el desplazamiento suave no se producía; y la barra fija tapaba el dashboard en móvil (bitácora, sección 6r).

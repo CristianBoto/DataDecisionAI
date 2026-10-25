@@ -27,7 +27,7 @@ import { approvedAIPlans, collectAIPlans, conversationClarifications } from '@/l
 import { buildDatasetCatalog } from '@/lib/datasetCatalog'
 import { getErrorMessage } from '@/services'
 
-const CHART_TYPE_LABEL = { bar: 'Barras', line: 'Líneas', area: 'Áreas', histogram: 'Distribución' }
+const CHART_TYPE_LABEL = { bar: 'Barras', line: 'Líneas', area: 'Áreas', histogram: 'Distribución', pie: 'Torta' }
 
 function Section({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
   return (
@@ -150,9 +150,8 @@ function AIPlanConfirmation() {
         al recargar la página o reiniciar el backend.
       </Alert>
 
-      {confirmed && <AnalysisExecution plans={approved} />}
-
-      <Card className="sticky bottom-4 z-10 p-4 shadow-elevated sm:p-5">
+      {/* Fija abajo solo mientras falta confirmar: después no debe tapar la ejecución ni el dashboard. */}
+      <Card className={confirmed ? 'p-4 sm:p-5' : 'sticky bottom-4 z-10 p-4 shadow-elevated sm:p-5'}>
         {confirmed ? (
           <Alert tone="success" title="Propuesta confirmada">
             Ya podés ejecutar el análisis con Pandas. Podés volver al asistente si querés ajustarla.
@@ -183,6 +182,8 @@ function AIPlanConfirmation() {
           )}
         </div>
       </Card>
+
+      {confirmed && <AnalysisExecution plans={approved} />}
     </div>
   )
 }

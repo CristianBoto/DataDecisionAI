@@ -1,0 +1,343 @@
+{
+  "engine": "pandas",
+  "executed_at": "2026-10-25T12:00:00+00:00",
+  "sources": [
+    {
+      "alias": "A",
+      "rows": 6,
+      "columns": 3
+    },
+    {
+      "alias": "B",
+      "rows": 3,
+      "columns": 2
+    }
+  ],
+  "results": [
+    {
+      "plan_id": "plan-a",
+      "source_alias": "A",
+      "title": "Ventas por mes y sector",
+      "status": "partial",
+      "operations": [
+        {
+          "operation": "time_series",
+          "description": "Evolución mensual por sector",
+          "columns": [
+            "ventas"
+          ],
+          "group_by": [
+            "fecha",
+            "sector"
+          ],
+          "status": "ok",
+          "dimensions": [
+            "fecha",
+            "sector"
+          ],
+          "measures": [
+            {
+              "column": "ventas",
+              "aggregate": "sum",
+              "unit": "ARS"
+            }
+          ],
+          "rows": [
+            {
+              "keys": [
+                "2026-01",
+                "Indumentaria"
+              ],
+              "values": [
+                8000.0
+              ]
+            },
+            {
+              "keys": [
+                "2026-01",
+                "Tecnologia"
+              ],
+              "values": [
+                15000.0
+              ]
+            },
+            {
+              "keys": [
+                "2026-02",
+                "Indumentaria"
+              ],
+              "values": [
+                9500.0
+              ]
+            },
+            {
+              "keys": [
+                "2026-02",
+                "Tecnologia"
+              ],
+              "values": [
+                18000.0
+              ]
+            },
+            {
+              "keys": [
+                "2026-03",
+                "Indumentaria"
+              ],
+              "values": [
+                11000.0
+              ]
+            },
+            {
+              "keys": [
+                "2026-03",
+                "Tecnologia"
+              ],
+              "values": [
+                21000.0
+              ]
+            }
+          ],
+          "period": "month",
+          "rows_used": 6,
+          "warnings": [],
+          "error": null
+        },
+        {
+          "operation": "time_series",
+          "description": "Ventas totales por mes",
+          "columns": [
+            "ventas"
+          ],
+          "group_by": [
+            "fecha"
+          ],
+          "status": "ok",
+          "dimensions": [
+            "fecha"
+          ],
+          "measures": [
+            {
+              "column": "ventas",
+              "aggregate": "sum",
+              "unit": "ARS"
+            }
+          ],
+          "rows": [
+            {
+              "keys": [
+                "2026-01"
+              ],
+              "values": [
+                23000.0
+              ]
+            },
+            {
+              "keys": [
+                "2026-02"
+              ],
+              "values": [
+                27500.0
+              ]
+            },
+            {
+              "keys": [
+                "2026-03"
+              ],
+              "values": [
+                32000.0
+              ]
+            }
+          ],
+          "period": "month",
+          "rows_used": 6,
+          "warnings": [],
+          "error": null
+        },
+        {
+          "operation": "compare_groups",
+          "description": "Ventas acumuladas por sector",
+          "columns": [
+            "ventas"
+          ],
+          "group_by": [
+            "sector"
+          ],
+          "status": "ok",
+          "dimensions": [
+            "sector"
+          ],
+          "measures": [
+            {
+              "column": "ventas",
+              "aggregate": "sum",
+              "unit": "ARS"
+            },
+            {
+              "column": "ventas",
+              "aggregate": "share_pct",
+              "unit": "%"
+            }
+          ],
+          "rows": [
+            {
+              "keys": [
+                "Indumentaria"
+              ],
+              "values": [
+                28500.0,
+                34.5455
+              ]
+            },
+            {
+              "keys": [
+                "Tecnologia"
+              ],
+              "values": [
+                54000.0,
+                65.4545
+              ]
+            }
+          ],
+          "period": null,
+          "rows_used": 6,
+          "warnings": [],
+          "error": null
+        },
+        {
+          "operation": "sum",
+          "description": "Total general",
+          "columns": [
+            "ventas"
+          ],
+          "group_by": [],
+          "status": "ok",
+          "dimensions": [],
+          "measures": [
+            {
+              "column": "ventas",
+              "aggregate": "sum",
+              "unit": "ARS"
+            }
+          ],
+          "rows": [
+            {
+              "keys": [],
+              "values": [
+                82500.0
+              ]
+            }
+          ],
+          "period": null,
+          "rows_used": 6,
+          "warnings": [],
+          "error": null
+        },
+        {
+          "operation": "sum",
+          "description": "Suma inválida",
+          "columns": [
+            "sector"
+          ],
+          "group_by": [],
+          "status": "error",
+          "dimensions": [],
+          "measures": [],
+          "rows": [],
+          "period": null,
+          "rows_used": null,
+          "warnings": [],
+          "error": "«sector» es una columna categórica: esta operación requiere una columna cuantitativa."
+        }
+      ],
+      "charts": [
+        {
+          "type": "line",
+          "x": "fecha",
+          "y": "ventas",
+          "title": "Evolución mensual de ventas por sector"
+        },
+        {
+          "type": "pie",
+          "x": "sector",
+          "y": "ventas",
+          "title": "Participación de cada sector"
+        },
+        {
+          "type": "scatter",
+          "x": "fecha",
+          "y": "ventas",
+          "title": "Dispersión de ventas"
+        }
+      ],
+      "warnings": [
+        "Datos sintéticos."
+      ]
+    },
+    {
+      "plan_id": "plan-b",
+      "source_alias": "B",
+      "title": "CIF por año",
+      "status": "ok",
+      "operations": [
+        {
+          "operation": "time_series",
+          "description": "CIF por año",
+          "columns": [
+            "CIF"
+          ],
+          "group_by": [
+            "ANYO"
+          ],
+          "status": "ok",
+          "dimensions": [
+            "ANYO"
+          ],
+          "measures": [
+            {
+              "column": "CIF",
+              "aggregate": "sum",
+              "unit": "USD"
+            }
+          ],
+          "rows": [
+            {
+              "keys": [
+                "2020"
+              ],
+              "values": [
+                150.0
+              ]
+            },
+            {
+              "keys": [
+                "2021"
+              ],
+              "values": [
+                70.0
+              ]
+            }
+          ],
+          "period": "year",
+          "rows_used": 3,
+          "warnings": [],
+          "error": null
+        }
+      ],
+      "charts": [
+        {
+          "type": "bar",
+          "x": "ANYO",
+          "y": "CIF",
+          "title": "CIF importado por año"
+        }
+      ],
+      "warnings": []
+    }
+  ],
+  "notes": [
+    "Calculado con Pandas en el backend local, sobre una copia en memoria de cada archivo.",
+    "La IA no participó del cálculo ni recibió los datos.",
+    "Cada plan usa una sola fuente: las fuentes no se unieron ni relacionaron."
+  ]
+}

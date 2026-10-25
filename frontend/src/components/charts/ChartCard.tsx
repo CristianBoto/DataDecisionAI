@@ -5,15 +5,18 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Line,
   LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
   type TooltipContentProps,
 } from 'recharts'
-import { BarChart3, LineChart as LineIcon, Sigma, Table2, TrendingUp } from 'lucide-react'
+import { BarChart3, LineChart as LineIcon, PieChart as PieIcon, Sigma, Table2, TrendingUp } from 'lucide-react'
 import type { Chart, ChartSeries, ChartType } from '@/types/domain'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { cn } from '@/lib/cn'
@@ -21,9 +24,10 @@ import { formatCompact, formatValue } from '@/lib/format'
 
 /**
  * Paleta categórica validada (orden fijo, nunca rotado): azul, naranja, aqua.
- * Los colores siguen a la serie, no a su posición en un filtro.
+ * Los colores siguen a la serie, no a su posición en un filtro. Los tres
+ * siguientes solo se usan cuando hay más series (resultados reales con varias categorías).
  */
-const SERIES_COLORS = ['#2a78d6', '#eb6834', '#1baf7a']
+const SERIES_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#8b5cf6', '#d4a20b', '#64748b']
 const GRID_COLOR = '#e2e8f0'
 const AXIS_TICK = { fill: '#64748b', fontSize: 12 }
 
@@ -32,6 +36,13 @@ const TYPE_META: Record<ChartType, { label: string; Icon: typeof BarChart3 }> = 
   line: { label: 'Líneas', Icon: LineIcon },
   area: { label: 'Áreas', Icon: TrendingUp },
   histogram: { label: 'Distribución', Icon: Sigma },
+  pie: { label: 'Torta', Icon: PieIcon },
+}
+
+/** Valor con su formato y, si se conoce, su unidad (por ejemplo, "23.000 ARS"). */
+function display(value: number, series?: ChartSeries): string {
+  const formatted = formatValue(value, series?.format)
+  return series?.unit ? `${formatted} ${series.unit}` : formatted
 }
 
 function seriesColor(index: number) {
@@ -53,7 +64,7 @@ function ChartTooltip({ active, payload, label, series }: TooltipContentProps<nu
               {meta?.label ?? item.name}
             </span>
             <span className="font-semibold text-slate-900 tabular-nums">
-              {typeof item.value === 'number' ? formatValue(item.value, meta?.format) : '—'}
+              {typeof item.value === 'number' ? display(item.value, meta) : '—'}
             </span>
           </p>
         )
@@ -77,13 +88,34 @@ function Legend({ series }: { series: ChartSeries[] }) {
 }
 
 function ChartPlot({ chart }: { chart: Chart }) {
+  const animated = chart.animated ?? true
   const common = {
     data: chart.data,
-    margin: { top: 8, right: 12, left: 0, bottom: 0 },
+    // Con títulos de ejes (resultados reales) se reserva espacio para leerlos.
+    margin: { top: 8, right: 12, left: chart.yLabel ? 8 : 0, bottom: chart.xLabel && chart.yLabel ? 16 : 0 },
   }
   const grid = <CartesianGrid vertical={false} stroke={GRID_COLOR} strokeDasharray="0" />
-  const xAxis = <XAxis dataKey={chart.xKey} tick={AXIS_TICK} tickLine={false} axisLine={{ stroke: GRID_COLOR }} tickMargin={8} interval="preserveStartEnd" />
-  const yAxis = <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={44} tickFormatter={(v: number) => formatCompact(v)} />
+  const xAxis = (
+    <XAxis
+      dataKey={chart.xKey}
+      tick={AXIS_TICK}
+      tickLine={false}
+      axisLine={{ stroke: GRID_COLOR }}
+      tickMargin={8}
+      interval="preserveStartEnd"
+      label={chart.yLabel && chart.xLabel ? { value: chart.xLabel, position: 'insideBottom', offset: -12, fill: '#64748b', fontSize: 11 } : undefined}
+    />
+  )
+  const yAxis = (
+    <YAxis
+      tick={AXIS_TICK}
+      tickLine={false}
+      axisLine={false}
+      width={chart.yLabel ? 56 : 44}
+      tickFormatter={(v: number) => formatCompact(v)}
+      label={chart.yLabel ? { value: chart.yLabel, angle: -90, position: 'insideLeft', offset: 4, fill: '#64748b', fontSize: 11 } : undefined}
+    />
+  )
   const tooltip = (
     <Tooltip
       cursor={chart.type === 'bar' || chart.type === 'histogram' ? { fill: '#f1f5f9' } : { stroke: '#94a3b8', strokeWidth: 1 }}
@@ -92,6 +124,19 @@ function ChartPlot({ chart }: { chart: Chart }) {
   )
 
   switch (chart.type) {
+    case 'pie': {
+      const s = chart.series[0]
+      return (
+        <PieChart>
+          {tooltip}
+          <Pie data={chart.data} dataKey={s.key} nameKey={chart.xKey} innerRadius="45%" outerRadius="80%" paddingAngle={1} isAnimationActive={false}>
+            {chart.data.map((row, index) => (
+              <Cell key={String(row[chart.xKey])} fill={seriesColor(index)} stroke="#fff" />
+            ))}
+          </Pie>
+        </PieChart>
+      )
+    }
     case 'line':
       return (
         <LineChart {...common}>
@@ -100,7 +145,7 @@ function ChartPlot({ chart }: { chart: Chart }) {
           {yAxis}
           {tooltip}
           {chart.series.map((s, index) => (
-            <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={seriesColor(index)} strokeWidth={2} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} />
+            <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={seriesColor(index)} strokeWidth={2} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} isAnimationActive={animated} />
           ))}
         </LineChart>
       )
@@ -120,7 +165,7 @@ function ChartPlot({ chart }: { chart: Chart }) {
           {yAxis}
           {tooltip}
           {chart.series.map((s, index) => (
-            <Area key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={seriesColor(index)} strokeWidth={2} fill={`url(#grad-${chart.id}-${s.key})`} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} />
+            <Area key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={seriesColor(index)} strokeWidth={2} fill={`url(#grad-${chart.id}-${s.key})`} activeDot={{ r: 5, strokeWidth: 2, stroke: '#fff' }} isAnimationActive={animated} />
           ))}
         </AreaChart>
       )
@@ -132,7 +177,7 @@ function ChartPlot({ chart }: { chart: Chart }) {
           {yAxis}
           {tooltip}
           {chart.series.map((s, index) => (
-            <Bar key={s.key} dataKey={s.key} name={s.label} fill={seriesColor(index)} fillOpacity={0.85} radius={[4, 4, 0, 0]} />
+            <Bar key={s.key} dataKey={s.key} name={s.label} fill={seriesColor(index)} fillOpacity={0.85} radius={[4, 4, 0, 0]} isAnimationActive={animated} />
           ))}
         </BarChart>
       )
@@ -144,7 +189,7 @@ function ChartPlot({ chart }: { chart: Chart }) {
           {yAxis}
           {tooltip}
           {chart.series.map((s, index) => (
-            <Bar key={s.key} dataKey={s.key} name={s.label} fill={seriesColor(index)} radius={[4, 4, 0, 0]} maxBarSize={44} />
+            <Bar key={s.key} dataKey={s.key} name={s.label} fill={seriesColor(index)} radius={[4, 4, 0, 0]} maxBarSize={44} isAnimationActive={animated} />
           ))}
         </BarChart>
       )
@@ -171,7 +216,7 @@ function ChartTable({ chart }: { chart: Chart }) {
                 const value = row[s.key]
                 return (
                   <td key={s.key} className="px-3 py-1.5 text-right text-slate-900 tabular-nums">
-                    {typeof value === 'number' ? formatValue(value, s.format) : '—'}
+                    {typeof value === 'number' ? display(value, s) : '—'}
                   </td>
                 )
               })}
@@ -223,7 +268,11 @@ export function ChartCard({ chart, className }: ChartCardProps) {
           </div>
         }
       />
-      <Legend series={chart.series} />
+      {chart.type === 'pie' ? (
+        <Legend series={chart.data.map((row) => ({ key: String(row[chart.xKey]), label: String(row[chart.xKey]) }))} />
+      ) : (
+        <Legend series={chart.series} />
+      )}
       <div className="flex-1 p-3 pt-2 sm:p-5 sm:pt-3">
         {view === 'chart' ? (
           <div className="h-64 w-full" role="img" aria-label={`${chart.title}. ${chart.description}`}>

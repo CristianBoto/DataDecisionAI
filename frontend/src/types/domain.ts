@@ -185,7 +185,7 @@ export interface ProposedIndicator {
   columns: string[]
 }
 
-export type ChartType = 'bar' | 'line' | 'area' | 'histogram'
+export type ChartType = 'bar' | 'line' | 'area' | 'histogram' | 'pie'
 
 export interface ProposedChart {
   id: string
@@ -259,6 +259,8 @@ export interface ChartSeries {
   key: string
   label: string
   format?: IndicatorFormat
+  /** Unidad indicada por el usuario (por ejemplo, "ARS"); se muestra en tooltips y tablas. */
+  unit?: string
 }
 
 export interface Chart {
@@ -269,6 +271,10 @@ export interface Chart {
   /** Clave del eje X (categoría o fecha). */
   xKey: string
   xLabel?: string
+  /** Título del eje Y (por ejemplo, la unidad). */
+  yLabel?: string
+  /** false: se dibuja completo de inmediato (resultados reales; también para imprimir o exportar). */
+  animated?: boolean
   series: ChartSeries[]
   data: ChartDatum[]
 }

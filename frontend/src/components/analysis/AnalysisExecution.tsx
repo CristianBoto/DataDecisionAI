@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Play } from 'lucide-react'
+import { Spinner } from '@/components/ui/Feedback'
 import { AnalysisResults } from '@/components/analysis/AnalysisResults'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
@@ -8,6 +9,7 @@ import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useAnalysisEngine } from '@/hooks/useService'
 import type { SessionAIPlan } from '@/lib/aiPlans'
 import { buildExecution, quantitativeColumns, unitKey } from '@/lib/analysisRequest'
+import { buildDatasetCatalog } from '@/lib/datasetCatalog'
 import { getErrorMessage } from '@/services'
 
 /**
@@ -26,6 +28,16 @@ export function AnalysisExecution({ plans }: { plans: SessionAIPlan[] }) {
     () => (review ? buildExecution(session.sources, review, plans, units) : null),
     [session.sources, review, plans, units],
   )
+  const fileNames = useMemo(
+    () => Object.fromEntries(buildDatasetCatalog(session.sources).sources.map((s) => [s.alias, s.fileName])),
+    [session.sources],
+  )
+  // Al terminar el cálculo, el dashboard queda a la vista sin navegar a otra pantalla.
+  const dashboardRef = useRef<HTMLDivElement>(null)
+  const lastRun = session.analysisRun
+  useEffect(() => {
+    if (lastRun) dashboardRef.current?.scrollIntoView?.({ block: 'start' })
+  }, [lastRun])
 
   if (!engine) {
     return (
@@ -84,7 +96,12 @@ export function AnalysisExecution({ plans }: { plans: SessionAIPlan[] }) {
           {session.analysisRun ? 'Volver a ejecutar análisis' : 'Ejecutar análisis'}
         </Button>
       </Card>
-      {session.analysisRun && <AnalysisResults run={session.analysisRun} />}
+      {running && (
+        <Card className="p-6">
+          <Spinner label="Calculando con Pandas…" />
+        </Card>
+      )}
+      <div ref={dashboardRef}>{lastRun && !running && <AnalysisResults run={lastRun} fileNames={fileNames} />}</div>
     </div>
   )
 }
