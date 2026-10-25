@@ -3,6 +3,7 @@ import type { Dataset, DatasetProfile } from '@/types/domain'
 import type { AnalysisSource } from '@/lib/datasetCatalog'
 import type { SourceReview } from '@/lib/aiContext'
 import type { AIAuthorizeResult } from '@/services/aiGateway'
+import type { ExecutionResponse } from '@/services/analysisEngine'
 
 /**
  * Revisión obligatoria de datos y privacidad. Guarda las DECISIONES del
@@ -51,15 +52,17 @@ export interface AnalysisSessionState {
   confirmedPlanIds: string[]
   /** Autorización de la conversación con la IA real, si el usuario la otorgó. */
   aiConversationGrant: AIConversationGrant | null
+  /** Último resultado del motor de análisis (Pandas) para los planes confirmados. */
+  analysisRun: ExecutionResponse | null
 }
 
 export interface AnalysisSessionValue extends AnalysisSessionState {
   /** Fuente principal (la primera); se mantiene para las pantallas de una sola fuente. */
   dataset: Dataset | null
   profile: DatasetProfile | null
-  addSource: (dataset: Dataset, profile: DatasetProfile) => void
+  addSource: (dataset: Dataset, profile: DatasetProfile, file?: File) => void
   /** Reemplaza una fuente en su misma posición, sin tocar las demás. */
-  replaceSource: (datasetId: string, dataset: Dataset, profile: DatasetProfile) => void
+  replaceSource: (datasetId: string, dataset: Dataset, profile: DatasetProfile, file?: File) => void
   removeSource: (datasetId: string) => void
   setProjectId: (projectId: string) => void
   setProjectName: (name: string) => void
@@ -71,6 +74,7 @@ export interface AnalysisSessionValue extends AnalysisSessionState {
   /** Confirmación final del paso 4 (no ejecuta cálculos). */
   confirmPlans: (planIds: string[]) => void
   setAIConversationGrant: (grant: AIConversationGrant | null) => void
+  setAnalysisRun: (run: ExecutionResponse | null) => void
   reset: () => void
 }
 

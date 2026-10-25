@@ -107,6 +107,16 @@ Cargar → **revisar datos y privacidad** → conversar → confirmar. Las decis
 - El punto de conexión en la interfaz ya existe: el panel «Enviar a la IA real» (`MessageAuthorization`) y el hook `useAIAuthorization`. Hoy terminan en «Prueba finalizada…» (403/501); en 3B.2 ese estado final se reemplaza por la respuesta estructurada y validada de la IA, sin cambiar la autorización de un solo uso.
 - Pendiente para la fase de cálculo: aplicar las decisiones en Pandas sobre copias (por ejemplo, tratar `NA` como faltante solo donde el usuario lo indicó).
 
+## Fase 4A — Motor de análisis con Pandas (implementada)
+
+Los planes aprobados se ejecutan con Pandas sobre los archivos reenviados al confirmar. Ver [ARCHITECTURE.md](ARCHITECTURE.md), sección "Motor de análisis con Pandas".
+
+**Siguiente (4B):**
+- gráficos dinámicos a partir de las tablas de resultados (ya incluyen dimensiones, medidas y los gráficos sugeridos por el plan);
+- informe PDF descargable;
+- elección del período (mes o año) y operaciones pendientes del catálogo (desvío, ranking, correlación);
+- persistencia de planes aprobados y resultados.
+
 ## Fase 3B.2 — Integración real con OpenAI (implementada; primera llamada real pendiente)
 
 **Estado (25/10/2026).** Todos los requisitos de la tabla están implementados y probados con proveedores falsos, sin consumir tokens. Ver [SEGURIDAD.md](SEGURIDAD.md), sección 10.

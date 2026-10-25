@@ -1,0 +1,176 @@
+{
+  "engine": "pandas",
+  "executed_at": "2026-10-25T12:00:00+00:00",
+  "sources": [
+    {
+      "alias": "A",
+      "rows": 6,
+      "columns": 3
+    }
+  ],
+  "results": [
+    {
+      "plan_id": "plan-1a",
+      "source_alias": "A",
+      "title": "Ventas por mes y sector",
+      "status": "partial",
+      "operations": [
+        {
+          "operation": "time_series",
+          "description": "Ventas totales por mes",
+          "columns": [
+            "ventas"
+          ],
+          "group_by": [
+            "fecha"
+          ],
+          "status": "ok",
+          "dimensions": [
+            "fecha"
+          ],
+          "measures": [
+            {
+              "column": "ventas",
+              "aggregate": "sum",
+              "unit": "ARS"
+            }
+          ],
+          "rows": [
+            {
+              "keys": [
+                "2026-01"
+              ],
+              "values": [
+                23000.0
+              ]
+            },
+            {
+              "keys": [
+                "2026-02"
+              ],
+              "values": [
+                27500.0
+              ]
+            },
+            {
+              "keys": [
+                "2026-03"
+              ],
+              "values": [
+                32000.0
+              ]
+            }
+          ],
+          "period": "month",
+          "rows_used": 6,
+          "warnings": [],
+          "error": null
+        },
+        {
+          "operation": "group_by",
+          "description": "Ventas totales por sector",
+          "columns": [
+            "ventas"
+          ],
+          "group_by": [
+            "sector"
+          ],
+          "status": "ok",
+          "dimensions": [
+            "sector"
+          ],
+          "measures": [
+            {
+              "column": "ventas",
+              "aggregate": "sum",
+              "unit": "ARS"
+            }
+          ],
+          "rows": [
+            {
+              "keys": [
+                "Indumentaria"
+              ],
+              "values": [
+                28500.0
+              ]
+            },
+            {
+              "keys": [
+                "Tecnologia"
+              ],
+              "values": [
+                54000.0
+              ]
+            }
+          ],
+          "period": null,
+          "rows_used": 6,
+          "warnings": [],
+          "error": null
+        },
+        {
+          "operation": "sum",
+          "description": "Total general",
+          "columns": [
+            "ventas"
+          ],
+          "group_by": [],
+          "status": "ok",
+          "dimensions": [],
+          "measures": [
+            {
+              "column": "ventas",
+              "aggregate": "sum",
+              "unit": "ARS"
+            }
+          ],
+          "rows": [
+            {
+              "keys": [],
+              "values": [
+                82500.0
+              ]
+            }
+          ],
+          "period": null,
+          "rows_used": 6,
+          "warnings": [],
+          "error": null
+        },
+        {
+          "operation": "correlation",
+          "description": "Correlación",
+          "columns": [
+            "ventas"
+          ],
+          "group_by": [],
+          "status": "error",
+          "dimensions": [],
+          "measures": [],
+          "rows": [],
+          "period": null,
+          "rows_used": null,
+          "warnings": [],
+          "error": "La operación «correlation» todavía no está disponible en el motor de cálculo."
+        }
+      ],
+      "charts": [
+        {
+          "type": "line",
+          "x": "fecha",
+          "y": "ventas",
+          "title": "Ventas por mes"
+        }
+      ],
+      "warnings": [
+        "Datos sintéticos."
+      ]
+    }
+  ],
+  "notes": [
+    "Calculado con Pandas en el backend local, sobre una copia en memoria de cada archivo.",
+    "La IA no participó del cálculo ni recibió los datos.",
+    "Cada plan usa una sola fuente: las fuentes no se unieron ni relacionaron."
+  ]
+}

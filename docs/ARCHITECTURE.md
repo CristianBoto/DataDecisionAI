@@ -322,3 +322,89 @@ Dataset ──► Python + Pandas (navegador, backend local o interno)
 - Si lo que se pretende enviar puede ser confidencial, se requiere **autorización explícita**.
 - La IA propone **planes estructurados**; no modifica el código fuente del backend ni se ejecuta código generado por ella.
 - **Estado:** política decidida; su implementación y validación están pendientes (ver [SEGURIDAD.md](SEGURIDAD.md)).
+
+
+## Motor de análisis con Pandas (Fase 4A)
+
+**Principio: Pandas calcula, la IA interpreta y propone, el usuario confirma.** La IA nunca genera ni ejecuta código: propone planes con operaciones de un catálogo cerrado, y el backend los resuelve con funciones de Python escritas a mano.
+
+### Dónde está el código
+
+| Archivo | Qué hace |
+|---------|----------|
+| `backend/app/services/analysis_engine.py` | **El motor.** Lee los archivos, valida cada plan y cada operación, y calcula con Pandas |
+| `backend/app/schemas/analysis.py` | Contratos del pedido (planes y correspondencia de columnas) y de la respuesta (tablas de resultados) |
+| `backend/app/api/routes/analysis.py` | Endpoint `POST /api/analysis/execute`: recibe los archivos, verifica que los planes estén aprobados y llama al motor |
+| `backend/app/services/dataset_profiler.py` → `read_dataset` | Lectura de CSV/XLSX con los mismos controles de tamaño y forma que el perfilado (la comparten ambos) |
+| `frontend/src/lib/analysisRequest.ts` | Arma el pedido desde la revisión: nombre visto por la IA → columna real, interpretación, decisión sobre faltantes y unidad |
+| `frontend/src/services/analysisEngine.ts` | Cliente HTTP del motor (separado del cliente de la IA) |
+| `frontend/src/components/analysis/AnalysisExecution.tsx` y `AnalysisResults.tsx` | Botón «Ejecutar análisis», unidades opcionales y tablas de resultados en el paso «Confirmar» |
+
+### Qué función hace cada cálculo (`analysis_engine.py`)
+
+| Operación del plan | Función | Cálculo con Pandas |
+|--------------------|---------|--------------------|
+| `count` | `op_count` | Cantidad de filas, total o por grupo (`groupby(...).agg("count")`) |
+| `sum`, `mean`, `median`, `min`, `max` | `_simple_aggregate(...)` | La agregación indicada sobre columnas cuantitativas, total (`DataFrame.agg`) o por grupo (`groupby(...).agg`) |
+| `group_by` | `op_group_by` | Suma de las columnas cuantitativas por categoría (o conteo si no hay cuantitativas) |
+| `compare_groups` | `op_compare_groups` | Lo mismo que `group_by`, más la participación de cada grupo sobre el total (%) |
+| `time_series` | `op_time_series` | Suma por período (mes `AAAA-MM`, o año si las fechas abarcan más de 36 meses), en orden cronológico |
+| `frequency` | `op_frequency` | Cantidad de registros por valor (o combinación de valores) |
+| `distinct_count` | `op_distinct_count` | Valores distintos por columna (`Series.nunique`) |
+| `std`, `percentage`, `top_n`, `correlation`, `missing_summary` | — | **No disponibles todavía:** se informa el motivo y no se reemplazan por otro cálculo |
+
+Funciones auxiliares:
+- `_grouped`: agregación genérica. Arma un DataFrame con las claves de grupo (`g:...`) y los valores (`v:...`), y aplica `groupby(...).agg(...)`.
+- `PreparedSource.texts`: aplica la política de faltantes.
+- `PreparedSource.numbers`: convierte a números con `to_numbers` y `parse_number`, y valida la interpretación.
+- `PreparedSource.group_keys`: arma las etiquetas de grupo y los períodos, con `to_dates`, que usa `pd.to_datetime` con formato explícito.
+- `run_plan` y `run_operation`: validan y ejecutan.
+
+### Cómo llegan los datos desde React a FastAPI
+
+1. **Carga (paso 1):** el navegador envía cada archivo a `POST /api/datasets/profile`. El backend devuelve el **perfil** y descarta el archivo. El navegador conserva el `File` original **solo en memoria** (`AnalysisSource.file`), no en disco ni en `localStorage`.
+2. **Revisión (paso 2):** el usuario decide qué columnas compartir con la IA, sus nombres, sus interpretaciones y qué hacer con marcadores como `NA`.
+3. **Conversación (paso 3):** la IA recibe solo metadatos y propone planes. El backend los valida y los guarda; el usuario aprueba uno.
+4. **Confirmar (paso 4):** después de la confirmación final aparece «Ejecutar análisis». Al pulsarlo, React envía un único `multipart/form-data` a `POST /api/analysis/execute` con:
+   - `request`: JSON con los `plan_ids` y, por fuente, la correspondencia `name` (nombre que vio la IA) → `original` (columna real), la interpretación, la decisión sobre faltantes y la unidad opcional;
+   - `file_A`, `file_B`, `file_C`: los archivos originales de las fuentes que usan los planes.
+5. El backend calcula en memoria y responde con tablas (dimensiones + medidas). Los archivos se descartan al terminar el pedido.
+
+**El perfil no son los datos.** El perfil (paso 1) resume las columnas y no alcanza para calcular. Por eso el archivo completo se reenvía al ejecutar.
+
+### Cómo se valida y se ejecuta un plan
+
+1. **Pedido:** la lista blanca Pydantic (`ExecutionRequest`, `extra="forbid"`) admite hasta 6 planes y 3 fuentes, sin repetidos.
+2. **Planes del backend, no del navegador** (`approved_plans`): cada `plan_id` debe existir en el registro del backend (404 si no) y estar **aprobado** (409 si no). Así se ejecuta exactamente el plan validado, aunque el navegador mande otra cosa.
+3. **Archivos:** debe estar el archivo de cada fuente que usan los planes (422 si falta). Se aplican los límites existentes: `Origin` autorizado, 25 MB por archivo, 60 MB por pedido, filas, columnas, celdas y descompresión de XLSX. Hay una sola ejecución simultánea (429 si ya hay otra).
+4. **Fuente** (`prepare_source`): las columnas reales indicadas deben existir en el archivo. Si no existen, se cargó otro archivo y se responde 422.
+5. **Plan** (`run_plan`): todas sus columnas deben seguir autorizadas en la revisión. Cada plan usa **una sola fuente**: nunca se unen, concatenan ni relacionan archivos.
+6. **Operación** (`run_operation`):
+   - la operación tiene que estar en el catálogo;
+   - las columnas tienen que existir;
+   - los tipos tienen que ser compatibles con la interpretación de la revisión: sumar o promediar exige una columna cuantitativa, un código o identificador no se suma, y una serie temporal exige una columna temporal.
+
+   Si algo falla, esa operación devuelve un error comprensible y las demás siguen. El plan queda como "parcial".
+7. **Faltantes:** la celda vacía siempre es faltante. Los marcadores como `NA` cuentan como faltantes solo si el usuario eligió «Tratar como faltante». Si no, quedan como valores; en una columna numérica no se pueden convertir, se excluyen y se avisa.
+
+### Qué se usa de Pandas y por qué
+
+| Herramienta | Uso | Por qué |
+|-------------|-----|---------|
+| `read_csv(dtype=str, keep_default_na=False)` / `ExcelFile.parse(dtype=str)` | Leer todo como texto | No transforma `00123` en `123` ni `NA` en faltante sin decisión del usuario |
+| `Series.mask`, `str.strip`, `isin` | Marcar faltantes | Aplica la política de faltantes de forma vectorizada |
+| `Series.map` sobre valores únicos | Convertir números | Cada valor distinto se convierte una sola vez (rápido en archivos grandes) y acepta formatos como `15.000` o `1.234,56` |
+| `pd.to_datetime(format=...)` | Fechas | Un formato explícito evita interpretaciones ambiguas (día/mes); se elige el que interpreta más valores |
+| `Series.dt.strftime("%Y-%m")` | Períodos | Agrupar por mes o año con etiquetas legibles |
+| `DataFrame.groupby(...).agg(...)` | Agrupar y agregar | La operación central del análisis descriptivo: dividir, aplicar y combinar |
+| `DataFrame.agg`, `Series.nunique` | Totales y distintos | Agregaciones sin grupos |
+
+### Limitaciones del MVP
+
+- **Datos en memoria:** los archivos se guardan solo en la memoria del navegador. Si se recarga la página, hay que volver a cargarlos. Los planes aprobados viven en la memoria del backend y se pierden si se reinicia.
+- **Catálogo acotado:** no están disponibles desvío estándar, porcentajes generales, rankings, correlaciones ni resumen de faltantes.
+- **Agregación fija:** las series temporales y las agrupaciones usan **suma**, porque cada fila es un total. Para otro criterio, el plan debe pedir `mean`, `min` o `max` con `group_by`.
+- **Período automático:** las series son mensuales, o anuales si las fechas abarcan más de 36 meses. Todavía no se puede elegir el período.
+- **Números ambiguos:** `15.000` se interpreta como quince mil (separador de miles), porque es la convención local.
+- **Unidades:** solo las que indica el usuario. El motor no las convierte ni las deduce.
+- **Gráficos y PDF:** los resultados ya incluyen los gráficos sugeridos por el plan aprobado, pero todavía se muestran como tablas. Los gráficos y el PDF quedan para la etapa siguiente.

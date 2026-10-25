@@ -172,15 +172,13 @@ def _read_excel(content: bytes) -> tuple[pd.DataFrame, str, str | None]:
     return df, "xlsx", sheet_name
 
 
-def profile_dataset(content: bytes, filename: str) -> dict:
-    """Lee un dataset tabular y devuelve un diagnóstico JSON serializable.
+def read_dataset(content: bytes, filename: str) -> tuple[pd.DataFrame, str, str, str | None]:
+    """Lee un CSV/XLSX como texto, con todos los controles de tamaño y forma.
 
-    No elimina duplicados, rellena nulos ni altera el archivo original.
-    La lectura como texto evita convertir automáticamente identificadores '00123'.
-
-    Política de faltantes: solo la celda vacía (o con espacios) es faltante.
-    Marcadores como 'NA', 'null' o '-' se informan como *sospechosos* y no se
-    descuentan, porque pueden ser valores válidos.
+    Devuelve (DataFrame, extensión, codificación, hoja). Todas las celdas son
+    texto ('' = vacía): así no se convierten identificadores como '00123' ni se
+    interpretan marcadores como 'NA'. La usan el perfilador y el motor de
+    análisis (`analysis_engine.py`), para que ambos lean exactamente igual.
     """
     name = Path(filename or "").name
     extension = Path(name).suffix.lower()
@@ -202,8 +200,22 @@ def profile_dataset(content: bytes, filename: str) -> dict:
     if df.shape[1] > MAX_COLUMNS or df.shape[0] > MAX_ROWS or df.shape[0] * df.shape[1] > MAX_CELLS:
         raise _shape_error()
 
-    df.columns = [str(name) for name in df.columns]
-    df = df.fillna("")
+    df.columns = [str(column) for column in df.columns]
+    return df.fillna(""), extension, encoding, sheet_name
+
+
+def profile_dataset(content: bytes, filename: str) -> dict:
+    """Lee un dataset tabular y devuelve un diagnóstico JSON serializable.
+
+    No elimina duplicados, rellena nulos ni altera el archivo original.
+    La lectura como texto evita convertir automáticamente identificadores '00123'.
+
+    Política de faltantes: solo la celda vacía (o con espacios) es faltante.
+    Marcadores como 'NA', 'null' o '-' se informan como *sospechosos* y no se
+    descuentan, porque pueden ser valores válidos.
+    """
+    name = Path(filename or "").name
+    df, extension, encoding, sheet_name = read_dataset(content, filename)
     column_profiles = []
     warnings = []
     for column in df.columns:

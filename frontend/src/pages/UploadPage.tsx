@@ -114,7 +114,7 @@ export function UploadPage() {
     for (const { key, file } of accepted) {
       try {
         const { dataset, profile } = await profileSource(() => service.uploadDataset(file))
-        session.addSource(dataset, profile)
+        session.addSource(dataset, profile, file)
         suggestName(dataset)
         patch(key, { status: 'ready', datasetId: dataset.id, profile, name: dataset.fileName, size: dataset.sizeBytes })
         setActiveKey(key)
@@ -163,10 +163,10 @@ export function UploadPage() {
     try {
       const { dataset, profile } = await profileSource(() => service.uploadDataset(file))
       if (previous.status === 'ready' && previous.datasetId) {
-        session.replaceSource(previous.datasetId, dataset, profile)
+        session.replaceSource(previous.datasetId, dataset, profile, file)
         service.discardDataset(previous.datasetId)
       } else {
-        session.addSource(dataset, profile)
+        session.addSource(dataset, profile, file)
       }
       patch(key, { status: 'ready', datasetId: dataset.id, profile, name: dataset.fileName, size: dataset.sizeBytes, isDemo: false })
       setActiveKey(key)

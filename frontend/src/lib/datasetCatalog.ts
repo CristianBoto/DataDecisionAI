@@ -18,6 +18,12 @@ export const MAX_TOTAL_UPLOAD_MB = 60
 export interface AnalysisSource {
   dataset: Dataset
   profile: DatasetProfile
+  /**
+   * Archivo original, solo en la memoria del navegador (no se guarda en disco ni
+   * en localStorage). Se vuelve a enviar al backend únicamente al pulsar
+   * «Ejecutar análisis», porque el perfilado no conserva los datos.
+   */
+  file?: File
 }
 
 export interface CatalogColumn {

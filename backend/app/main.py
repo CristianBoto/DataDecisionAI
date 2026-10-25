@@ -18,6 +18,9 @@ from app.services.dataset_profiler import MAX_FILE_BYTES
 # Margen para el encabezado y los separadores de multipart sobre el límite del archivo.
 MULTIPART_OVERHEAD_BYTES = 1024 * 1024
 UPLOAD_PATHS = ("/api/datasets/profile",)
+# Ejecución de análisis: hasta tres archivos (60 MB en total, como en la carga).
+ANALYSIS_PATHS = ("/api/analysis/execute",)
+ANALYSIS_MAX_BODY_BYTES = 60 * 1024 * 1024
 AI_PATH_PREFIX = "/api/ai/"
 AI_MAX_BODY_BYTES = 64 * 1024
 
@@ -48,6 +51,15 @@ def create_app() -> FastAPI:
         max_body_bytes=AI_MAX_BODY_BYTES,
         allowed_origins=settings.cors_origins,
         origin_message="Origen no autorizado para solicitudes de IA.",
+    )
+
+    # Mismo control para la ejecución de análisis, que vuelve a recibir los archivos.
+    app.add_middleware(
+        UploadGuardMiddleware,
+        paths=ANALYSIS_PATHS,
+        max_body_bytes=ANALYSIS_MAX_BODY_BYTES + MULTIPART_OVERHEAD_BYTES,
+        allowed_origins=settings.cors_origins,
+        origin_message="Origen no autorizado para ejecutar análisis.",
     )
 
     # Control de origen y tamaño de las cargas, antes de leer el cuerpo.

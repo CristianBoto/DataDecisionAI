@@ -383,3 +383,19 @@ Credenciales (502), cuota o saldo (429), límite temporal (429), modelo inexiste
   - el permiso vive en la memoria del proceso;
   - el control de `Origin` sigue sin ser autenticación: el backend con la IA habilitada debe usarse solo en el propio equipo;
   - el historial que se comparte son textos que el usuario ya vio, pero sale del equipo en cada mensaje autorizado.
+
+
+## 11. Motor de análisis con Pandas (Fase 4A)
+
+- **Sin código del modelo:** solo se ejecutan las funciones del catálogo (`OPERATIONS` en `analysis_engine.py`). No hay `eval`, `exec`, SQL ni texto del plan que se interprete como código.
+- **Ningún dato va a OpenAI para calcular.** `POST /api/analysis/execute` no usa el proveedor de IA ni la autorización de envíos. Ejecutar un análisis y autorizar un envío a la IA son acciones separadas.
+- **Planes del backend, no del navegador:** solo se ejecutan planes que el backend validó y que están aprobados (404 o 409 en otro caso).
+- **Mismos límites que la carga:**
+  - `Origin` autorizado;
+  - 25 MB por archivo y 60 MB por pedido;
+  - filas, columnas, celdas y descompresión de XLSX (con `read_dataset`);
+  - una ejecución simultánea;
+  - como máximo 500 filas por resultado.
+- **Sin persistencia:** los archivos se procesan en memoria y se descartan; los originales no se modifican. El navegador guarda el `File` solo en memoria.
+- **Demo pública:** sin motor, porque no tiene backend.
+- **Limitación:** el control de `Origin` no es autenticación. El backend debe usarse solo en el propio equipo.

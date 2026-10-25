@@ -4,7 +4,8 @@ import { service as defaultService } from '@/services'
 import type { Dataset, DatasetProfile } from '@/types/domain'
 import { MAX_SOURCES } from '@/lib/datasetCatalog'
 import type { AIGatewayClient } from '@/services/aiGateway'
-import { AIGatewayContext, defaultAIGateway, ServiceContext } from './serviceContext'
+import type { AnalysisEngineClient } from '@/services/analysisEngine'
+import { AIGatewayContext, AnalysisEngineContext, defaultAIGateway, defaultAnalysisEngine, ServiceContext } from './serviceContext'
 import { AnalysisSessionContext, type AnalysisSessionState } from './sessionContext'
 
 const EMPTY_SESSION: AnalysisSessionState = {
@@ -17,9 +18,10 @@ const EMPTY_SESSION: AnalysisSessionState = {
   approvedPlanIds: [],
   confirmedPlanIds: [],
   aiConversationGrant: null,
+  analysisRun: null,
 }
 // Lo que depende de la frontera de privacidad: conversación, planes y permiso de conversación.
-const CONVERSATION_RESET = { aiChat: [], approvedPlanIds: [], confirmedPlanIds: [], aiConversationGrant: null }
+const CONVERSATION_RESET = { aiChat: [], approvedPlanIds: [], confirmedPlanIds: [], aiConversationGrant: null, analysisRun: null }
 // Cambiar las fuentes obliga a revisar de nuevo, a crear otro proyecto y a empezar otra conversación.
 const SOURCES_CHANGED = { projectId: null, review: null, reviewConfirmed: false, ...CONVERSATION_RESET }
 
@@ -28,24 +30,31 @@ interface AppProvidersProps {
   service?: DataDecisionService
   /** Cliente de la frontera de IA; null = sin conexión (demo pública). */
   aiGateway?: AIGatewayClient | null
+  /** Motor de análisis con Pandas; null = sin backend (demo pública). */
+  analysisEngine?: AnalysisEngineClient | null
 }
 
-export function AppProviders({ children, service = defaultService, aiGateway = defaultAIGateway }: AppProvidersProps) {
+export function AppProviders({
+  children,
+  service = defaultService,
+  aiGateway = defaultAIGateway,
+  analysisEngine = defaultAnalysisEngine,
+}: AppProvidersProps) {
   const [session, setSession] = useState<AnalysisSessionState>(EMPTY_SESSION)
 
   // Cambiar las fuentes implica empezar un proyecto nuevo.
-  const addSource = useCallback((dataset: Dataset, profile: DatasetProfile) => {
+  const addSource = useCallback((dataset: Dataset, profile: DatasetProfile, file?: File) => {
     setSession((current) => ({
       ...current,
       ...SOURCES_CHANGED,
-      sources: [...current.sources, { dataset, profile }].slice(0, MAX_SOURCES),
+      sources: [...current.sources, { dataset, profile, file }].slice(0, MAX_SOURCES),
     }))
   }, [])
-  const replaceSource = useCallback((datasetId: string, dataset: Dataset, profile: DatasetProfile) => {
+  const replaceSource = useCallback((datasetId: string, dataset: Dataset, profile: DatasetProfile, file?: File) => {
     setSession((current) => ({
       ...current,
       ...SOURCES_CHANGED,
-      sources: current.sources.map((s) => (s.dataset.id === datasetId ? { dataset, profile } : s)),
+      sources: current.sources.map((s) => (s.dataset.id === datasetId ? { dataset, profile, file } : s)),
     }))
   }, [])
   const removeSource = useCallback((datasetId: string) => {
@@ -74,6 +83,9 @@ export function AppProviders({ children, service = defaultService, aiGateway = d
   }, [])
   const setAIConversationGrant = useCallback((aiConversationGrant: AnalysisSessionState['aiConversationGrant']) => {
     setSession((current) => ({ ...current, aiConversationGrant }))
+  }, [])
+  const setAnalysisRun = useCallback((analysisRun: AnalysisSessionState['analysisRun']) => {
+    setSession((current) => ({ ...current, analysisRun }))
   }, [])
 
   // Un permiso que se descarta (revocación, cambio de fuentes o de revisión) también se revoca en el backend.
@@ -106,6 +118,7 @@ export function AppProviders({ children, service = defaultService, aiGateway = d
       markPlanApproved,
       confirmPlans,
       setAIConversationGrant,
+      setAnalysisRun,
       reset,
     }),
     [
@@ -121,6 +134,7 @@ export function AppProviders({ children, service = defaultService, aiGateway = d
       markPlanApproved,
       confirmPlans,
       setAIConversationGrant,
+      setAnalysisRun,
       reset,
     ],
   )
@@ -128,7 +142,9 @@ export function AppProviders({ children, service = defaultService, aiGateway = d
   return (
     <ServiceContext.Provider value={service}>
       <AIGatewayContext.Provider value={aiGateway}>
-        <AnalysisSessionContext.Provider value={value}>{children}</AnalysisSessionContext.Provider>
+        <AnalysisEngineContext.Provider value={analysisEngine}>
+          <AnalysisSessionContext.Provider value={value}>{children}</AnalysisSessionContext.Provider>
+        </AnalysisEngineContext.Provider>
       </AIGatewayContext.Provider>
     </ServiceContext.Provider>
   )

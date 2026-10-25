@@ -18,6 +18,7 @@ import { Card } from '@/components/ui/Card'
 import { EmptyState, ErrorState, Spinner } from '@/components/ui/Feedback'
 import { FeasibilityBadge } from '@/components/ui/FeasibilityBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { AnalysisExecution } from '@/components/analysis/AnalysisExecution'
 import { AIPlanDetails } from '@/components/chat/AIReplyCard'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useAsync } from '@/hooks/useAsync'
@@ -144,15 +145,17 @@ function AIPlanConfirmation() {
       </div>
 
       <Alert tone="info" title="Todavía no se ejecuta ningún cálculo">
-        Aprobar un plan y confirmarlo acá no consulta a la IA ni procesa tus datos. Los cálculos con Pandas sobre estos
-        planes llegan en la próxima etapa. Estos planes viven en la memoria de la sesión: se pierden al recargar la página
-        o reiniciar el backend.
+        Aprobar un plan y confirmarlo acá no consulta a la IA ni procesa tus datos. El cálculo con Pandas ocurre solo
+        cuando, después de confirmar, pulsás «Ejecutar análisis». Estos planes viven en la memoria de la sesión: se pierden
+        al recargar la página o reiniciar el backend.
       </Alert>
+
+      {confirmed && <AnalysisExecution plans={approved} />}
 
       <Card className="sticky bottom-4 z-10 p-4 shadow-elevated sm:p-5">
         {confirmed ? (
           <Alert tone="success" title="Propuesta confirmada">
-            Quedó lista para el motor de análisis de la próxima etapa. Podés volver al asistente si querés ajustarla.
+            Ya podés ejecutar el análisis con Pandas. Podés volver al asistente si querés ajustarla.
           </Alert>
         ) : (
           <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-700">

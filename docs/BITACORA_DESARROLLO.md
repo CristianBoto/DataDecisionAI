@@ -30,6 +30,7 @@ Autor: Damián Boto. Documento de base para la exposición final.
 | 6n. Fase 3B.2 — Integración real con OpenAI (probada con proveedores falsos) | Cambios sin confirmar; la primera llamada real queda pendiente de autorización del autor |
 | 6o. Error 404 al cargar datasets con `VITE_DEMO_MODE=false` | Cambios sin confirmar; error detectado por el autor en la primera prueba de integración de la Fase 3B.2 |
 | 6p. Primeras llamadas reales, plan aprobado en «Confirmar» y autorización por conversación | Cambios sin confirmar; problemas detectados por el autor en las primeras pruebas reales |
+| 6q. Fase 4A — Motor de análisis real con Python y Pandas | Cambios sin confirmar |
 | 7. Decisión de minimización de datos para la IA | Registrada en [SEGURIDAD.md](SEGURIDAD.md) y [ARCHITECTURE.md](ARCHITECTURE.md); implementación pendiente |
 
 ---
@@ -510,6 +511,45 @@ Después, el autor aprobó un plan. La aplicación mostró "Plan aprobado y guar
 | **Ejecución de cálculos** (próxima etapa) | Pandas calculará los planes confirmados | — Todavía no implementada |
 
 **Problema relacionado en la verificación.** Los heredocs del shell volvieron a fallar con algunos contenidos. Se usaron scripts escritos como archivos.
+
+## 6q. Fase 4A — Motor de análisis real con Python y Pandas (sin confirmar)
+
+**Objetivo.** Que un plan aprobado produzca resultados numéricos verdaderos, calculados con Pandas desde el archivo cargado. La IA no participa del cálculo.
+
+**Inspección inicial.**
+- `/api/datasets/profile` lee el archivo, devuelve el perfil y lo descarta: no hay datos guardados para calcular.
+- El navegador tampoco conservaba el archivo: solo guardaba el perfil.
+- Los planes aprobados existen en el registro del backend (memoria) y en la sesión del navegador.
+
+**Decisión sobre el acceso a los datos.**
+- El navegador conserva el `File` original **solo en memoria**.
+- Al pulsar «Ejecutar análisis», lo **vuelve a enviar** junto con los identificadores de los planes y la correspondencia de columnas.
+- El backend calcula sobre una copia en memoria y la descarta.
+- Se descartó guardar archivos en el servidor: agregaba almacenamiento, limpieza y riesgos de privacidad innecesarios para un MVP local.
+
+**Implementación.**
+- **Motor:** `analysis_engine.py`, con un catálogo cerrado de operaciones, cada una con su función. Se agregó la mediana, que usa el mismo camino que el promedio, y la frecuencia y los valores distintos, que son conteos.
+- **Endpoint:** `POST /api/analysis/execute`. Toma los planes del registro del backend y exige que estén aprobados.
+- **Lectura compartida:** se extrajo `read_dataset` del perfilador, para que el motor lea igual y con los mismos límites.
+- **Interfaz:** en «Confirmar», después de la confirmación final, aparecen «Ejecutar análisis», la unidad opcional de cada cantidad y tablas con los resultados.
+- Detalle de funciones, flujo de datos, validaciones y operaciones de Pandas en [ARCHITECTURE.md](ARCHITECTURE.md), sección "Motor de análisis con Pandas".
+
+**Verificación del caso obligatorio (CSV sintético de ventas en ARS).** Pandas produjo:
+
+| Agrupación | Resultado |
+|------------|-----------|
+| Enero | 23.000 |
+| Febrero | 27.500 |
+| Marzo | 32.000 |
+| Tecnología | 54.000 |
+| Indumentaria | 28.500 |
+| Total general | 82.500 |
+
+Se comprobó en pruebas automáticas y en la aplicación.
+
+**Problemas encontrados.**
+- **Heredocs del shell:** volvieron a fallar con algunos contenidos. Se usaron scripts escritos como archivos.
+- **Tiempo de una prueba:** con la suite completa en paralelo, la prueba de punta a punta del plan aprobado superó el límite de 5 s de Vitest. Era un tiempo agotado, no un fallo de aserción. Se le dio un límite de 15 s.
 
 ## 7. Demo pública en Cloudflare Pages (commit `1fe248a`)
 

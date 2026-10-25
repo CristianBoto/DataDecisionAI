@@ -176,7 +176,7 @@ describe('plan aprobado y paso «Confirmar»', () => {
     expect(gateway.sendInConversation).not.toHaveBeenCalled()
     expect(gateway.approvePlan).toHaveBeenCalledTimes(1)
     expect(runSpy).not.toHaveBeenCalled()
-  })
+  }, 15_000) // recorrido largo de punta a punta: con la suite completa en paralelo supera los 5 s por defecto
 
   it('el paso del encabezado también lleva al plan aprobado', async () => {
     const { user, router } = await reachRealAssistant()

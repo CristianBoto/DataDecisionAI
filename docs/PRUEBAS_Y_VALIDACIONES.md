@@ -710,3 +710,48 @@ Cambios sin confirmar.
 - el navegador no hizo solicitudes fuera del equipo.
 
 El registro de consumo de esa verificación (solo con datos simulados) se guardó en una carpeta temporal y se eliminó.
+
+
+## 24. Fase 4A — Motor de análisis con Pandas (✅ verificada, 25/10/2026)
+
+Cambios sin confirmar. **Sin llamadas reales a OpenAI ni consumo.** El motor se prueba con archivos reales y Pandas real; la IA está deshabilitada o simulada.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **169 de 169** (140 anteriores, + 29 en `tests/test_analysis_engine.py`) |
+| Frontend (`npm test`) | **139 de 139** en 16 archivos, tres ejecuciones seguidas (132 anteriores, + 7 en `test/analysisExecution.test.tsx`; a una prueba larga se le amplió el tiempo límite) |
+| Lint, typecheck y build pública | Sin errores |
+
+**Caso obligatorio** (CSV sintético `fecha,sector,ventas`, 6 filas, ARS):
+
+| Valor esperado | Resultado de Pandas |
+|----------------|---------------------|
+| Enero: 23.000 ARS | ✅ 23000.0 (`time_series`, período `2026-01`) |
+| Febrero: 27.500 ARS | ✅ 27500.0 |
+| Marzo: 32.000 ARS | ✅ 32000.0 |
+| Tecnología: 54.000 ARS | ✅ 54000.0 (`group_by` por `sector`) |
+| Indumentaria: 28.500 ARS | ✅ 28500.0 |
+| Total general: 82.500 ARS | ✅ 82500.0 (`sum`), 6 filas usadas |
+
+| Requisito | Prueba |
+|-----------|--------|
+| Promedio, mínimo, máximo, mediana, conteo, comparación, frecuencias y distintos | Promedio por sector: 9.500 y 18.000; mínimo 8.000; máximo 21.000; mediana 13.000; 3 registros por sector; participación de Tecnología: 65,45 %; frecuencias 3 y 3; distintos: 2 sectores y 3 fechas |
+| Plan sin aprobación o inexistente | 409 «no está aprobado» y 404 «Pedí la propuesta de nuevo» |
+| Archivo faltante u otro archivo | 422 «Falta el archivo de la fuente A» y 422 «¿se cargó otro archivo?» |
+| Columnas no autorizadas | El plan queda en error, con el motivo |
+| Tipos incompatibles | Sumar una categórica, promediar una temporal, serie temporal sin columna temporal, sumar un identificador: error comprensible en esa operación, el resto sigue y el plan queda "parcial" |
+| Operaciones no disponibles | `std` y `correlation`: «todavía no está disponible», sin reemplazo |
+| Fechas inválidas | Quedan en el grupo «(sin dato)», con advertencia |
+| Faltantes | La celda vacía nunca suma. `NA` sin decidir: se excluye y se avisa. `NA` «tratar como faltante»: se excluye sin aviso. Los registros se cuentan todos |
+| Columnas renombradas | El nombre que vio la IA se traduce a la columna real |
+| Dos fuentes independientes | Resultados separados para A y B (B con años), sin unir |
+| Originales y almacenamiento | El contenido no cambia y no se crea ningún archivo |
+| Seguridad del endpoint | `Origin` externo: 403; archivo de más de 25 MB: 413; pedido inválido: 422 |
+| Límite de resultados | 600 grupos se recortan a 500, con advertencia |
+| Conversión de números y fechas | `15.000`, `1.234,56`, `1,234.56`, `3,5`; formato `dd/mm/aaaa` |
+| Interfaz | «Ejecutar análisis» solo después de la confirmación final. Envía el `File` original y la correspondencia de columnas, con la unidad ARS. Muestra 23.000/27.500/32.000, 54.000/28.500 y 82.500 ARS. Informa la operación no disponible y el estado "Parcial". No consulta a la IA. Los resultados se conservan al navegar. Muestra los errores del backend. Sin backend no hay motor |
+
+**Verificación en el navegador.** Backend local con el **motor real** y un **proveedor de IA falso** (sin red ni OpenAI); frontend con `VITE_DEMO_MODE=false`:
+- se cargó el CSV obligatorio, se aprobó el plan, se confirmó y se pulsó «Ejecutar análisis» con la unidad ARS;
+- la aplicación mostró 2026-01: 23.000 ARS, 2026-02: 27.500 ARS y 2026-03: 32.000 ARS; Indumentaria: 28.500 ARS y Tecnologia: 54.000 ARS; total: 82.500 ARS, con 6 filas usadas;
+- el registro del backend muestra un solo `POST /api/analysis/execute`, y el navegador no hizo solicitudes fuera del equipo.
