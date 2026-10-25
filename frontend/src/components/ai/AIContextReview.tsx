@@ -198,6 +198,12 @@ export function AIContextReview({
           )}
           {problem && <Alert tone="warning">{problem}</Alert>}
           {result && <Alert tone={result.tone}>{result.text}</Alert>}
+          {embedded ? (
+            // En la revisión (acción A) no se autoriza ningún envío: eso ocurre mensaje por mensaje en el asistente.
+            <p className="text-xs text-slate-500">
+              Confirmar la revisión no envía nada. Cada envío a la IA se autoriza por separado en el asistente.
+            </p>
+          ) : (
           <div className="flex flex-wrap gap-2">
             {result?.final ? null : !prepared ? (
               <Button onClick={() => void handlePrepare()} disabled={!gateway || !!problem} loading={busy}>
@@ -208,12 +214,11 @@ export function AIContextReview({
                 Autorizar este envío
               </Button>
             )}
-            {!embedded && (
-              <Button variant="ghost" onClick={handleCancel} disabled={busy}>
-                Cancelar
-              </Button>
-            )}
+            <Button variant="ghost" onClick={handleCancel} disabled={busy}>
+              Cancelar
+            </Button>
           </div>
+          )}
         </div>
       </div>
     </Card>

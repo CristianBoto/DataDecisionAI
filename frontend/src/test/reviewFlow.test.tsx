@@ -79,8 +79,9 @@ describe('revisión obligatoria antes de conversar', () => {
     await completeReview(user, 'Comparar montos por país')
     await waitFor(() => expect(router.state.location.pathname).toBe('/analisis/asistente'))
 
-    // El objetivo llega a la conversación sin enviarse solo.
-    expect(await screen.findByRole('textbox', { name: /Mensaje/i })).toHaveValue('Comparar montos por país')
+    // El objetivo llega a la conversación como resumen, sin enviarse solo ni copiarse en el chat.
+    expect(await screen.findByRole('region', { name: 'Objetivo confirmado' })).toHaveTextContent('Comparar montos por país')
+    expect(screen.getByRole('textbox', { name: /Mensaje/i })).toHaveValue('')
 
     // Las decisiones se conservan: al volver a la configuración siguen aplicadas.
     await user.click(screen.getByRole('link', { name: /Modificar configuración de datos/ }))
@@ -111,10 +112,11 @@ describe('revisión obligatoria antes de conversar', () => {
     await user.type(nameInput, 'importe')
     expect(preview().sources[0].columns.map((c: { name: string }) => c.name)).toEqual(['pais', 'importe'])
 
-    await user.click(screen.getByRole('button', { name: 'Validar contenido' }))
-    const sent = prepare.mock.calls[0][0]
-    expect(sent.sources[0].columns.map((c: { name: string }) => c.name)).toEqual(['pais', 'importe'])
-    expect(JSON.stringify(sent)).not.toMatch(/codigo|ventas\.csv|001/)
+    // La revisión (acción A) no valida ni autoriza envíos: eso ocurre mensaje por mensaje en el asistente.
+    expect(screen.queryByRole('button', { name: 'Validar contenido' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Cada envío a la IA se autoriza por separado en el asistente/)).toBeInTheDocument()
+    expect(JSON.stringify(preview())).not.toMatch(/codigo|ventas\.csv|001/)
+    expect(prepare).not.toHaveBeenCalled()
   })
 
   it('cambiar la revisión después de confirmarla obliga a confirmarla de nuevo', async () => {

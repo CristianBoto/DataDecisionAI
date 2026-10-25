@@ -107,7 +107,17 @@ Cargar → **revisar datos y privacidad** → conversar → confirmar. Las decis
 - El punto de conexión en la interfaz ya existe: el panel «Enviar a la IA real» (`MessageAuthorization`) y el hook `useAIAuthorization`. Hoy terminan en «Prueba finalizada…» (403/501); en 3B.2 ese estado final se reemplaza por la respuesta estructurada y validada de la IA, sin cambiar la autorización de un solo uso.
 - Pendiente para la fase de cálculo: aplicar las decisiones en Pandas sobre copias (por ejemplo, tratar `NA` como faltante solo donde el usuario lo indicó).
 
-## Fase 3B.2 — Integración real con OpenAI (planificada, alcance reducido)
+## Fase 3B.2 — Integración real con OpenAI (implementada; primera llamada real pendiente)
+
+**Estado (25/10/2026).** Todos los requisitos de la tabla están implementados y probados con proveedores falsos, sin consumir tokens. Ver [SEGURIDAD.md](SEGURIDAD.md), sección 10.
+
+Lo que falta:
+1. ~~**Primera llamada real**~~: realizada por el autor con datos sintéticos (dos consultas, USD 0,0004 y 0,0005). Ver la bitácora, sección 6p. También quedaron resueltos el plan aprobado en «Confirmar» y la autorización por conversación.
+1b. **Persistir planes y aprobaciones**, hoy en memoria, cuando llegue el motor de análisis.
+2. **Caso del autor con la IA real:** indicadores provinciales y SIACAM por separado, preguntas sobre `PPRO` y los `NA`. Registrar el resultado y el consumo.
+3. **Ajustar las instrucciones** si el modelo no pregunta lo esperado.
+
+**Plan original:**
 
 **Objetivo:** que la IA comprenda objetivos sobre una o varias fuentes, haga preguntas aclaratorias y proponga planes para aprobar. Pandas sigue calculando; la IA no ejecuta nada.
 

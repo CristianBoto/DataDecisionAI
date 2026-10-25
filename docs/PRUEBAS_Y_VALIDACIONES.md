@@ -578,3 +578,135 @@ La evidencia del autor no incluye inspección de red. Que no se transmitieron da
 - el estado final que muestra la interfaz;
 - el rechazo del backend (`AI_ENABLED=false` → 403);
 - `NotImplementedProvider`, que no hace llamadas externas (sección 15).
+
+
+## 21. Fase 3B.2 — Integración con OpenAI con proveedores falsos (✅ verificada, 25/10/2026)
+
+Cambios sin confirmar. **Ninguna prueba consumió tokens.**
+- El backend usa un proveedor falso o un cliente de OpenAI simulado, y la red externa queda bloqueada: cualquier conexión hace fallar la prueba.
+- El frontend usa una frontera falsa.
+- **No se realizó ninguna llamada real a OpenAI.**
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **121 de 121** (84 anteriores, 4 adaptadas, + 37 en `tests/test_ai_openai.py`) |
+| Frontend (`npm test`) | **117 de 117** en 13 archivos (108 anteriores; los afectados por «Comenzar conversación» se adaptaron, + 9 nuevas) |
+| Lint, typecheck y build pública | Sin errores; el paquete público no contiene la dirección de OpenAI, claves ni el nombre del modelo |
+
+| Requisito | Prueba |
+|-----------|--------|
+| IA deshabilitada | 403 y nada enviado; en el frontend, prueba de autorización con estado final |
+| Clave ausente | 503 «Falta configurar OPENAI_API_KEY…», antes de cualquier envío |
+| Contexto inválido | Lista blanca (422); historial con más de 8 turnos, rol no permitido o campos extra (422); contexto demasiado grande (413) |
+| Autorización faltante, vencida, consumida o con otra huella | 404, 410, 404 y 409; tras un tiempo agotado, la autorización ya está consumida |
+| Cambios posteriores a la autorización | La huella cambia con el mensaje y el historial; el frontend cancela lo validado |
+| Presupuesto insuficiente | 402 antes de enviar; el proveedor no recibe nada |
+| Límite de solicitudes | 429 en la solicitud que supera el límite |
+| Consumo real | 1.200 tokens de entrada y 400 de salida = USD 0,00032; el registro no contiene objetivo ni columnas; persiste entre reinicios; un registro dañado bloquea y no se sobrescribe |
+| Tiempo agotado | 504, una sola llamada (sin reintentos) y registro del máximo estimado |
+| Error de conexión | 502, sin costo registrado |
+| Credenciales, cuota, límite temporal, modelo inexistente | Mensajes comprensibles, sin la clave |
+| Respuestas incompletas, rechazadas o malformadas | 502 con el motivo; se registra el consumo y no se guarda ningún plan |
+| Alias o columnas no autorizados, sin planes ni preguntas, bloques de código | 502; se descarta la respuesta |
+| Operación fuera del catálogo | El esquema la rechaza |
+| Caso obligatorio (A: indicadores, B: SIACAM, "sin unir") | Respuesta simulada: dos planes independientes (uno por fuente), preguntas sobre `NA` y `PPRO`. Lo enviado no contiene nombres de archivo ni valores. Los planes quedan "propuestos" |
+| Una y tres fuentes | Un plan por fuente |
+| Llamada al proveedor | `responses.parse` con `text_format`, `max_output_tokens`, razonamiento `low`, `store=False`; cliente con `max_retries=0` y tiempo máximo |
+| Aprobación de plan | Queda registrada con `executed: false`; plan inexistente: 404; `Origin` no autorizado: 403 |
+| Objetivo sin duplicar | `message` igual al objetivo se omite (backend y frontend) |
+| «Comenzar conversación» | Resumen del objetivo confirmado. En modo DEMO lo envía una vez; en modo IA real pasa por la autorización y la respuesta aparece solo después de autorizar |
+| Conversación | Los mensajes siguientes llevan el historial y su propia autorización; las respuestas anteriores se conservan; cancelar devuelve el texto al chat |
+| Errores en la interfaz | 402, 429, 502 y 504 se muestran sin reintento automático y sin perder la conversación |
+| Diferenciación | Insignia «IA real · gpt-6-luna» y aviso propio; el modo DEMO conserva su aviso; la revisión del paso 2 ya no autoriza envíos |
+| Demo pública | Sin cliente de IA ni solicitudes |
+
+**Verificación en el navegador.** Backend local con `AI_ENABLED=true` y una **clave falsa**; no se autorizó ningún envío:
+- modo IA real visible, con la insignia «IA real · gpt-6-luna»;
+- la revisión sin botones de envío;
+- resumen del objetivo y «Comenzar conversación»;
+- panel con el objetivo sin duplicar y costo máximo estimado de USD 0,0015;
+- «Cancelar» canceló las solicitudes validadas, y el navegador no hizo solicitudes fuera del equipo.
+
+
+## 22. Error 404 al cargar datasets con `VITE_DEMO_MODE=false` (✅ corregido, 25/10/2026)
+
+Cambios sin confirmar. **Error detectado por el autor** (evidencia del autor: DevTools/Network mostró `POST /api/datasets` → 404; curl a `POST /api/datasets/profile` con `Origin: http://localhost:5174` → 200, con el CSV sintético de 6 filas `fecha`, `sector`, `ventas`).
+
+**Causa:** con `VITE_DEMO_MODE=false` se usaba el proveedor de la API completa, todavía no implementada en el backend. Detalle en la bitácora, sección 6o.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Frontend (`npm test`) | **120 de 120** en 14 archivos, tres ejecuciones seguidas sin fallos (117 anteriores, + 2 en `test/localBackendMode.test.tsx`, + 1 de aislamiento en `lib/config.test.ts`) |
+| Backend (`python -m pytest`) | **121 de 121** (sin cambios en el backend) |
+| Lint, typecheck y build pública | Sin errores |
+
+| Requisito | Prueba |
+|-----------|--------|
+| La carga devuelve un perfil real y no un 404 | `createService(false, false)` perfila con `POST /api/datasets/profile` y **nunca** llama a `POST /api/datasets` ni a `/api/projects`. `fetch` se simula con la respuesta **real** del backend para el CSV sintético, generada con el perfilador de Python (`test/fixtures/ventasSinteticasProfile.json`) |
+| Se reconocen `fecha`, `sector` y `ventas` | Interpretados como temporal, categórica y cuantitativa en el perfil y en la revisión |
+| Recorrido Cargar → Revisar → Conversar | Completo, con la IA real habilitada (frontera falsa) |
+| Preparación y validación sin llamadas externas | «Comenzar conversación» valida el contexto: las tres columnas con su interpretación, sin valores ni nombre de archivo. Muestra el costo estimado y **no** se autoriza nada; la única solicitud de red de la app es el perfilado |
+| Pruebas aisladas del entorno local | Con el `.env.local` del autor (`VITE_DEMO_MODE=false`), las pruebas corren como la demo pública y `fetch` sin simular se rechaza |
+
+**Verificación en el navegador.** Con la configuración del autor (`VITE_DEMO_MODE=false`, `VITE_BACKEND_PROFILING=true`) contra un backend local propio en otro puerto, `AI_ENABLED=true` y una **clave falsa**; no se autorizó ningún envío:
+- el CSV se cargó con `POST /api/datasets/profile` (200), sin 404;
+- la revisión mostró las tres columnas con su interpretación;
+- el asistente en modo IA real validó el contexto y mostró el costo máximo estimado (USD 0,0014);
+- «Cancelar» canceló lo validado;
+- el registro del backend no muestra `POST /api/datasets` ni autorizaciones.
+
+**Demo pública (build de producción).** Recorrido hasta la respuesta del asistente DEMO, sin cliente de IA y sin solicitudes fuera del sitio.
+
+
+## 23. Plan aprobado en «Confirmar» y autorización por conversación (✅ verificada, 25/10/2026)
+
+Cambios sin confirmar.
+
+### Evidencia aportada por el autor (llamadas reales, no ejecutadas por las herramientas)
+
+| Consulta real | Resultado | Tokens | Costo informado |
+|---------------|-----------|--------|-----------------|
+| 1. Objetivo sobre el CSV sintético (`fecha`, `sector`, `ventas`, 6 filas) | Interpretó el objetivo y formuló preguntas aclaratorias | 1.265 de entrada y 493 de salida | USD 0,0004 |
+| 2. Aclaraciones: `ventas` en ARS, una fila por sector y mes, sin faltantes | Incorporó las aclaraciones; propuso sumas, comparaciones entre sectores y series temporales | 1.517 de entrada y 723 de salida | USD 0,0005 |
+
+- **Aprobación:** el autor aprobó un plan; la aplicación mostró "Plan aprobado y guardado…" y "2 planes propuestos · 1 aprobado".
+- **Defecto detectado por el autor:** el paso «Confirmar» decía "Todavía no hay una propuesta".
+- **Problema de uso detectado por el autor:** autorizar cada mensaje resultaba lento.
+
+### Verificaciones de las herramientas de desarrollo (sin llamadas reales ni consumo)
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **140 de 140** (121 anteriores, + 19 en `tests/test_ai_conversation.py`) |
+| Frontend (`npm test`) | **132 de 132** en 15 archivos, dos ejecuciones seguidas (120 anteriores, 2 adaptadas, + 12 en `test/aiPlanAndConversation.test.tsx`) |
+| Lint, typecheck y build pública | Sin errores; el paquete público no contiene la dirección de OpenAI ni claves |
+
+| Requisito | Prueba |
+|-----------|--------|
+| Propuesta estructurada en la sesión; la segunda no borra la primera | Dos respuestas con dos planes cada una: las dos quedan visibles; "4 planes propuestos · 0 aprobados" |
+| Aprobar exactamente el plan elegido | Aprobar un plan de la segunda propuesta marca solo ese (`plan-2a`); la tarjeta indica "4 planes propuestos · 1 aprobado" |
+| «Continuar a Confirmar» y el paso del encabezado | Ambos llevan al paso 4 con el plan aprobado |
+| Plan completo en «Confirmar» | Título, fuente y archivo, motivo, columnas, operación, gráfico, limitaciones, objetivo, aclaraciones y advertencias. Solo el aprobado: el de la primera propuesta no aparece |
+| Volver al asistente | Conserva planes y aprobación; ir y venir no llama a `prepare`, `authorize` ni a la conversación; no se ejecutan cálculos (`runAnalysis` sin llamadas) |
+| Sin planes aprobados | Estado vacío "Todavía no aprobaste ningún plan" y sin botón de confirmación |
+| Confirmación final | Requiere marcar la revisión; muestra "Propuesta confirmada" sin calcular |
+| Consentimiento explícito | El primer envío muestra el panel con las dos opciones y su alcance; el JSON queda plegado |
+| Autorización por mensaje | Sigue funcionando: el mensaje siguiente vuelve a mostrar el panel |
+| Conversación autorizada | Los siguientes mensajes van directo (sin nueva validación), con historial y consumo visible |
+| El backend exige un permiso vigente | Sin permiso 404, vencido 410, tope de mensajes 429, IA deshabilitada 403 |
+| Cambio de la frontera de privacidad | Objetivo, interpretación, fuentes o columnas distintas: 409 y permiso eliminado. En la interfaz, cambiar la revisión revoca el permiso en el backend y reinicia la conversación |
+| Mensajes normales | No invalidan el permiso |
+| Revocación | «Desactivar autorización de conversación» llama a `DELETE`; el siguiente envío vuelve a pedir autorización |
+| Límites con permiso | Solicitudes por sesión (429), presupuesto (402), tamaño del contexto (413) y validación de la respuesta (502). En la interfaz, un 402 se informa, el texto vuelve al chat y no se reintenta |
+| Concurrencia | Dos envíos simultáneos en la misma conversación: 409. Seis envíos simultáneos con presupuesto para cuatro: exactamente cuatro llegan al proveedor y el gasto no supera el presupuesto |
+| Origen no autorizado | `POST` y `DELETE` de conversaciones: 403 |
+| Demo pública | Sin cliente de IA (pruebas anteriores y build pública) |
+
+**Verificación en el navegador.** Backend local propio con un **proveedor falso**, sin red ni OpenAI; frontend con `VITE_DEMO_MODE=false`:
+- el primer envío mostró las dos opciones; con «Autorizar esta conversación», el segundo mensaje se envió directo (2 respuestas, sin panel);
+- aprobar el plan de la segunda propuesta mostró el aviso, y «Continuar a Confirmar» llevó al paso 4 con el plan completo, la aclaración y la advertencia;
+- volver por el encabezado conservó el plan aprobado;
+- «Desactivar autorización de conversación» hizo `DELETE` en el backend, y el siguiente mensaje volvió a pedir autorización;
+- el navegador no hizo solicitudes fuera del equipo.
+
+El registro de consumo de esa verificación (solo con datos simulados) se guardó en una carpeta temporal y se eliminó.

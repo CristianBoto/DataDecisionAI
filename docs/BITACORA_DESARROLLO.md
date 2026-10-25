@@ -27,6 +27,9 @@ Autor: Damián Boto. Documento de base para la exposición final.
 | 6k. Una sola pantalla de configuración de datos y autorización por mensaje | Incluido en el commit de cierre del recorrido de revisión y conversación; mejora detectada en las pruebas manuales del autor |
 | 6l. Ajustes de experiencia en el paso 3: panel de autorización, IA deshabilitada y objetivo inicial | Incluido en el commit de cierre del recorrido de revisión y conversación; problemas detectados en las pruebas manuales del autor |
 | 6m. Cierre del recorrido: validación manual del autor | Incluido en el commit de cierre del recorrido de revisión y conversación; evidencia aportada por el autor |
+| 6n. Fase 3B.2 — Integración real con OpenAI (probada con proveedores falsos) | Cambios sin confirmar; la primera llamada real queda pendiente de autorización del autor |
+| 6o. Error 404 al cargar datasets con `VITE_DEMO_MODE=false` | Cambios sin confirmar; error detectado por el autor en la primera prueba de integración de la Fase 3B.2 |
+| 6p. Primeras llamadas reales, plan aprobado en «Confirmar» y autorización por conversación | Cambios sin confirmar; problemas detectados por el autor en las primeras pruebas reales |
 | 7. Decisión de minimización de datos para la IA | Registrada en [SEGURIDAD.md](SEGURIDAD.md) y [ARCHITECTURE.md](ARCHITECTURE.md); implementación pendiente |
 
 ---
@@ -406,6 +409,107 @@ El autor probó en su navegador local el recorrido completo de las secciones 6i 
 Esa evidencia visual es **del autor** y se registra aparte de las pruebas automatizadas y de las verificaciones en el navegador hechas con las herramientas de desarrollo (secciones 16 a 19).
 
 Con esto se cierra la etapa de experiencia de usuario previa a la IA real. La siguiente es la Fase 3B.2 (OpenAI con límites de consumo y respuestas estructuradas); después vienen el motor de cálculo con Pandas, los tableros y los reportes PDF.
+
+## 6n. Fase 3B.2 — Integración real con OpenAI (sin confirmar)
+
+**Objetivo.** Un asistente real que comprenda qué necesita analizar la persona, pregunte cuando falte información y proponga planes estructurados. La IA propone, el usuario confirma y Pandas calculará en una etapa posterior.
+
+**Inspección inicial.**
+- La frontera de 3B.1 se reutilizó tal cual: lista blanca, huella, vencimiento y uso único. Solo se reemplazó el proveedor sin red.
+- El objetivo todavía aparecía precargado en el chat: se reemplazó por un resumen del objetivo confirmado con el botón **«Comenzar conversación»**.
+- La pantalla de revisión todavía permitía autorizar un envío: se quitó, porque confirmar la revisión no autoriza transmisiones.
+
+**Decisiones.**
+- **Modelo `gpt-6-luna`** (el preferido por el autor), verificado en la documentación oficial: Responses API, Structured Outputs, USD 0,10 / 0,50 por millón de tokens. Razonamiento `low` para acotar los tokens de salida, que incluyen el razonamiento.
+- **Salida estructurada con Pydantic** y **validación propia** contra el contexto autorizado. Structured Outputs garantiza la forma, no que las columnas existan; por eso el backend vuelve a comprobarlas.
+- **Cada plan usa una sola fuente.** Así, pedir "sin unir los datasets" se respeta por diseño; unir fuentes queda fuera de esta etapa.
+- **Controles de consumo en el backend:**
+  - límites de salida, contexto, solicitudes y presupuesto local de USD 1 (persistente);
+  - estimación y reserva antes de enviar;
+  - registro del consumo real;
+  - sin reintentos automáticos.
+- **Historial** de la conversación dentro del contenido aprobado, como máximo 8 turnos.
+- **Objetivo sin duplicar:** si el mensaje es el objetivo, solo se envía `objective`.
+- **Planes aprobables y guardados en memoria, sin ejecución.**
+
+**Problemas encontrados.**
+- **Heredoc del shell:** al editar algunos archivos con heredoc, el shell falló por el contenido. Se resolvió escribiendo los archivos directamente.
+- **Validación duplicada en desarrollo:** el modo estricto de React montaba dos veces el panel de envío, y una de las dos validaciones quedaba pendiente en el backend hasta vencer. Se agregó una numeración de validaciones: la superada se cancela. Se verificó en el navegador que ambas solicitudes se cancelan.
+
+**Primera llamada real.** No se realizó. Queda pendiente de la autorización explícita del autor, con datos sintéticos y costo acotado.
+
+## 6o. Error 404 al cargar datasets con `VITE_DEMO_MODE=false` (sin confirmar)
+
+**Problema detectado por el autor** en la primera prueba de integración de la Fase 3B.2, con esta configuración local:
+- `VITE_DEMO_MODE=false`, `VITE_BACKEND_PROFILING=true` y `VITE_API_BASE_URL=http://127.0.0.1:8000`;
+- backend con `AI_ENABLED=true`.
+
+Al cargar un CSV, el navegador hacía `POST /api/datasets` y el backend respondía **404** (verificado por el autor en DevTools). En cambio, `POST /api/datasets/profile` respondía 200 con curl, para un CSV sintético de 6 filas (`fecha`, `sector`, `ventas`).
+
+**Causa exacta.**
+- `createService` (`frontend/src/services/index.ts`) elegía, con `VITE_DEMO_MODE=false`, el proveedor HTTP (`httpProvider.ts`).
+- Ese proveedor implementa la **API completa planificada** en `docs/API_CONTRACT.md`: `POST /api/datasets` para guardar el archivo, `/api/datasets/{id}/profile`, `/api/projects`, la conversación y los resultados.
+- El backend actual solo implementa `/api/health`, `/api/datasets/profile` y `/api/ai/*`.
+- Además, `VITE_BACKEND_PROFILING` solo se tenía en cuenta dentro de DEMO.
+- Por eso, desactivar DEMO llevaba a una API inexistente: el 404 de la carga habría seguido en `/api/projects` y en la conversación.
+
+**Por qué no se redirigió `/api/datasets` al perfilado.** Los contratos son distintos. `/api/datasets` es una API de almacenamiento: guarda el archivo y devuelve un dataset persistido con identificador. `/api/datasets/profile` lee el archivo, devuelve el perfil y no guarda nada. Hacer pasar una por la otra ocultaría que el almacenamiento no existe.
+
+**Corrección mínima.**
+- Fuera de la demo pública, `createService` usa la **sesión local en memoria del navegador** con el **perfilado real de Pandas** (`POST /api/datasets/profile`). Es la misma composición que `VITE_DEMO_MODE=true` + `VITE_BACKEND_PROFILING=true`, que el backend actual sí soporta.
+- El proveedor HTTP completo se conserva, documentado como "todavía no se usa", para cuando exista esa API.
+- La franja superior distingue la **ejecución local** de la **demo pública**.
+- La demo pública no cambia.
+
+**Problema relacionado encontrado al verificar.**
+- **Síntoma:** una prueba de navegación fallaba de forma intermitente.
+- **Causa:** las pruebas de Vitest leían el `.env.local` del autor, que apunta a su backend real. Con ese backend en marcha y `AI_ENABLED=true`, algunas pruebas consultaban `/api/ai/status` y validaban contenido (`/api/ai/requests`) contra él.
+- **Impacto:** ninguna prueba autorizó envíos. El backend del autor informó `spent_usd: 0.0` y `requests_used: 0`: no se consumieron créditos.
+- **Corrección:**
+  - la configuración de Vitest fija las variables `VITE_*` de la demo pública;
+  - `fetch` queda bloqueado por defecto en las pruebas, salvo que cada prueba lo simule;
+  - una prueba comprueba ese aislamiento.
+
+## 6p. Primeras llamadas reales, plan aprobado en «Confirmar» y autorización por conversación (sin confirmar)
+
+**Evidencia aportada por el autor: primeras llamadas reales a OpenAI.** Con un CSV sintético de 6 filas (`fecha`, `sector`, `ventas`):
+
+| Consulta | Resultado informado | Consumo | Costo informado |
+|----------|---------------------|---------|-----------------|
+| 1 | OpenAI interpretó el objetivo y formuló preguntas aclaratorias | 1.265 tokens de entrada y 493 de salida | USD 0,0004 |
+| 2 | El autor aclaró que `ventas` son importes en ARS, que cada fila es el total de un sector en un mes y que no hay faltantes. OpenAI incorporó esas aclaraciones y propuso sumas, comparaciones entre sectores y series temporales | 1.517 tokens de entrada y 723 de salida | USD 0,0005 |
+
+Después, el autor aprobó un plan. La aplicación mostró "Plan aprobado y guardado…" y la tarjeta lateral "2 planes propuestos · 1 aprobado". Estas llamadas las hizo el autor; las herramientas de desarrollo no hicieron ninguna llamada real.
+
+**Problema 1 (detectado por el autor): el plan aprobado no llegaba a «Confirmar».** Al abrir el paso 4 aparecía "Todavía no hay una propuesta".
+- *Causa exacta:* `ConfirmPage` solo leía la propuesta del servicio DEMO (`service.getCurrentProposal`, en memoria del proveedor DEMO). Los planes de la IA real y su aprobación viven en la sesión del análisis (`aiChat` y `approvedPlanIds`), así que el paso 4 nunca los consultaba.
+- *Corrección:*
+  - **Una única fuente de verdad:** la sesión. `lib/aiPlans.ts` deriva de ahí los planes propuestos, los aprobados (en orden de aprobación), las aclaraciones del usuario y las advertencias.
+  - El asistente y «Confirmar» usan esas funciones y el mismo componente (`AIPlanDetails`). Se muestra **exactamente** el plan estructurado validado; nada se reconstruye desde texto libre.
+  - Al aprobar aparece «Plan aprobado correctamente», con «Continuar a Confirmar» y «Seguir conversando».
+  - Sin planes aprobados, el paso 4 muestra un estado vacío y no permite confirmar.
+  - Navegar no consulta a OpenAI ni ejecuta cálculos.
+
+**Problema 2 (detectado por el autor): autorizar cada mensaje era lento.** Cada mensaje exigía validar y autorizar.
+- *Decisión:* además de la autorización por mensaje (la opción por defecto, la más restrictiva), se puede **autorizar la conversación**. El permiso lo crea y lo controla el **backend**; no es un booleano de React.
+- *El permiso:*
+  - queda atado a la huella de la frontera de privacidad (objetivo y metadatos autorizados, sin mensaje ni historial);
+  - vence a los 30 minutos;
+  - admite 20 mensajes;
+  - se revoca desde el asistente;
+  - se anula si cambia la configuración de datos (el backend responde 409 y lo elimina; el frontend también lo revoca).
+- *Límites:* cada mensaje pasa por los mismos límites de tamaño, solicitudes y presupuesto. Dos envíos simultáneos en la misma conversación se rechazan, y la reserva de presupuesto impide gastar de más con solicitudes concurrentes.
+- *Diferencias entre conceptos:*
+
+| Concepto | Qué significa | Qué NO hace |
+|----------|---------------|-------------|
+| **Autorización de un mensaje** | Ese envío a OpenAI, con el contenido exacto revisado, una vez | No autoriza los mensajes siguientes |
+| **Autorización de la conversación** | Los próximos mensajes que el usuario envíe voluntariamente en esta conversación van a OpenAI sin volver a mostrar el panel. Cada envío comparte el mensaje, un historial limitado (hasta 8 turnos), el objetivo y los metadatos ya autorizados | No es permanente: vence (30 min), tiene tope de mensajes (20), se anula si cambia la configuración de datos y se puede revocar. No saltea ningún límite de consumo ni hace llamadas automáticas |
+| **Aprobación de un plan** (asistente) | El usuario elige un plan validado; el backend lo registra | No consulta a la IA ni calcula nada |
+| **Confirmación de la propuesta** (paso 4) | El usuario confirma los planes aprobados para la etapa siguiente | No ejecuta cálculos |
+| **Ejecución de cálculos** (próxima etapa) | Pandas calculará los planes confirmados | — Todavía no implementada |
+
+**Problema relacionado en la verificación.** Los heredocs del shell volvieron a fallar con algunos contenidos. Se usaron scripts escritos como archivos.
 
 ## 7. Demo pública en Cloudflare Pages (commit `1fe248a`)
 

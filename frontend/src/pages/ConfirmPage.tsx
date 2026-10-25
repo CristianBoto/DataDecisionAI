@@ -18,9 +18,12 @@ import { Card } from '@/components/ui/Card'
 import { EmptyState, ErrorState, Spinner } from '@/components/ui/Feedback'
 import { FeasibilityBadge } from '@/components/ui/FeasibilityBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { AIPlanDetails } from '@/components/chat/AIReplyCard'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useAsync } from '@/hooks/useAsync'
 import { useService } from '@/hooks/useService'
+import { approvedAIPlans, collectAIPlans, conversationClarifications } from '@/lib/aiPlans'
+import { buildDatasetCatalog } from '@/lib/datasetCatalog'
 import { getErrorMessage } from '@/services'
 
 const CHART_TYPE_LABEL = { bar: 'Barras', line: 'Líneas', area: 'Áreas', histogram: 'Distribución' }
@@ -41,13 +44,155 @@ function Empty({ children }: { children: ReactNode }) {
   return <p className="text-sm text-slate-400">{children}</p>
 }
 
+/**
+ * Paso 4 con la IA real: muestra los planes APROBADOS tal como los validó el
+ * backend (misma fuente que el asistente: la sesión). No consulta a OpenAI ni
+ * ejecuta cálculos; la confirmación final solo existe si hay un plan aprobado.
+ */
+function AIPlanConfirmation() {
+  const navigate = useNavigate()
+  const session = useAnalysisSession()
+  const { aiChat, approvedPlanIds, confirmedPlanIds, review, sources } = session
+  const [acknowledged, setAcknowledged] = useState(false)
+  const approved = approvedAIPlans(aiChat, approvedPlanIds)
+  const proposed = collectAIPlans(aiChat, approvedPlanIds).length
+  const objective = review?.objective.trim() ?? ''
+  const clarifications = conversationClarifications(aiChat, objective)
+  const fileByAlias = new Map(buildDatasetCatalog(sources).sources.map((s) => [s.alias, s.fileName]))
+  const confirmed = approved.length > 0 && approved.every((p) => confirmedPlanIds.includes(p.planId))
+
+  if (approved.length === 0) {
+    return (
+      <EmptyState
+        icon={<ClipboardCheck className="size-6" />}
+        title="Todavía no aprobaste ningún plan"
+        description={
+          proposed > 0
+            ? `El asistente propuso ${proposed} ${proposed === 1 ? 'plan' : 'planes'}. Aprobá el que quieras usar para continuar.`
+            : 'Conversá con el asistente para que proponga un plan de análisis.'
+        }
+        action={
+          <Link to="/analisis/asistente">
+            <Button>Volver al asistente</Button>
+          </Link>
+        }
+      />
+    )
+  }
+
+  const warnings = [...new Set(approved.flatMap((p) => p.reply.warnings))]
+
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow={
+          <>
+            <Badge tone="blue">Paso 4 de 4</Badge>
+            <Badge tone="green" icon={<CheckCircle2 className="size-3" aria-hidden />}>
+              {approved.length === 1 ? '1 plan aprobado' : `${approved.length} planes aprobados`}
+            </Badge>
+          </>
+        }
+        title="Confirmá la propuesta de análisis"
+        description="Estos son los planes que aprobaste, tal como los validó el backend. Nada se calcula todavía."
+      />
+
+      <Card className="relative overflow-hidden border-blue-200 bg-gradient-to-br from-navy-950 to-navy-800 p-6 text-white">
+        <div className="relative">
+          <p className="flex items-center gap-2 text-xs font-semibold tracking-wide text-cyan-300 uppercase">
+            <Target className="size-4" aria-hidden /> Objetivo confirmado
+          </p>
+          <p className="mt-2 text-lg leading-relaxed font-semibold">{objective}</p>
+          <p className="mt-3 text-sm text-slate-300">La IA lo interpretó así: {approved[0].reply.interpreted_objective}</p>
+        </div>
+      </Card>
+
+      {approved.map((p) => (
+        <Card key={p.planId} className="p-5" role="region" aria-label={`Plan aprobado: ${p.plan.title}`}>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold text-slate-900">{p.plan.title}</h2>
+            <Badge tone="neutral">
+              Fuente {p.plan.source_alias}
+              {fileByAlias.get(p.plan.source_alias) ? ` · ${fileByAlias.get(p.plan.source_alias)}` : ''}
+            </Badge>
+            <Badge tone="green">Aprobado</Badge>
+            <span className="text-xs text-slate-400">Propuesta {p.proposal}</span>
+          </div>
+          <AIPlanDetails plan={p.plan} />
+        </Card>
+      ))}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Section icon={<PencilLine className="size-4" />} title="Aclaraciones de la conversación">
+          {clarifications.length === 0 ? (
+            <Empty>Sin aclaraciones adicionales al objetivo.</Empty>
+          ) : (
+            <ul className="list-inside list-disc space-y-1 text-sm text-slate-700">
+              {clarifications.map((c, i) => <li key={i}>{c}</li>)}
+            </ul>
+          )}
+        </Section>
+        <Section icon={<AlertTriangle className="size-4" />} title="Advertencias y suposiciones">
+          {warnings.length === 0 ? (
+            <Empty>La IA no informó advertencias.</Empty>
+          ) : (
+            <ul className="list-inside list-disc space-y-1 text-sm text-slate-700">
+              {warnings.map((w) => <li key={w}>{w}</li>)}
+            </ul>
+          )}
+        </Section>
+      </div>
+
+      <Alert tone="info" title="Todavía no se ejecuta ningún cálculo">
+        Aprobar un plan y confirmarlo acá no consulta a la IA ni procesa tus datos. Los cálculos con Pandas sobre estos
+        planes llegan en la próxima etapa. Estos planes viven en la memoria de la sesión: se pierden al recargar la página
+        o reiniciar el backend.
+      </Alert>
+
+      <Card className="sticky bottom-4 z-10 p-4 shadow-elevated sm:p-5">
+        {confirmed ? (
+          <Alert tone="success" title="Propuesta confirmada">
+            Quedó lista para el motor de análisis de la próxima etapa. Podés volver al asistente si querés ajustarla.
+          </Alert>
+        ) : (
+          <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(e) => setAcknowledged(e.target.checked)}
+              className="mt-0.5 size-4 rounded border-slate-300 accent-blue-600"
+            />
+            Revisé los planes aprobados y entiendo sus limitaciones.
+          </label>
+        )}
+        <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <Button variant="outline" icon={<PencilLine className="size-4" />} onClick={() => navigate('/analisis/asistente')}>
+            Volver al asistente
+          </Button>
+          {!confirmed && (
+            <Button
+              icon={<ClipboardCheck className="size-4" />}
+              disabled={!acknowledged}
+              onClick={() => session.confirmPlans(approved.map((p) => p.planId))}
+            >
+              Confirmar propuesta
+            </Button>
+          )}
+        </div>
+      </Card>
+    </div>
+  )
+}
+
 export function ConfirmPage() {
   const navigate = useNavigate()
   const service = useService()
-  const { projectId, sources, reviewConfirmed } = useAnalysisSession()
+  const { projectId, sources, reviewConfirmed, aiChat } = useAnalysisSession()
+  // Con la IA real, la propuesta son los planes de la conversación (sesión), no la del servicio DEMO.
+  const realAIConversation = aiChat.some((t) => t.result)
   const proposal = useAsync(
-    () => (projectId ? service.getCurrentProposal(projectId) : Promise.resolve(null)),
-    [projectId, service],
+    () => (projectId && !realAIConversation ? service.getCurrentProposal(projectId) : Promise.resolve(null)),
+    [projectId, service, realAIConversation],
   )
   const [acknowledged, setAcknowledged] = useState(false)
   const [approving, setApproving] = useState(false)
@@ -82,6 +227,7 @@ export function ConfirmPage() {
       />
     )
   }
+  if (realAIConversation) return <AIPlanConfirmation />
   if (proposal.status === 'loading') return <Spinner label="Cargando propuesta…" />
   if (proposal.status === 'error') return <ErrorState message={proposal.error} onRetry={proposal.retry} />
   if (!proposal.data) {

@@ -10,7 +10,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.core.upload_guard import UploadGuardMiddleware
-from app.services.ai_gateway import AIRequestStore, NotImplementedProvider
+from app.services.ai_budget import AIBudget
+from app.services.ai_gateway import AIConversationStore, AIPlanStore, AIRequestStore
+from app.services.openai_provider import OpenAIProvider
 from app.services.dataset_profiler import MAX_FILE_BYTES
 
 # Margen para el encabezado y los separadores de multipart sobre el límite del archivo.
@@ -30,9 +32,13 @@ def create_app() -> FastAPI:
         description="API de DataDecision AI: datasets, asistente de requisitos, análisis e informes.",
     )
 
-    # Frontera de IA: solicitudes preparadas en memoria y proveedor sin red (Fase 3B.1).
+    # Frontera de IA: solicitudes preparadas en memoria, proveedor OpenAI (solo se usa
+    # tras una autorización de uso único), presupuesto local y planes validados.
     app.state.ai_store = AIRequestStore()
-    app.state.ai_provider = NotImplementedProvider()
+    app.state.ai_provider = OpenAIProvider()
+    app.state.ai_budget = AIBudget(settings.ai_usage_file, settings.ai_budget_usd, settings.ai_max_requests_per_session)
+    app.state.ai_plans = AIPlanStore()
+    app.state.ai_conversations = AIConversationStore()
 
     # Mismo control de origen para la IA, con un cuerpo pequeño (solo metadatos revisados).
     app.add_middleware(

@@ -44,7 +44,17 @@ export interface AIContextPayload {
   /** Mensaje concreto del chat que se autorizaría enviar (solo en la autorización por mensaje). */
   message?: string
   sources: AISourceContext[]
+  /** Turnos anteriores con la IA real: también se revisan y aprueban. */
+  history?: AIHistoryTurn[]
 }
+
+export interface AIHistoryTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+/** Máximo de turnos anteriores que se envían (el backend rechaza más). */
+export const MAX_HISTORY_TURNS = 8
 
 /**
  * Decisiones del usuario sobre una columna. Se guardan en el estado del
@@ -109,6 +119,7 @@ export function buildAIContext(
   objective: string,
   review: SourceReview[],
   message?: string,
+  history: AIHistoryTurn[] = [],
 ): AIContextPayload {
   const sources = catalog.sources
     .slice(0, 3)
@@ -138,8 +149,13 @@ export function buildAIContext(
     })
     .filter((s): s is AISourceContext => s !== null)
 
+  const goal = objective.trim()
   const text = message?.trim()
-  return text ? { version: 1, objective: objective.trim(), message: text, sources } : { version: 1, objective: objective.trim(), sources }
+  const payload: AIContextPayload = { version: 1, objective: goal, sources }
+  // El objetivo no se envía dos veces: si el mensaje es el propio objetivo, alcanza con `objective`.
+  if (text && text !== goal) payload.message = text
+  if (history.length > 0) payload.history = history.slice(-MAX_HISTORY_TURNS)
+  return payload
 }
 
 /** Motivo por el que todavía no se puede preparar la solicitud, o null. */

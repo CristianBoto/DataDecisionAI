@@ -7,6 +7,9 @@ uvicorn[standard]>=0.30
 pydantic-settings>=2.4
 python-multipart>=0.0.20,<1
 
+# IA (Fase 3B.2): SDK oficial de OpenAI, solo en el backend
+openai==3.37.0
+
 # Ciencia de datos
 pandas>=2.2,<3
 openpyxl>=3.1,<4

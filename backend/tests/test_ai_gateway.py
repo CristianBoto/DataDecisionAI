@@ -8,94 +8,28 @@ import logging
 import socket
 
 import pytest
-from fastapi.testclient import TestClient
 
-from app.core.config import Settings, get_settings
-from app.main import create_app
-from app.services.ai_gateway import AIRequestStore, payload_hash
+from app.core.config import Settings
 from app.schemas.ai_context import AIContext
-
-
-LOOPBACK = {"127.0.0.1", "::1", "localhost"}
-external_attempts: list = []
-
-
-@pytest.fixture(autouse=True)
-def no_network(monkeypatch):
-    """Bloquea toda conexión fuera del propio equipo.
-
-    Se permite el loopback porque, en Windows, asyncio crea su canal interno
-    con un par de sockets conectados a 127.0.0.1 (no es una llamada externa).
-    """
-    original_connect = socket.socket.connect
-    external_attempts.clear()
-
-    def guarded_connect(sock, address):
-        host = address[0] if isinstance(address, tuple) else address
-        if host not in LOOPBACK:
-            external_attempts.append(address)
-            raise AssertionError(f"Intento de conexión externa durante las pruebas: {address}")
-        return original_connect(sock, address)
-
-    def blocked_create_connection(address, *args, **kwargs):
-        external_attempts.append(address)
-        raise AssertionError(f"Intento de conexión externa durante las pruebas: {address}")
-
-    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
-    monkeypatch.setattr(socket, "create_connection", blocked_create_connection)
-    yield
-    assert external_attempts == []
+from app.services.ai_gateway import AIRequestStore, payload_hash
+from app.services.openai_provider import OpenAIProvider
+from tests.ai_helpers import (  # noqa: F401 - no_network se activa en todo el módulo
+    ORIGIN,
+    FakeProvider,
+    authorize,
+    context,
+    external_attempts,
+    make_client,
+    no_network,
+    prepare,
+    source,
+)
 
 
 def test_network_guard_detects_external_connections():
     with pytest.raises(AssertionError, match="conexión externa"):
         socket.create_connection(("api.openai.com", 443))
     external_attempts.clear()
-
-
-class FakeProvider:
-    """Proveedor de prueba: registra lo que recibiría la IA, sin red."""
-
-    implemented = True
-
-    def __init__(self):
-        self.received = []
-
-    def send(self, payload):
-        self.received.append(payload)
-        return {"status": "sent"}
-
-
-def make_client(*, ai_enabled=False, api_key=None, provider=None):
-    app = create_app()
-    app.dependency_overrides[get_settings] = lambda: Settings(_env_file=None, ai_enabled=ai_enabled, openai_api_key=api_key)
-    if provider is not None:
-        app.state.ai_provider = provider
-    return TestClient(app), app
-
-
-def source(alias="A", *columns):
-    cols = columns or ({"name": "ANYO", "format": "numeric", "semantic_type": "temporal", "semantic_confidence": "high"},)
-    return {"alias": alias, "columns": list(cols)}
-
-
-def context(*sources, objective="Evolución anual de las importaciones"):
-    return {"objective": objective, "sources": list(sources) or [source()]}
-
-
-ORIGIN = {"Origin": "http://localhost:5173"}
-
-
-def prepare(client, body):
-    return client.post("/api/ai/requests", json=body, headers=ORIGIN)
-
-
-def authorize(client, prepared):
-    return client.post(
-        f"/api/ai/requests/{prepared['request_id']}/authorize",
-        json={"payload_sha256": prepared["payload_sha256"], "confirm": True},
-        headers=ORIGIN,
-    )
 
 
 # --- Contenido permitido (lista blanca) ---------------------------------------
@@ -144,14 +78,15 @@ def test_prepared_payload_is_exactly_the_whitelisted_content():
     client, _ = make_client()
     prepared = prepare(client, context(source("A"), source("B"))).json()
     payload = prepared["payload"]
-    assert set(payload) == {"version", "objective", "message", "sources"}
+    assert set(payload) == {"version", "objective", "message", "sources", "history"}
     assert payload["message"] is None  # solo presente en la autorización de un mensaje
     assert set(payload["sources"][0]) == {"alias", "columns", "size_range"}
     assert set(payload["sources"][0]["columns"][0]) == {
         "name", "format", "semantic_type", "semantic_confidence", "user_corrected", "missing_markers",
     }
     assert prepared["payload_sha256"] == payload_hash(AIContext.model_validate(payload))
-    assert prepared["ai_enabled"] is False and prepared["external_calls_implemented"] is False
+    assert prepared["ai_enabled"] is False
+    assert prepared["estimated_input_tokens"] > 0 and prepared["estimated_max_cost_usd"] > 0
 
 
 # --- Autorización ------------------------------------------------------------
@@ -206,12 +141,13 @@ def test_cancelled_and_expired_requests_cannot_be_sent():
     assert provider.received == []
 
 
-def test_default_provider_never_calls_openai_in_this_phase():
-    client, _ = make_client(ai_enabled=True, api_key="sk-prueba-no-real")
+def test_default_provider_is_openai_but_needs_a_key():
+    client, app = make_client(ai_enabled=True, api_key=None)
+    assert isinstance(app.state.ai_provider, OpenAIProvider)
     prepared = prepare(client, context()).json()
     response = authorize(client, prepared)
-    assert response.status_code == 501
-    assert "No se envió nada" in response.json()["detail"]
+    assert response.status_code == 503
+    assert "OPENAI_API_KEY" in response.json()["detail"] and "No se envió nada" in response.json()["detail"]
 
 
 # --- Configuración, origen y registros ------------------------------------------
@@ -219,7 +155,9 @@ def test_default_provider_never_calls_openai_in_this_phase():
 def test_status_reports_configuration_without_revealing_the_key():
     client, _ = make_client(ai_enabled=False, api_key="sk-prueba-secreta-123")
     response = client.get("/api/ai/status")
-    assert response.json() == {"ai_enabled": False, "provider_configured": True, "external_calls_implemented": False}
+    data = response.json()
+    assert data["ai_enabled"] is False and data["provider_configured"] is True
+    assert data["model"] == "gpt-6-luna" and data["budget_usd"] == 1.0 and data["spent_usd"] == 0
     assert "sk-prueba" not in response.text
 
 

@@ -27,6 +27,7 @@ SizeRange = Literal["<1k", "1k-10k", "10k-100k", "100k-1M", ">1M"]
 MAX_SOURCES = 3
 MAX_COLUMNS_PER_SOURCE = 250
 MAX_OBJECTIVE_CHARS = 2000
+MAX_HISTORY_TURNS = 8
 
 
 class _Strict(BaseModel):
@@ -52,6 +53,13 @@ class ColumnContext(_Strict):
         return value
 
 
+class HistoryTurn(_Strict):
+    """Turno anterior de la conversación con la IA real (texto ya visto por el usuario)."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=MAX_OBJECTIVE_CHARS)
+
+
 class SourceContext(_Strict):
     alias: Literal["A", "B", "C"]
     columns: list[ColumnContext] = Field(min_length=1, max_length=MAX_COLUMNS_PER_SOURCE)
@@ -64,12 +72,21 @@ class AIContext(_Strict):
     # Mensaje del chat que se autoriza enviar (cada mensaje requiere su propia autorización).
     message: str | None = Field(default=None, min_length=1, max_length=MAX_OBJECTIVE_CHARS)
     sources: list[SourceContext] = Field(min_length=1, max_length=MAX_SOURCES)
+    # Turnos previos con la IA real: forman parte del contenido revisado y aprobado.
+    history: list[HistoryTurn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
 
     @model_validator(mode="after")
     def unique_aliases(self) -> AIContext:
         aliases = [s.alias for s in self.sources]
         if len(set(aliases)) != len(aliases):
             raise ValueError("Cada fuente debe tener un alias distinto.")
+        return self
+
+    @model_validator(mode="after")
+    def no_duplicated_objective(self) -> AIContext:
+        # El primer mensaje suele ser el propio objetivo: no se envía dos veces.
+        if self.message is not None and self.message == self.objective:
+            self.message = None
         return self
 
 
@@ -82,15 +99,31 @@ class PreparedRequest(BaseModel):
     expires_in_seconds: int
     ai_enabled: bool
     external_calls_implemented: bool
+    # Estimación previa (puede diferir del consumo real informado por el proveedor).
+    estimated_input_tokens: int
+    estimated_max_cost_usd: float | None
 
 
 class AuthorizeRequest(_Strict):
     # El usuario aprueba ESTE contenido: si cambia un solo carácter, la huella no coincide.
     payload_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     confirm: Literal[True]
+    # "message": solo este envío (por defecto). "conversation": además, los próximos
+    # mensajes de esta conversación, con vencimiento y atados a esta frontera de privacidad.
+    scope: Literal["message", "conversation"] = "message"
 
 
 class AIStatus(BaseModel):
     ai_enabled: bool
+    # Solo indica si hay clave configurada; nunca su valor.
     provider_configured: bool
     external_calls_implemented: bool
+    model: str
+    budget_usd: float
+    spent_usd: float
+    remaining_usd: float
+    requests_used: int
+    max_requests: int
+    max_output_tokens: int
+    conversation_ttl_minutes: int
+    conversation_max_messages: int

@@ -7,7 +7,7 @@ import { routes } from '@/routes'
 import type { AIGatewayClient } from '@/services/aiGateway'
 import { createDemoService } from '@/services/demoProvider'
 import type { DataDecisionService } from '@/services/types'
-import { completeReview, goToReview } from './reviewHelpers'
+import { completeReview, goToReview, startConversation } from './reviewHelpers'
 
 const csv = (name: string, text: string) => new File([text], name, { type: 'text/csv' })
 const ventas = () => csv('ventas.csv', 'pais,codigo,monto\nAR,001,10\nNA,002,20\nBR,003,NA\n')
@@ -83,10 +83,8 @@ describe('volver atrás conserva el estado', () => {
     await completeReview(user, 'Comparar regiones')
     await waitFor(() => expect(router.state.location.pathname).toBe('/analisis/asistente'))
 
-    // Enviar el objetivo precargado (el editor se habilita al cargar la conversación).
-    const composer = await screen.findByRole('textbox', { name: /Mensaje/i })
-    await waitFor(() => expect(composer).toBeEnabled())
-    await user.type(composer, '{Enter}')
+    // Comenzar con el objetivo confirmado (sin copiarlo en el chat).
+    await startConversation(user)
     expect(await screen.findByText(/Entiendo tu objetivo/)).toBeInTheDocument()
 
     // "Modificar configuración de datos": las decisiones siguen ahí.
@@ -151,7 +149,7 @@ describe('invalidación y bloqueo hacia adelante', () => {
 })
 
 describe('volver atrás no crea ni reutiliza autorizaciones', () => {
-  it('salir de la revisión cancela la solicitud preparada y no autoriza nada', async () => {
+  it('ir y volver desde la revisión no prepara ni autoriza envíos', async () => {
     const user = userEvent.setup()
     const gateway: AIGatewayClient = {
       status: async () => ({ ai_enabled: false, provider_configured: false, external_calls_implemented: false }),
@@ -165,15 +163,13 @@ describe('volver atrás no crea ni reutiliza autorizaciones', () => {
     await upload(user, [ventas()])
     await goToReview(user)
     await user.type(screen.getByLabelText('¿Qué necesitás analizar?'), 'Ver montos')
-    await user.click(screen.getByRole('button', { name: 'Validar contenido' }))
-    expect(await screen.findByRole('button', { name: 'Autorizar este envío' })).toBeInTheDocument()
+    // La revisión no ofrece validar ni autorizar envíos.
+    expect(screen.queryByRole('button', { name: 'Validar contenido' })).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('link', { name: /Volver a cargar datos/ }))
-    await waitFor(() => expect(gateway.cancel).toHaveBeenCalledWith('req-nav'))
-
     await goToReview(user)
     expect(screen.queryByRole('button', { name: 'Autorizar este envío' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Validar contenido' })).toBeInTheDocument()
+    expect(gateway.prepare).not.toHaveBeenCalled()
     expect(gateway.authorize).not.toHaveBeenCalled()
   })
 })

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AIContextPayload } from '@/lib/aiContext'
 import { ApiError, getErrorMessage } from '@/services'
-import type { AIGatewayClient, AIStatus, PreparedAIRequest } from '@/services/aiGateway'
+import type { AIAuthorizationScope, AIGatewayClient, AIStatus, PreparedAIRequest } from '@/services/aiGateway'
 
 export interface AuthorizationResult {
   tone: 'info' | 'error' | 'success'
@@ -22,6 +22,7 @@ export const TEST_FINISHED_NOT_IMPLEMENTED =
  * - Al desmontar la pantalla, lo preparado también se cancela.
  * - La autorización es de un solo uso. Su resultado queda visible mientras el
  *   contenido sea el mismo; un contenido distinto empieza de cero.
+ * - Sin reintentos automáticos: tras un error, el usuario decide si valida de nuevo.
  */
 export function useAIAuthorization(gateway: AIGatewayClient | null, payload: AIContextPayload) {
   const [status, setStatus] = useState<AIStatus | null>(null)
@@ -31,6 +32,8 @@ export function useAIAuthorization(gateway: AIGatewayClient | null, payload: AIC
 
   const key = JSON.stringify(payload)
   const preparedRef = useRef<{ request: PreparedAIRequest; key: string } | null>(null)
+  // Cada validación tiene un número: si llega una más nueva (o se sale), la anterior se cancela.
+  const prepareSeq = useRef(0)
 
   const cancelPending = () => {
     const pending = preparedRef.current
@@ -52,15 +55,29 @@ export function useAIAuthorization(gateway: AIGatewayClient | null, payload: AIC
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => () => cancelPending(), [gateway])
+  useEffect(
+    () => () => {
+      prepareSeq.current += 1
+      cancelPending()
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [gateway],
+  )
 
   async function prepare() {
     if (!gateway) return
+    cancelPending() // una validación nueva reemplaza a la anterior
+    setPrepared(null)
     setBusy(true)
     setOutcome(null)
+    const seq = (prepareSeq.current += 1)
     try {
       const request = await gateway.prepare(payload)
+      if (seq !== prepareSeq.current) {
+        // Validación superada por otra más nueva o pantalla cerrada: no queda pendiente.
+        void gateway.cancel(request.request_id).catch(() => undefined)
+        return
+      }
       preparedRef.current = { request, key }
       setPrepared(request)
     } catch (err) {
@@ -70,16 +87,21 @@ export function useAIAuthorization(gateway: AIGatewayClient | null, payload: AIC
     }
   }
 
-  async function authorize() {
+  /** Autoriza y envía lo validado. Devuelve la respuesta del backend, o null si no hubo respuesta. */
+  async function authorize(scope?: AIAuthorizationScope): Promise<unknown> {
     const pending = preparedRef.current
-    if (!gateway || !pending) return
+    if (!gateway || !pending) return null
     setBusy(true)
     preparedRef.current = null // uso único, pase lo que pase
     try {
-      await gateway.authorize(pending.request.request_id, pending.request.payload_sha256)
+      const { request_id: id, payload_sha256: sha } = pending.request
+      const response = await (scope ? gateway.authorize(id, sha, scope) : gateway.authorize(id, sha))
       setOutcome({ tone: 'success', text: 'Envío autorizado y realizado.', final: true, key: pending.key })
+      void gateway.status().then(setStatus, () => undefined) // presupuesto actualizado
+      return response
     } catch (err) {
-      setOutcome({ ...describeRejection(err, status), final: true, key: pending.key })
+      setOutcome({ ...describeRejection(err, status), key: pending.key })
+      return null
     } finally {
       setPrepared(null)
       setBusy(false)
@@ -97,12 +119,16 @@ export function useAIAuthorization(gateway: AIGatewayClient | null, payload: AIC
   return { status, prepared, busy, result, prepare, authorize, cancel }
 }
 
-/** 403 (IA deshabilitada) y 501 (Fase 3B.2 pendiente) son el final esperado de una prueba. */
-function describeRejection(err: unknown, status: AIStatus | null): Pick<AuthorizationResult, 'tone' | 'text'> {
+/**
+ * 403 (IA deshabilitada) y 501 (sin proveedor) son el final esperado de una prueba.
+ * Otros errores (cuota, conexión, validación) se informan y permiten volver a
+ * validar manualmente: nunca se reintenta solo.
+ */
+function describeRejection(err: unknown, status: AIStatus | null): Omit<AuthorizationResult, 'key'> {
   const httpStatus = err instanceof ApiError ? err.status : null
   if (httpStatus === 403 || (httpStatus === null && status?.ai_enabled === false)) {
-    return { tone: 'info', text: TEST_FINISHED_DISABLED }
+    return { tone: 'info', text: TEST_FINISHED_DISABLED, final: true }
   }
-  if (httpStatus === 501) return { tone: 'info', text: TEST_FINISHED_NOT_IMPLEMENTED }
-  return { tone: 'error', text: getErrorMessage(err) }
+  if (httpStatus === 501) return { tone: 'info', text: TEST_FINISHED_NOT_IMPLEMENTED, final: true }
+  return { tone: 'error', text: getErrorMessage(err), final: false }
 }

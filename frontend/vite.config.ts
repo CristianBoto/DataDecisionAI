@@ -29,5 +29,12 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // Las pruebas no dependen del .env.local de quien las ejecuta (que puede apuntar a un
+    // backend real con la IA habilitada): siempre corren como la demo pública, sin backend.
+    env: {
+      VITE_DEMO_MODE: 'true',
+      VITE_BACKEND_PROFILING: 'false',
+      VITE_API_BASE_URL: 'http://127.0.0.1:9',
+    },
   },
 })

@@ -20,8 +20,11 @@ import { HttpClient } from './httpClient'
 import type { DataDecisionService } from './types'
 
 /**
- * Implementación real contra FastAPI. Cada método corresponde a un endpoint
- * descripto en docs/API_CONTRACT.md. Hoy solo `/api/health` existe en el backend.
+ * Implementación contra la API completa descripta en docs/API_CONTRACT.md
+ * (almacenamiento de datasets, proyectos, conversación y resultados).
+ *
+ * TODAVÍA NO SE USA: el backend actual solo implementa `/api/health`,
+ * `/api/datasets/profile` y `/api/ai/*`. Ver `createService` en `./index.ts`.
  */
 export function createHttpService(baseUrl: string): DataDecisionService {
   const http = new HttpClient(baseUrl)

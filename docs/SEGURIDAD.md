@@ -235,6 +235,8 @@ DataDecision AI es un MVP académico: **no es una solución empresarial certific
 
 ## 9. Frontera de privacidad para la IA (Fase 3B.1)
 
+> **Actualización (Fase 3B.2):** la conexión real con OpenAI ya está implementada detrás de esta misma frontera. Las referencias a "sin llamadas externas" describen la Fase 3B.1. Ver la sección 10.
+
 **Decisión central: Python/Pandas calcula; OpenAI interpretará objetivos y propondrá planes; el usuario confirma.** Esta fase prepara **qué** podría salir del sistema y **cómo** se autoriza, **sin ninguna llamada real a OpenAI**.
 
 **Dónde llega el JSON en esta fase.** El contexto revisado **sí viaja al backend FastAPI local** (`POST /api/ai/requests`) para que lo valide la lista blanca; **no sale hacia ningún proveedor externo**: no hay SDK, URL ni llamada a OpenAI en el código, y el proveedor de esta fase no tiene red.
@@ -282,3 +284,102 @@ Archivos CSV/XLSX, nombres de archivo, filas, vistas previas, ejemplos, valores 
 - **La autorización no es autenticación:** cualquier persona con acceso al equipo y al navegador autorizado puede autorizar.
 - Las solicitudes preparadas viven en la memoria del proceso: se pierden al reiniciar y no se comparten entre procesos.
 - **Pendiente para la Fase 3B.2:** registro local de envíos (metadatos, sin contenido) y validación estructurada de la respuesta de la IA (plan con operaciones de un catálogo cerrado y solo columnas autorizadas). La IA no podrá ejecutar Python, modificar el backend ni alterar archivos originales.
+
+
+## 10. Integración con OpenAI (Fase 3B.2)
+
+**Qué cambia.** El proveedor sin red se reemplazó por `OpenAIProvider` (SDK oficial `openai` 3.37.0, Responses API con salida estructurada). Solo se invoca desde `authorize_and_send`, en este orden:
+1. IA habilitada.
+2. Autorización de uso único válida (huella, vencimiento).
+3. Clave configurada.
+4. Precio del modelo conocido.
+5. Contexto dentro del límite.
+6. Presupuesto reservado.
+7. Envío.
+8. Validación de la respuesta.
+
+**Qué NO cambia.** La lista blanca del contexto, los alias A/B/C, la exclusión de archivos, filas, ejemplos, valores y nombres de archivo, la autorización por mensaje y el control de `Origin`. La revisión confirmada **no** autoriza envíos: en el paso 2 ya no hay botones para validar ni autorizar.
+
+**Qué se agrega al contexto.**
+- `history`: los turnos anteriores con la IA real, como máximo 8. Son textos que el usuario ya vio, y forman parte del contenido que se revisa y se aprueba (cambian la huella).
+- El primer mensaje igual al objetivo **no se envía dos veces**: `message` queda vacío.
+
+### Controles de consumo (aplicados en el backend)
+
+| Control | Dónde | Valor por defecto |
+|---------|-------|-------------------|
+| IA deshabilitada salvo configuración explícita | `AI_ENABLED` | `false` |
+| Clave solo en el backend; nunca en `VITE_*`, respuestas, registros ni Git | `OPENAI_API_KEY` en `backend/.env` (excluido de Git) | vacía |
+| Modelo configurable | `OPENAI_MODEL` | `gpt-6-luna` |
+| Razonamiento acotado (sus tokens se cobran como salida) | `OPENAI_REASONING_EFFORT` | `low` |
+| Límite de tokens de salida por solicitud | `AI_MAX_OUTPUT_TOKENS` | 2.500 |
+| Límite de tamaño del contexto (estimado antes de enviar; 413 si se supera) | `AI_MAX_INPUT_TOKENS` | 8.000 |
+| Tiempo máximo de espera, **sin reintentos automáticos** (`max_retries=0`) | `AI_TIMEOUT_SECONDS` | 40 s |
+| Límite de solicitudes por sesión del servidor (429) | `AI_MAX_REQUESTS_PER_SESSION` | 25 |
+| Presupuesto local acumulado; bloqueo preventivo si no alcanza (402) | `AI_BUDGET_USD` | USD 1,00 |
+| Registro del consumo real (tokens y costo, sin contenido) | `AI_USAGE_FILE` (en `backend/data/`, excluido de Git) | `./data/ai_usage.json` |
+| `store=False`: se pide al proveedor no conservar la respuesta para reutilizarla | `app/services/openai_provider.py` | — |
+
+- **Estimación previa:** se estiman los tokens de entrada (instrucciones + contexto + esquema, a razón de 3 caracteres por token, de forma conservadora) y el costo máximo con la salida máxima permitida. Se muestran antes de autorizar.
+- **Reserva:** antes de enviar se reserva ese máximo. Si `gastado + reservado + estimado` supera el presupuesto, no se envía (402).
+- **Consumo real:** después de la respuesta se registran los tokens que informa OpenAI y su costo. Si la solicitud pudo haberse cobrado sin respuesta (tiempo agotado o error del servidor), se registra el **máximo estimado**, marcado como estimación. Un error de conexión previo al envío no registra costo.
+- **Persistencia:** el presupuesto se acumula entre reinicios. Si el registro está dañado, se bloquean los envíos en lugar de asumir cero, y el archivo no se sobrescribe.
+- **El presupuesto de OpenAI Platform no sustituye estos controles internos** (ni viceversa): conviene configurar también un límite en la cuenta. Las estimaciones pueden diferir del consumo real.
+
+**Elección del modelo.** `gpt-6-luna`, verificado el 25/10/2026 en la documentación oficial de OpenAI (página del modelo y de precios):
+- descripción: el modelo más eficiente de la familia GPT-6;
+- precio: USD 0,10 por millón de tokens de entrada (0,01 en caché) y USD 0,50 de salida, para contextos de hasta 272.000 tokens;
+- compatible con la Responses API y Structured Outputs.
+
+Si se cambia de modelo y no figura en la tabla interna (`app/services/ai_budget.py`), hay que configurar su precio (`OPENAI_PRICE_INPUT_PER_1M` y `OPENAI_PRICE_OUTPUT_PER_1M`); sin precio, el backend no envía nada (503).
+
+### Respuesta estructurada y validación
+
+- **Esquema** (`app/schemas/ai_plan.py`): mensaje breve, objetivo interpretado, relación entre fuentes, preguntas, planes y advertencias. Cada plan incluye:
+  - **una sola fuente**;
+  - columnas necesarias;
+  - operaciones de un **catálogo cerrado** (conteo, suma, promedio, mediana, serie temporal, ranking y otras);
+  - tipos de gráfico permitidos;
+  - limitaciones.
+- **Validación en el backend:** la respuesta se descarta (502), y no se guarda ningún plan, si:
+  - menciona alias o columnas no autorizados;
+  - no trae preguntas ni planes;
+  - supera las cantidades máximas;
+  - contiene bloques de código.
+- **Sin unir fuentes:** si la IA sugiere unir o concatenar fuentes, se agrega una advertencia, porque esa operación no está disponible en esta etapa.
+- **Planes:** los planes válidos se guardan en la memoria del proceso. El usuario puede aprobarlos (`POST /api/ai/plans/{id}/approve`), pero **no se ejecuta ningún cálculo** en esta fase.
+- **Seguridad:** el sistema **nunca ejecuta código** generado por el modelo.
+
+### Errores comprensibles
+
+Credenciales (502), cuota o saldo (429), límite temporal (429), modelo inexistente (502), conexión (502), tiempo agotado (504) y respuesta incompleta, rechazada o malformada (502). Los mensajes no incluyen la clave ni el contenido.
+
+### Limitaciones
+
+- **El control de `Origin` no es autenticación.** La API de IA está pensada solo para uso **local** (`127.0.0.1`). No debe publicarse: cualquiera con acceso al backend podría consumir el presupuesto.
+- El límite por sesión se reinicia al reiniciar el backend; el presupuesto acumulado, no.
+- Los tokens de entrada se estiman antes de enviar; el costo real puede ser menor o, en casos raros, mayor que la estimación.
+- Los planes aprobados viven en memoria: se pierden al reiniciar el backend. Persistirlos queda para la etapa del motor de análisis.
+- La calidad de las preguntas y los planes depende del modelo. Por eso se valida la **forma** y el uso de columnas autorizadas, no la pertinencia analítica: esa la juzga el usuario al aprobar.
+
+
+### Autorización por conversación (Fase 3B.2)
+
+- **Opcional y explícita.** La opción por defecto sigue siendo autorizar cada envío. En el primer envío, el panel ofrece «Autorizar solo este mensaje» y «Autorizar esta conversación», y explica qué se compartirá: cada mensaje nuevo, un historial limitado, el objetivo y los metadatos ya autorizados.
+- **Controlada por el backend** (`AIConversationStore`):
+  - identificador aleatorio;
+  - huella SHA-256 de la frontera de privacidad (objetivo y metadatos, sin mensaje ni historial);
+  - vencimiento de 30 minutos (`AI_CONVERSATION_TTL_MINUTES`);
+  - máximo de 20 mensajes (`AI_CONVERSATION_MAX_MESSAGES`);
+  - sin envíos simultáneos en la misma conversación.
+- **Respuestas del backend:** sin permiso, 404; vencido, 410; frontera distinta, 409, y el permiso se elimina; tope alcanzado, 429; IA deshabilitada, 403, y el permiso se revoca.
+- **Sin atajos de consumo.** Cada mensaje pasa por los mismos límites que un envío individual (tamaño del contexto, solicitudes por sesión, presupuesto con reserva previa) y por la misma validación de la respuesta. Una prueba con seis envíos simultáneos y presupuesto para cuatro confirma que solo se envían cuatro.
+- **Sin llamadas automáticas.** Cada envío nace de «Enviar» o de «Comenzar conversación». No hay reintentos ni envíos en segundo plano.
+- **Revocación:**
+  - desde el asistente, con «Desactivar autorización de conversación»;
+  - automática, al cambiar las fuentes o la revisión (se revoca también en el backend);
+  - al vencer o al reiniciar el backend.
+- **Limitaciones:**
+  - el permiso vive en la memoria del proceso;
+  - el control de `Origin` sigue sin ser autenticación: el backend con la IA habilitada debe usarse solo en el propio equipo;
+  - el historial que se comparte son textos que el usuario ya vio, pero sale del equipo en cada mensaje autorizado.

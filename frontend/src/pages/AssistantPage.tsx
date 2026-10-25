@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { ArrowRight, Bot, MessagesSquare, PencilLine, Sparkles } from 'lucide-react'
+import { ArrowRight, Bot, CheckCircle2, MessagesSquare, Play, ShieldAlert, ShieldCheck, ShieldOff, Sparkles, User } from 'lucide-react'
 import { DataReviewSummary } from '@/components/ai/DataReviewSummary'
-import { MessageAuthorization } from '@/components/ai/MessageAuthorization'
+import { AuthorizedSend, MessageAuthorization } from '@/components/ai/MessageAuthorization'
+import { AIReplyCard } from '@/components/chat/AIReplyCard'
 import { ChatComposer } from '@/components/chat/ChatComposer'
 import { ChatMessage, TypingIndicator } from '@/components/chat/ChatMessage'
 import { ProposalSummaryCard } from '@/components/chat/ProposalSummaryCard'
@@ -13,28 +14,81 @@ import { Card } from '@/components/ui/Card'
 import { EmptyState, Spinner } from '@/components/ui/Feedback'
 import { FeasibilityBadge } from '@/components/ui/FeasibilityBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
+import type { AIChatTurn } from '@/context/sessionContext'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useConversation } from '@/hooks/useConversation'
 import { useAIGateway, useService } from '@/hooks/useService'
+import { buildAIContext, MAX_HISTORY_TURNS, MAX_OBJECTIVE_CHARS, type AIHistoryTurn } from '@/lib/aiContext'
+import { collectAIPlans } from '@/lib/aiPlans'
+import { buildDatasetCatalog } from '@/lib/datasetCatalog'
+import { ApiError, getErrorMessage } from '@/services'
+import { isRealAIAvailable, type AIAuthorizeResult, type AIStatus } from '@/services/aiGateway'
 
 const MODIFY_PREFIX = 'Quisiera modificar: '
+
+/** Lo que la IA ya dijo, en texto, para darle continuidad a la conversación. */
+function turnText(result: AIAuthorizeResult): string {
+  const questions = result.reply.questions.map((q) => `- ${q.question}`).join('\n')
+  const plans = result.reply.plans.map((p) => `- Plan propuesto (fuente ${p.source_alias}): ${p.title}`).join('\n')
+  return [result.reply.message, questions, plans].filter(Boolean).join('\n').slice(0, MAX_OBJECTIVE_CHARS)
+}
+
+let turnSeq = 0
+const turnId = () => `t${Date.now().toString(36)}${(turnSeq += 1)}`
+
+/** El permiso de conversación dejó de valer (vencido, revocado, configuración cambiada o tope de mensajes). */
+function invalidatesGrant(err: unknown): boolean {
+  if (!(err instanceof ApiError)) return false
+  return err.status === 403 || err.status === 404 || err.status === 410 || /autoriz/i.test(err.message)
+}
+
+const timeLabel = (ms: number) => new Date(ms).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
 
 export function AssistantPage() {
   const navigate = useNavigate()
   const location = useLocation()
   const { mode } = useService()
-  const { projectId, dataset, profile, sources, review, reviewConfirmed } = useAnalysisSession()
+  const session = useAnalysisSession()
+  const { projectId, dataset, profile, sources, review, reviewConfirmed, aiChat, approvedPlanIds, aiConversationGrant: grant } = session
   const aiGateway = useAIGateway()
   const { messages, proposal, loading, sending, error, send, retry } = useConversation(projectId)
-  // El objetivo de la revisión se precarga, pero no se envía solo: el usuario lo manda.
-  const fromReview = (location.state as { fromReview?: boolean } | null)?.fromReview === true
-  const [draft, setDraft] = useState(() => (fromReview ? (review?.objective ?? '') : ''))
+  const [draft, setDraft] = useState('')
+  const [aiStatus, setAIStatus] = useState<AIStatus | null>(null)
+  // Mensaje que espera la autorización del usuario para ir a OpenAI.
+  const [outgoing, setOutgoing] = useState<{ text: string; fromComposer: boolean } | null>(null)
+  // Envío directo dentro de una conversación autorizada.
+  const [aiSending, setAISending] = useState(false)
+  const [aiError, setAIError] = useState<string | null>(null)
+  const [grantNotice, setGrantNotice] = useState<string | null>(null)
+  const [justApproved, setJustApproved] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
+  const catalog = useMemo(() => buildDatasetCatalog(sources), [sources])
+
+  // Mientras hay un permiso, se revisa su vencimiento para mostrar el estado correcto.
+  useEffect(() => {
+    if (!grant) return
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000)
+    return () => window.clearInterval(timer)
+  }, [grant])
+
+  useEffect(() => {
+    if (!aiGateway) return
+    let cancelled = false
+    aiGateway.status().then(
+      (status) => !cancelled && setAIStatus(status),
+      () => !cancelled && setAIStatus(null),
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [aiGateway])
+  const realAI = Boolean(aiGateway) && isRealAIAvailable(aiStatus)
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'end' })
-  }, [messages.length, sending])
+  }, [messages.length, sending, aiChat.length, aiSending, justApproved])
 
   // Si se vuelve desde la confirmación con "Modificar", se prepara el mensaje.
   const wantsModify = (location.state as { modify?: boolean } | null)?.modify === true
@@ -44,6 +98,14 @@ export function AssistantPage() {
       composerRef.current?.focus()
     }
   }, [wantsModify])
+
+  const history = useMemo<AIHistoryTurn[]>(
+    () =>
+      aiChat
+        .slice(-MAX_HISTORY_TURNS)
+        .map((t) => ({ role: t.role, content: t.result ? turnText(t.result) : t.content.slice(0, MAX_OBJECTIVE_CHARS) })),
+    [aiChat],
+  )
 
   if (dataset && profile && (!reviewConfirmed || !projectId)) {
     return (
@@ -80,11 +142,111 @@ export function AssistantPage() {
     composerRef.current?.focus()
   }
 
+  const objective = review?.objective.trim() ?? ''
+  const started = realAI ? aiChat.length > 0 : messages.some((m) => m.role === 'user')
+  const showStart = Boolean(objective) && !started && !outgoing
+
+  const grantActive = Boolean(grant && grant.expiresAt > now && aiGateway?.sendInConversation)
+  const grantExpired = Boolean(grant && !grantActive)
+  // Al enviar se mira el reloj en ese momento (el estado visual se refresca cada 15 s).
+  const grantLive = () => Boolean(grant && grant.expiresAt > Date.now() && aiGateway?.sendInConversation)
+
+  function requestAuthorization(text: string, fromComposer: boolean) {
+    if (grant && !grantLive()) {
+      session.setAIConversationGrant(null)
+      setGrantNotice('La autorización de la conversación venció. Autorizá de nuevo para seguir.')
+    }
+    setOutgoing({ text, fromComposer })
+  }
+
+  function startConversation() {
+    // El objetivo se escribió una sola vez, en la revisión: no hace falta copiarlo.
+    if (!realAI) return void send(objective)
+    if (grantLive()) void sendInConversation(objective, false)
+    else requestAuthorization(objective, false)
+  }
+
+  function handleComposerSend(text: string) {
+    if (!realAI) return void send(text)
+    // Cada envío nace de una acción explícita del usuario: con permiso, va directo; sin él, se pide autorización.
+    if (grantLive()) void sendInConversation(text, true)
+    else requestAuthorization(text, true)
+  }
+
+  function appendTurns(text: string, result: AIAuthorizeResult) {
+    const turns: AIChatTurn[] = [
+      { id: turnId(), role: 'user', content: text },
+      { id: turnId(), role: 'assistant', content: result.reply.message, result },
+    ]
+    session.appendAIChat(turns)
+    void aiGateway?.status().then(setAIStatus, () => undefined)
+  }
+
+  async function sendInConversation(text: string, fromComposer: boolean) {
+    if (!grant || !review || !aiGateway?.sendInConversation) return
+    setAISending(true)
+    setAIError(null)
+    try {
+      const payload = buildAIContext(catalog, review.objective, review.sources, text, history)
+      appendTurns(text, await aiGateway.sendInConversation(grant.id, payload))
+    } catch (err) {
+      if (invalidatesGrant(err)) {
+        // El backend rechazó el permiso: se descarta y se pide autorizar este mensaje de nuevo.
+        session.setAIConversationGrant(null)
+        setGrantNotice(getErrorMessage(err))
+        setOutgoing({ text, fromComposer })
+      } else {
+        // Presupuesto, límites, conexión o validación: se informa y el texto vuelve al chat. Sin reintentos.
+        setAIError(getErrorMessage(err))
+        if (fromComposer) setDraft(text)
+      }
+    } finally {
+      setAISending(false)
+    }
+  }
+
+  function handleSent(result: AIAuthorizeResult) {
+    if (!outgoing) return
+    appendTurns(outgoing.text, result)
+    if (result.conversation) {
+      session.setAIConversationGrant({
+        id: result.conversation.conversation_id,
+        expiresAt: Date.now() + result.conversation.expires_in_seconds * 1000,
+        maxMessages: result.conversation.max_messages,
+      })
+      setNow(Date.now())
+    }
+    setGrantNotice(null)
+    setOutgoing(null)
+  }
+
+  function revokeGrant() {
+    // El proveedor de la sesión también lo revoca en el backend.
+    session.setAIConversationGrant(null)
+    setGrantNotice(null)
+  }
+
+  function handleCancelSend() {
+    // Cancelar no borra lo escrito: vuelve al campo del chat.
+    if (outgoing?.fromComposer) setDraft(outgoing.text)
+    setOutgoing(null)
+  }
+
+  async function approvePlan(planId: string) {
+    if (!aiGateway?.approvePlan) return
+    await aiGateway.approvePlan(planId) // registro local en el backend: no consulta a OpenAI ni calcula nada
+    session.markPlanApproved(planId)
+    setJustApproved(true)
+  }
+
+  function keepTalking() {
+    setJustApproved(false)
+    composerRef.current?.focus()
+  }
+
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
-  const suggestions = !sending && lastAssistant?.suggestions ? lastAssistant.suggestions : []
-  // El objetivo del paso 2 queda listo como primer mensaje, hasta que el usuario lo envíe.
-  const objectiveReady =
-    fromReview && Boolean(review?.objective.trim()) && draft.trim() !== '' && !messages.some((m) => m.role === 'user')
+  const suggestions = !realAI && !sending && lastAssistant?.suggestions ? lastAssistant.suggestions : []
+  const proposedPlans = collectAIPlans(aiChat, approvedPlanIds).length
 
   return (
     <div className="space-y-6">
@@ -92,12 +254,19 @@ export function AssistantPage() {
         eyebrow={
           <>
             <Badge tone="blue">Paso 3 de 4</Badge>
-            {mode === 'demo' && <DemoBadge label="Asistente simulado" />}
+            {realAI ? (
+              <Badge tone="green" icon={<ShieldCheck className="size-3" aria-hidden />}>
+                IA real · {aiStatus?.model}
+              </Badge>
+            ) : (
+              mode === 'demo' && <DemoBadge label="Asistente simulado" />
+            )}
           </>
         }
         title="Contale al asistente qué necesitás"
-        description="Escribí tu objetivo con tus palabras. El asistente revisa tus datos, te hace preguntas y arma una propuesta para que la apruebes."
+        description="El asistente revisa tus datos, te hace preguntas y arma una propuesta para que la apruebes."
         actions={
+          !realAI &&
           proposal && (
             <Button onClick={() => navigate('/analisis/confirmar')} iconRight={<ArrowRight className="size-4" />}>
               Revisar propuesta
@@ -106,12 +275,22 @@ export function AssistantPage() {
         }
       />
 
-      {mode === 'demo' && (
-        <Alert tone="demo" title="Conversación de demostración">
-          Las respuestas siguen un guion fijo basado en palabras clave y en el perfil del dataset. No hay una IA real
-          conectada todavía: se integrará con OpenAI desde el backend. Revisión de datos confirmada; no hay ninguna
-          transmisión a OpenAI.
+      {realAI ? (
+        <Alert tone="info" title="Asistente con IA real (OpenAI)">
+          Cada mensaje requiere tu autorización: antes de enviarlo ves el contenido exacto y su costo máximo estimado.
+          Solo se envían el objetivo, el mensaje y los metadatos autorizados, nunca tus archivos ni sus valores. La IA
+          propone; los cálculos se harán con Pandas cuando apruebes un plan, en la próxima etapa.
+          {aiStatus?.remaining_usd != null && aiStatus.budget_usd != null && (
+            <> Presupuesto local disponible: USD {aiStatus.remaining_usd.toFixed(4)} de {aiStatus.budget_usd.toFixed(2)}.</>
+          )}
         </Alert>
+      ) : (
+        mode === 'demo' && (
+          <Alert tone="demo" title="Conversación de demostración">
+            Las respuestas siguen un guion fijo basado en palabras clave y en el perfil del dataset. No hay una IA real
+            conectada: revisión de datos confirmada, sin ninguna transmisión a OpenAI.
+          </Alert>
+        )
       )}
 
       {/* La configuración de datos se edita solo en el paso 2: acá, un resumen y el acceso para volver. */}
@@ -125,13 +304,64 @@ export function AssistantPage() {
                 <Bot className="size-4" aria-hidden />
               </span>
               <div>
-                <p className="text-sm font-semibold text-slate-900">Asistente de requisitos</p>
+                <p className="text-sm font-semibold text-slate-900">
+                  {realAI ? 'Asistente de requisitos · IA real' : 'Asistente de requisitos'}
+                </p>
                 <p className="text-xs text-slate-500">Te ayuda a definir el análisis · Nunca inventa datos</p>
               </div>
             </div>
 
             <div className="scrollbar-thin flex-1 space-y-5 overflow-y-auto bg-slate-50/60 px-4 py-5 sm:px-6" aria-live="polite">
-              {loading ? (
+              {showStart && (
+                <section
+                  aria-label="Objetivo confirmado"
+                  className="rounded-2xl border border-blue-100 bg-white p-4 text-sm shadow-sm"
+                >
+                  <p className="text-xs font-semibold tracking-wide text-blue-700 uppercase">Tu objetivo confirmado</p>
+                  <p className="mt-1 leading-relaxed whitespace-pre-wrap text-slate-800">{objective}</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <Button icon={<Play className="size-4" />} onClick={startConversation} disabled={sending || loading}>
+                      Comenzar conversación
+                    </Button>
+                    <span className="text-xs text-slate-500">
+                      {realAI
+                        ? 'Antes de enviarlo vas a ver el contenido y el costo estimado.'
+                        : 'Lo escribiste en la revisión: no hace falta copiarlo.'}
+                    </span>
+                  </div>
+                </section>
+              )}
+
+              {realAI ? (
+                aiChat.map((turn) =>
+                  turn.role === 'user' ? (
+                    <div key={turn.id} className="flex flex-row-reverse gap-3">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-slate-200 text-slate-600" aria-hidden>
+                        <User className="size-4" />
+                      </span>
+                      <p className="max-w-[85%] rounded-2xl rounded-tr-md bg-blue-600 px-4 py-2.5 text-sm whitespace-pre-wrap text-white">
+                        <span className="sr-only">Vos: </span>
+                        {turn.content}
+                      </p>
+                    </div>
+                  ) : (
+                    <div key={turn.id} className="flex gap-3">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-navy-900 to-blue-600 text-white" aria-hidden>
+                        <Bot className="size-4" />
+                      </span>
+                      <div className="min-w-0 max-w-[90%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                        {turn.result && (
+                          <AIReplyCard
+                            result={turn.result}
+                            approvedPlanIds={approvedPlanIds}
+                            onApprove={aiGateway?.approvePlan ? approvePlan : undefined}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ),
+                )
+              ) : loading ? (
                 <Spinner label="Preparando la conversación…" />
               ) : (
                 messages.map((m) => (
@@ -149,12 +379,33 @@ export function AssistantPage() {
                   </div>
                 ))
               )}
-              {sending && <TypingIndicator />}
+              {realAI && justApproved && (
+                <section aria-label="Plan aprobado" className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm">
+                  <p className="flex items-center gap-1.5 font-semibold text-emerald-900">
+                    <CheckCircle2 className="size-4" aria-hidden /> Plan aprobado correctamente.
+                  </p>
+                  <p className="mt-1 text-emerald-900/80">Tu propuesta está lista para revisar en el siguiente paso.</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button size="sm" iconRight={<ArrowRight className="size-3.5" />} onClick={() => navigate('/analisis/confirmar')}>
+                      Continuar a Confirmar
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={keepTalking}>
+                      Seguir conversando
+                    </Button>
+                  </div>
+                </section>
+              )}
+              {(sending || aiSending) && <TypingIndicator />}
               <div ref={endRef} />
             </div>
 
             <div className="border-t border-slate-100 bg-white p-4">
-              {error && (
+              {aiError && realAI && (
+                <Alert tone="error" className="mb-3">
+                  {aiError}
+                </Alert>
+              )}
+              {error && !realAI && (
                 <Alert tone="error" className="mb-3" action={<Button size="sm" variant="outline" onClick={retry}>Reintentar</Button>}>
                   {error}
                 </Alert>
@@ -174,39 +425,92 @@ export function AssistantPage() {
                   ))}
                 </div>
               )}
-              {objectiveReady && (
-                <p className="mb-2 flex items-start gap-1.5 rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-800" role="status">
-                  <PencilLine className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                  <span>
-                    <strong>Tu objetivo está preparado. Enviá para comenzar la conversación.</strong> Es el que escribiste en
-                    la revisión; podés editarlo antes de enviarlo.
-                  </span>
-                </p>
-              )}
               <ChatComposer
                 ref={composerRef}
                 value={draft}
                 onValueChange={setDraft}
-                onSend={(text) => void send(text)}
-                disabled={sending || loading}
-                placeholder={proposal ? 'Pedí cambios a la propuesta o hacé una pregunta…' : 'Ej.: Quiero saber qué productos se venden más en verano'}
+                onSend={handleComposerSend}
+                disabled={sending || loading || aiSending || Boolean(outgoing)}
+                placeholder={
+                  realAI
+                    ? 'Respondé las preguntas o pedí cambios…'
+                    : proposal
+                      ? 'Pedí cambios a la propuesta o hacé una pregunta…'
+                      : 'Ej.: Quiero saber qué productos se venden más en verano'
+                }
               />
-              {mode === 'demo' && (
+              {realAI ? (
+                <div
+                  role="status"
+                  aria-label="Estado de la autorización"
+                  className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 px-1 text-[11px] text-slate-500"
+                >
+                  {grantActive && grant ? (
+                    <>
+                      <Badge tone="green" icon={<ShieldCheck className="size-3" aria-hidden />}>
+                        Conversación autorizada
+                      </Badge>
+                      <span>«Enviar» va directo a OpenAI · vence a las {timeLabel(grant.expiresAt)}</span>
+                      <button
+                        type="button"
+                        onClick={revokeGrant}
+                        className="inline-flex items-center gap-1 font-medium text-red-700 underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-red-200 focus-visible:outline-none"
+                      >
+                        <ShieldOff className="size-3" aria-hidden /> Desactivar autorización de conversación
+                      </button>
+                    </>
+                  ) : grantExpired || grantNotice ? (
+                    <>
+                      <Badge tone="amber" icon={<ShieldAlert className="size-3" aria-hidden />}>
+                        {grantExpired ? 'Autorización vencida' : 'Se requiere nueva autorización'}
+                      </Badge>
+                      <span>El próximo envío volverá a mostrar el panel de privacidad.</span>
+                    </>
+                  ) : (
+                    <>
+                      <Badge tone="neutral" icon={<ShieldCheck className="size-3" aria-hidden />}>
+                        Autorización por mensaje
+                      </Badge>
+                      <span>«Enviar» prepara el envío a OpenAI: nada sale sin tu autorización.</span>
+                    </>
+                  )}
+                </div>
+              ) : (
                 <p className="mt-1 flex items-center gap-1.5 px-1 text-[11px] text-slate-500">
                   <Bot className="size-3" aria-hidden />
-                  «Enviar» conversa con el asistente DEMO, en este equipo. No usa OpenAI.
+                  {mode === 'demo'
+                    ? '«Enviar» conversa con el asistente DEMO, en este equipo. No usa OpenAI.'
+                    : '«Enviar» conversa con el asistente del backend.'}
                 </p>
               )}
             </div>
           </Card>
           {/* Fuera de la tarjeta del chat (altura fija): al abrirse no empuja los botones fuera de la vista. */}
-          {review && <MessageAuthorization sources={sources} review={review} message={draft} gateway={aiGateway} />}
+          {realAI && aiGateway && review && outgoing && (
+            <AuthorizedSend
+              sources={sources}
+              review={review}
+              message={outgoing.text}
+              history={history}
+              gateway={aiGateway}
+              onSent={handleSent}
+              onCancel={handleCancelSend}
+              notice={grantNotice}
+            />
+          )}
+          {!realAI && review && <MessageAuthorization sources={sources} review={review} message={draft} gateway={aiGateway} />}
         </div>
 
         <aside className="space-y-4">
           <Card className="p-5">
             <p className="text-sm font-semibold text-slate-900">Estado de la propuesta</p>
-            {proposal ? (
+            {realAI ? (
+              <p className="mt-2 text-xs leading-relaxed text-slate-600">
+                {proposedPlans === 0
+                  ? 'Todavía no hay planes. Comenzá la conversación y respondé las preguntas del asistente.'
+                  : `${proposedPlans} ${proposedPlans === 1 ? 'plan propuesto' : 'planes propuestos'} · ${approvedPlanIds.length} ${approvedPlanIds.length === 1 ? 'aprobado' : 'aprobados'}. Los cálculos llegan en la próxima etapa.`}
+              </p>
+            ) : proposal ? (
               <div className="mt-3 space-y-2 text-xs text-slate-600">
                 <div className="flex items-center justify-between">
                   <span>Versión {proposal.version}</span>

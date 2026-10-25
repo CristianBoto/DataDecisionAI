@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { DataDecisionService } from '@/services'
 import { service as defaultService } from '@/services'
 import type { Dataset, DatasetProfile } from '@/types/domain'
@@ -7,9 +7,21 @@ import type { AIGatewayClient } from '@/services/aiGateway'
 import { AIGatewayContext, defaultAIGateway, ServiceContext } from './serviceContext'
 import { AnalysisSessionContext, type AnalysisSessionState } from './sessionContext'
 
-const EMPTY_SESSION: AnalysisSessionState = { sources: [], projectId: null, projectName: '', review: null, reviewConfirmed: false }
-// Cambiar las fuentes obliga a revisar de nuevo y a crear otro proyecto.
-const SOURCES_CHANGED = { projectId: null, review: null, reviewConfirmed: false }
+const EMPTY_SESSION: AnalysisSessionState = {
+  sources: [],
+  projectId: null,
+  projectName: '',
+  review: null,
+  reviewConfirmed: false,
+  aiChat: [],
+  approvedPlanIds: [],
+  confirmedPlanIds: [],
+  aiConversationGrant: null,
+}
+// Lo que depende de la frontera de privacidad: conversación, planes y permiso de conversación.
+const CONVERSATION_RESET = { aiChat: [], approvedPlanIds: [], confirmedPlanIds: [], aiConversationGrant: null }
+// Cambiar las fuentes obliga a revisar de nuevo, a crear otro proyecto y a empezar otra conversación.
+const SOURCES_CHANGED = { projectId: null, review: null, reviewConfirmed: false, ...CONVERSATION_RESET }
 
 interface AppProvidersProps {
   children: ReactNode
@@ -46,8 +58,33 @@ export function AppProviders({ children, service = defaultService, aiGateway = d
     setSession((current) => ({ ...current, projectName }))
   }, [])
   const setReview = useCallback((review: AnalysisSessionState['review']) => {
-    setSession((current) => ({ ...current, review, reviewConfirmed: false, projectId: null }))
+    // Cambiar la revisión cambia la frontera de privacidad: el permiso de conversación deja de valer.
+    setSession((current) => ({ ...current, review, reviewConfirmed: false, projectId: null, ...CONVERSATION_RESET }))
   }, [])
+  const appendAIChat = useCallback((turns: AnalysisSessionState['aiChat']) => {
+    setSession((current) => ({ ...current, aiChat: [...current.aiChat, ...turns] }))
+  }, [])
+  const markPlanApproved = useCallback((planId: string) => {
+    setSession((current) =>
+      current.approvedPlanIds.includes(planId) ? current : { ...current, approvedPlanIds: [...current.approvedPlanIds, planId] },
+    )
+  }, [])
+  const confirmPlans = useCallback((planIds: string[]) => {
+    setSession((current) => ({ ...current, confirmedPlanIds: planIds.filter((id) => current.approvedPlanIds.includes(id)) }))
+  }, [])
+  const setAIConversationGrant = useCallback((aiConversationGrant: AnalysisSessionState['aiConversationGrant']) => {
+    setSession((current) => ({ ...current, aiConversationGrant }))
+  }, [])
+
+  // Un permiso que se descarta (revocación, cambio de fuentes o de revisión) también se revoca en el backend.
+  const grantId = session.aiConversationGrant?.id ?? null
+  const previousGrant = useRef<string | null>(null)
+  useEffect(() => {
+    const previous = previousGrant.current
+    previousGrant.current = grantId
+    if (previous && previous !== grantId) void aiGateway?.revokeConversation?.(previous).catch(() => undefined)
+  }, [grantId, aiGateway])
+
   const confirmReview = useCallback(() => {
     setSession((current) => (current.review ? { ...current, reviewConfirmed: true } : current))
   }, [])
@@ -65,9 +102,27 @@ export function AppProviders({ children, service = defaultService, aiGateway = d
       setProjectName,
       setReview,
       confirmReview,
+      appendAIChat,
+      markPlanApproved,
+      confirmPlans,
+      setAIConversationGrant,
       reset,
     }),
-    [session, addSource, replaceSource, removeSource, setProjectId, setProjectName, setReview, confirmReview, reset],
+    [
+      session,
+      addSource,
+      replaceSource,
+      removeSource,
+      setProjectId,
+      setProjectName,
+      setReview,
+      confirmReview,
+      appendAIChat,
+      markPlanApproved,
+      confirmPlans,
+      setAIConversationGrant,
+      reset,
+    ],
   )
 
   return (

@@ -1,0 +1,94 @@
+{
+  "filename": "ventas-sinteticas.csv",
+  "format": "csv",
+  "encoding": "utf-8-sig",
+  "sheet_name": null,
+  "row_count": 6,
+  "column_count": 3,
+  "duplicate_rows": 0,
+  "total_cells": 18,
+  "empty_cells": 0,
+  "suspected_missing_cells": 0,
+  "completeness": 1.0,
+  "columns": [
+    {
+      "name": "fecha",
+      "missing": 0,
+      "non_empty": 6,
+      "distinct": 6,
+      "examples": [
+        "2026-01-05",
+        "2026-01-12",
+        "2026-01-19"
+      ],
+      "suspected_missing": 0,
+      "suspected_missing_values": {},
+      "value_kind": "date",
+      "semantic_type": "temporal",
+      "semantic_confidence": "high",
+      "semantic_reason": "El 100 % de los valores tiene formato de fecha."
+    },
+    {
+      "name": "sector",
+      "missing": 0,
+      "non_empty": 6,
+      "distinct": 3,
+      "examples": [
+        "Comercio",
+        "Industria",
+        "Servicios"
+      ],
+      "suspected_missing": 0,
+      "suspected_missing_values": {},
+      "value_kind": "text",
+      "semantic_type": "categorical",
+      "semantic_confidence": "medium",
+      "semantic_reason": "Texto con pocos valores distintos (3) que se repiten en las filas."
+    },
+    {
+      "name": "ventas",
+      "missing": 0,
+      "non_empty": 6,
+      "distinct": 6,
+      "examples": [
+        "1200",
+        "3400",
+        "980"
+      ],
+      "suspected_missing": 0,
+      "suspected_missing_values": {},
+      "value_kind": "numeric",
+      "semantic_type": "quantitative",
+      "semantic_confidence": "medium",
+      "semantic_reason": "Valores enteros con 6 valores distintos."
+    }
+  ],
+  "preview": [
+    {
+      "fecha": "2026-01-05",
+      "sector": "Comercio",
+      "ventas": "1200"
+    },
+    {
+      "fecha": "2026-01-12",
+      "sector": "Industria",
+      "ventas": "3400"
+    },
+    {
+      "fecha": "2026-01-19",
+      "sector": "Servicios",
+      "ventas": "980"
+    },
+    {
+      "fecha": "2026-01-26",
+      "sector": "Comercio",
+      "ventas": "1500"
+    },
+    {
+      "fecha": "2026-02-02",
+      "sector": "Industria",
+      "ventas": "2900"
+    }
+  ],
+  "warnings": []
+}

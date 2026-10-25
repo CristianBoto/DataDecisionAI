@@ -24,3 +24,14 @@ describe('formatos de exportación', () => {
     expect(getExportExtension({ format: 'canva', canvaFileType: 'pdf' })).toBe('pdf')
   })
 })
+
+describe('aislamiento de las pruebas', () => {
+  it('corren como la demo pública aunque el .env.local apunte a un backend real', async () => {
+    const { appConfig } = await import('./config')
+    const { createDefaultAIGateway } = await import('@/services/aiGateway')
+    expect(appConfig.demoMode).toBe(true)
+    expect(appConfig.backendProfiling).toBe(false)
+    expect(createDefaultAIGateway()).toBeNull()
+    await expect(fetch('http://127.0.0.1:8000/api/ai/status')).rejects.toThrow(/Red bloqueada/)
+  })
+})

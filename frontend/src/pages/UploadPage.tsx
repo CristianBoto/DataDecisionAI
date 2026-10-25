@@ -233,7 +233,8 @@ export function UploadPage() {
           {service.mode === 'demo' && usesBackendProfiling && (
             <Alert tone="info" title="Perfilado real con el backend local">
               Cada archivo se envía por separado a FastAPI ({appConfig.apiBaseUrl}) para leerlo con Pandas y no se
-              guarda. El asistente y los resultados siguen en modo DEMO.
+              guarda. Los resultados siguen en modo DEMO; el asistente usa la IA real solo si está habilitada en el
+              backend.
             </Alert>
           )}
 

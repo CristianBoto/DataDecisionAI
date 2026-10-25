@@ -52,11 +52,14 @@ Navegador ──► demoProvider.ts (asistente y resultados DEMO)
 ```
 
 - `createService()` inyecta un `DatasetProfiler` en el proveedor DEMO; los demás métodos no cambian.
+- **`VITE_DEMO_MODE=false` usa hoy esta misma composición** (sesión en memoria + perfilado real), porque el backend todavía no implementa la API completa de la instalación privada (`POST /api/datasets`, `/api/projects`…). Antes usaba el proveedor HTTP completo y la carga terminaba en 404 (bitácora, sección 6o). El asistente usa la IA real solo si el backend la tiene habilitada.
 - `backendProfile.ts` adapta la respuesta snake_case de Python a `DatasetProfile` (`origin: "backend"`).
 - Si el backend falla, `uploadDataset` rechaza con el error: no hay respaldo silencioso con datos locales o ficticios.
 - El servicio expone `profiling: "browser" | "backend"` para que la pantalla de carga muestre el aviso correcto.
 
-### Instalación privada (frontend + backend en la organización)
+### Instalación privada (frontend + backend en la organización) — planificada
+
+> El proveedor HTTP completo (`httpProvider.ts`) y la persistencia descripta acá todavía no están implementados en el backend.
 
 ```
 Red interna de la organización
@@ -224,7 +227,7 @@ Ninguna operación se ejecuta sin un **plan aprobado por el usuario**. Las valid
 
 **Justificación.** Estos límites permiten controlar recursos, realizar pruebas reproducibles, mantener una complejidad razonable y terminar el proyecto dentro del alcance académico. La arquitectura separa la carga y administración de fuentes, el perfilado, el procesamiento estadístico y la interfaz; esa separación **facilita** futuras ampliaciones, pero **no garantiza escalabilidad ilimitada**. Ampliar las capacidades requeriría nuevas pruebas de rendimiento, memoria y concurrencia y, según el volumen, otras estrategias de procesamiento. **El límite de tres fuentes es una decisión de alcance y de seguridad operativa del MVP, no una incapacidad conceptual** para trabajar con más datasets.
 
-## Frontera de datos para la IA (Fase 3B.1: implementada sin llamadas externas)
+## Frontera de datos para la IA (Fase 3B.1) y conexión con OpenAI (Fase 3B.2)
 
 **Decisión central: Python/Pandas calcula; OpenAI interpretará objetivos y propondrá planes; el usuario confirma.**
 
@@ -245,16 +248,54 @@ Catálogo de fuentes (sin valores)
         │  POST /api/ai/requests/{id}/authorize  AI_ENABLED=false → 403, se descarta
         └──────────────────────────────────────► huella distinta → 409; vencida → 410
                                                  uso único (consumida)
-                                                 proveedor sin red en 3B.1 → 501 ─ ─ ─ ✗ (Fase 3B.2)
+                                                 sin clave → 503; sin presupuesto → 402
+                                                 reserva el costo máximo estimado ──────────► Responses API
+                                                 valida la respuesta (alias, columnas,       (salida estructurada,
+                                                 catálogo de operaciones) y guarda planes ◄── sin reintentos)
+        ◄────────────── preguntas + planes validados + consumo real
+  └─ El usuario aprueba un plan (no se ejecuta nada todavía)
 ```
 
 En la **demo pública** no existe el cliente de la frontera (`createDefaultAIGateway()` devuelve `null`): el panel solo muestra qué se enviaría.
 
 Archivos: `backend/app/schemas/ai_context.py` (contrato), `backend/app/services/ai_gateway.py` (autorización de uso único y proveedor), `backend/app/api/routes/ai.py` (endpoints), `frontend/src/lib/aiContext.ts` (contexto mínimo), `frontend/src/services/aiGateway.ts` (cliente) y `frontend/src/components/ai/AIContextReview.tsx` (revisión).
 
-**Dónde llega el JSON en esta fase.** El contexto revisado **sí viaja al backend FastAPI local** (`POST /api/ai/requests`) para que lo valide la lista blanca; **no sale hacia ningún proveedor externo**: no hay SDK, URL ni llamada a OpenAI en el código, y el proveedor de esta fase no tiene red.
+**Dónde llega el JSON.** El contexto revisado viaja al backend FastAPI local para validarse. Solo sale hacia OpenAI cuando el usuario autoriza **ese** mensaje, con la IA habilitada, la clave configurada y presupuesto disponible.
 
-En la Fase 3B.2 el proveedor real reemplazará a `NotImplementedProvider` y su respuesta deberá validarse como plan estructurado antes de que Pandas ejecute algo.
+**Fase 3B.2 (implementada, probada con proveedores falsos):**
+- **Backend:**
+  - `app/services/openai_provider.py`: Responses API, `max_retries=0`, `store=False` y traducción de errores.
+  - `app/services/ai_budget.py`: estimación, reserva, consumo real y presupuesto persistente.
+  - `app/schemas/ai_plan.py`: esquema de la respuesta y validación contra el contexto autorizado.
+- **Asistente en modo IA real** (`AssistantPage`):
+  - el resumen del objetivo confirmado y «Comenzar conversación»;
+  - el panel `AuthorizedSend` (contenido, costo estimado y «Autorizar y enviar»);
+  - `AIReplyCard` (preguntas, planes por fuente y «Aprobar este plan»);
+  - la conversación en la sesión del análisis (`aiChat`), que se reinicia si cambian las fuentes o la revisión.
+- **Modos:** sin IA habilitada sigue el asistente DEMO, más la prueba de autorización si hay backend. La demo pública no tiene cliente de IA.
+
+Controles y límites en [SEGURIDAD.md](SEGURIDAD.md), sección 10.
+
+**Planes y autorizaciones (fuente única: la sesión del análisis).**
+- `aiChat`: los turnos con las respuestas validadas.
+- `approvedPlanIds`: los planes aprobados, en orden.
+- `confirmedPlanIds`: los planes confirmados en el paso 4.
+- `aiConversationGrant`: el permiso de la conversación.
+- `lib/aiPlans.ts` deriva de estos datos lo que muestran el asistente y «Confirmar».
+- Los planes también quedan registrados en el backend (memoria del proceso), que es quien aprueba.
+
+**Autorización por conversación.**
+- `POST /api/ai/requests/{id}/authorize` con `scope: "conversation"` devuelve un `conversation_id`.
+- Los mensajes siguientes van por `POST /api/ai/conversations/{id}/messages`. El backend comprueba el permiso (vencimiento, tope de mensajes, huella de la frontera de privacidad, sin envíos simultáneos) y aplica los mismos límites que un envío individual.
+- `DELETE /api/ai/conversations/{id}` lo revoca.
+
+| Concepto | Qué significa | Qué NO hace |
+|----------|---------------|-------------|
+| **Autorización de un mensaje** | Ese envío a OpenAI, con el contenido exacto revisado, una vez | No autoriza los mensajes siguientes |
+| **Autorización de la conversación** | Los próximos mensajes que el usuario envíe voluntariamente en esta conversación van a OpenAI sin volver a mostrar el panel. Cada envío comparte el mensaje, un historial limitado (hasta 8 turnos), el objetivo y los metadatos ya autorizados | No es permanente: vence (30 min), tiene tope de mensajes (20), se anula si cambia la configuración de datos y se puede revocar. No saltea ningún límite de consumo ni hace llamadas automáticas |
+| **Aprobación de un plan** (asistente) | El usuario elige un plan validado; el backend lo registra | No consulta a la IA ni calcula nada |
+| **Confirmación de la propuesta** (paso 4) | El usuario confirma los planes aprobados para la etapa siguiente | No ejecuta cálculos |
+| **Ejecución de cálculos** (próxima etapa) | Pandas calculará los planes confirmados | — Todavía no implementada |
 
 Auditoría y justificación de cada campo en [SEGURIDAD.md](SEGURIDAD.md), sección 6.
 
