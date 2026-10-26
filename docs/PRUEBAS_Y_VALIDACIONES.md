@@ -14,16 +14,16 @@ Entorno de la verificación: Windows 11, Node 22.17.0, Python 3.12.9.
 
 | Prueba | Resultado | Evidencia |
 |--------|-----------|-----------|
-| Frontend inicial (commit `797fdd7`) | 28 pruebas | 📄 28 casos `it(` en los archivos de prueba de ese commit |
-| Preparación para Cloudflare (commit `1fe248a`) | 29 pruebas | 📄 29 casos en ese commit (se agregó la prueba de "sin envío por red") |
-| Frontend al cierre de la integración React + Pandas (commit `7971702`) | 41 de 41 aprobadas, 7 archivos | ✅ ejecutada en esa etapa |
-| Frontend al cierre de la Fase 2 (commit `106bb9d`) | 51 de 51 aprobadas, 8 archivos | ✅ ejecutada en esa etapa |
+| Frontend inicial (commit `e943df3`) | 28 pruebas | 📄 28 casos `it(` en los archivos de prueba de ese commit |
+| Preparación para Cloudflare (commit `492b9f9`) | 29 pruebas | 📄 29 casos en ese commit (se agregó la prueba de "sin envío por red") |
+| Frontend al cierre de la integración React + Pandas (commit `ac5553e`) | 41 de 41 aprobadas, 7 archivos | ✅ ejecutada en esa etapa |
+| Frontend al cierre de la Fase 2 (commit `7f2c481`) | 51 de 51 aprobadas, 8 archivos | ✅ ejecutada en esa etapa |
 | Frontend con la Fase 3A, antes del endurecimiento | 63 de 63 aprobadas, 9 archivos | ✅ (sección 10) |
 | **Frontend actual (Fase 3A + endurecimiento)** | **66 de 66 aprobadas**, 9 archivos | ✅ `npm test` (sección 12) |
 | Lint del frontend | Sin errores | ✅ `npm run lint` |
 | Build de producción del frontend | Correcta | ✅ `npm run build` |
-| Backend al cierre de la integración (commit `7971702`) | 15 de 15 aprobadas | ✅ ejecutada en esa etapa |
-| Backend al cierre de la Fase 2 (commit `106bb9d`) | 26 de 26 aprobadas | ✅ ejecutada en esa etapa |
+| Backend al cierre de la integración (commit `ac5553e`) | 15 de 15 aprobadas | ✅ ejecutada en esa etapa |
+| Backend al cierre de la Fase 2 (commit `7f2c481`) | 26 de 26 aprobadas | ✅ ejecutada en esa etapa |
 | Backend con la Fase 3A, antes del endurecimiento | 29 de 29 aprobadas | ✅ (sección 10) |
 | **Backend actual (Fase 3A + endurecimiento)** | **52 de 52 aprobadas** (1 advertencia de librería) | ✅ `python -m pytest` (sección 12) |
 | Swagger con el dataset SIACAM: HTTP 200, 102.254 registros, 8 columnas | Informado como correcto | 🗣️ El archivo no está en el repositorio |

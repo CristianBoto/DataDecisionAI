@@ -9,11 +9,11 @@ Autor: Damián Boto. Documento de base para la exposición final.
 
 | Etapa | Evidencia en el repositorio |
 |-------|-----------------------------|
-| 1. MVP inicial: frontend completo en modo DEMO y esqueleto FastAPI | Commit `797fdd7` (24/10/2026, 14:09) |
-| 2. Preparación de la demo pública y documentación de instalación privada | Commit `1fe248a` (24/10/2026, 15:35) |
-| 3. Perfilado de datasets con FastAPI + Pandas | Commit `7971702`: `backend/app/services/dataset_profiler.py`, `backend/app/api/routes/datasets.py`, `backend/tests/test_dataset_profiler.py` (incorporados por el autor) |
-| 4. Integración de la pantalla de carga con el perfilado real | Commit `7971702`: `frontend/src/services/backendProfile.ts` y cambios en la capa de servicios |
-| 5. Documentación académica (este documento) | Commit `7971702`, actualizada en cada fase |
+| 1. MVP inicial: frontend completo en modo DEMO y esqueleto FastAPI | Commit `e943df3` (24/10/2026, 14:09) |
+| 2. Preparación de la demo pública y documentación de instalación privada | Commit `492b9f9` (24/10/2026, 15:35) |
+| 3. Perfilado de datasets con FastAPI + Pandas | Commit `ac5553e`: `backend/app/services/dataset_profiler.py`, `backend/app/api/routes/datasets.py`, `backend/tests/test_dataset_profiler.py` (incorporados por el autor) |
+| 4. Integración de la pantalla de carga con el perfilado real | Commit `ac5553e`: `frontend/src/services/backendProfile.ts` y cambios en la capa de servicios |
+| 5. Documentación académica (este documento) | Commit `ac5553e`, actualizada en cada fase |
 | 6. Publicación de la demo en https://datadecisionai.pages.dev | Captura de Cloudflare provista por el autor (comunicada); respuesta HTTP 200 comprobada el 24/10/2026 |
 | 6b. Prueba local con el dataset real `impominerales-siacam.csv` (102.254 registros) | Capturas del autor (comunicada); ver [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 7 |
 | 6c. Fase 2: calidad y confiabilidad del dataset (faltantes, tipos semánticos) | Commit de cierre de la Fase 2; validación con SIACAM aportada por el autor (sección 6c) |
@@ -69,7 +69,7 @@ En la versión actual se cumplen 1, 2 y la interfaz de 3 a 7; el detalle está e
 
 Se descartaron explícitamente microservicios, Kubernetes y Docker: para un MVP académico agregan complejidad sin aportar valor demostrable.
 
-## 4. Frontend con React, TypeScript y Tailwind (commit `797fdd7`)
+## 4. Frontend con React, TypeScript y Tailwind (commit `e943df3`)
 
 - **Pantallas** en español: inicio, carga, asistente, confirmación y workspace (resumen con indicadores y gráficos, dataset y exportación del análisis).
 - **Capa de servicios con una interfaz única** (`DataDecisionService`) y dos implementaciones: un proveedor **DEMO** en memoria y un cliente **HTTP** para FastAPI. Las pantallas nunca hacen `fetch` ni conocen los datos simulados; cambiar de modo es cambiar una variable de entorno (`VITE_DEMO_MODE`).
@@ -80,8 +80,8 @@ Se descartaron explícitamente microservicios, Kubernetes y Docker: para un MVP 
 
 ## 5. Backend con FastAPI y Pandas
 
-- **Esqueleto inicial** (`797fdd7`): fábrica `create_app()`, configuración con `pydantic-settings` leída de `.env`, CORS limitado a los orígenes de desarrollo y endpoint `GET /api/health`.
-- **Perfilado de datasets** (incorporado por el autor, commit `7971702`): `POST /api/datasets/profile` recibe el archivo por `multipart/form-data`, lo lee con Pandas **como texto** (para no transformar identificadores como `00123`) y devuelve filas, columnas, vacíos, valores distintos, ejemplos, duplicados, primeras filas y advertencias. **No modifica ni guarda el archivo.** Incluye límites de tamaño, filas y columnas, y controles para Excel comprimido.
+- **Esqueleto inicial** (`e943df3`): fábrica `create_app()`, configuración con `pydantic-settings` leída de `.env`, CORS limitado a los orígenes de desarrollo y endpoint `GET /api/health`.
+- **Perfilado de datasets** (incorporado por el autor, commit `ac5553e`): `POST /api/datasets/profile` recibe el archivo por `multipart/form-data`, lo lee con Pandas **como texto** (para no transformar identificadores como `00123`) y devuelve filas, columnas, vacíos, valores distintos, ejemplos, duplicados, primeras filas y advertencias. **No modifica ni guarda el archivo.** Incluye límites de tamaño, filas y columnas, y controles para Excel comprimido.
 
 ## 6. Integración frontend–backend
 
@@ -628,7 +628,7 @@ Se comprobó en pruebas automáticas y en la aplicación.
 - **Tiempo límite de las pruebas:** antes del commit, una ejecución con la máquina cargada (la suite del backend corriendo al mismo tiempo) hizo superar el límite de 5 s de Vitest a pruebas largas de punta a punta, como el recorrido local completo, de unos 4 s. Era un tiempo agotado, no un fallo de aserción. Se reprodujo con carga simultánea, y se fijó `testTimeout: 15_000` en la configuración de Vitest; después, 4 de 4 ejecuciones bajo carga pasaron.
 - **Dependencias:** NumPy quedó declarada en `requirements.txt`, porque el motor la importa directamente. `pip check` no encontró dependencias rotas.
 
-## 7. Demo pública en Cloudflare Pages (commit `1fe248a`)
+## 7. Demo pública en Cloudflare Pages (commit `492b9f9`)
 
 - Configuración documentada en [DEPLOYMENT.md](DEPLOYMENT.md): carpeta `frontend`, `npm run build`, salida `dist`, `VITE_DEMO_MODE=true`.
 - Las rutas de React Router funcionan al recargar porque Cloudflare trata el sitio como SPA cuando no existe `404.html`; por eso no fue necesario agregar `_redirects`.
