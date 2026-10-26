@@ -298,7 +298,7 @@ def test_operations_the_engine_cannot_run_cannot_reach_a_plan(operation):
         AIPlan.model_validate(plan(op(operation, ["ventas"])))
 
 
-@pytest.mark.parametrize("chart", ["scatter", "histogram", "box", "roc"])
+@pytest.mark.parametrize("chart", ["box", "violin", "heatmap"])
 def test_charts_the_dashboard_cannot_build_cannot_reach_a_plan(chart):
     data = plan(op("sum", ["ventas"]))
     data["charts"] = [{"type": chart, "x": "ventas", "y": None, "title": "x"}]

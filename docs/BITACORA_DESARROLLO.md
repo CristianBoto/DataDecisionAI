@@ -33,6 +33,7 @@ Autor: Damián Boto. Documento de base para la exposición final.
 | 6q. Fase 4A — Motor de análisis real con Python y Pandas | Cambios sin confirmar |
 | 6r. Fase 4B — Dashboard interactivo con resultados reales | Cambios sin confirmar |
 | 6s. Modo real sin respuestas simuladas, catálogo único e instrucciones de la IA | Cambios sin confirmar; problema señalado por el autor |
+| 6t. Histograma, dispersión y curva ROC | Cambios sin confirmar |
 | 7. Decisión de minimización de datos para la IA | Registrada en [SEGURIDAD.md](SEGURIDAD.md) y [ARCHITECTURE.md](ARCHITECTURE.md); implementación pendiente |
 
 ---
@@ -601,6 +602,31 @@ Se comprobó en pruebas automáticas y en la aplicación.
 **Problemas encontrados al verificar.**
 - **Motivo desactualizado al reintentar:** durante el reintento seguía visible el motivo anterior. Ahora se muestra «Comprobando la conexión con la IA…» mientras se consulta.
 - **Indicador confuso:** con la IA no disponible se veía el indicador «Autorización por mensaje». Ahora solo aparece cuando la IA está disponible.
+
+## 6t. Histograma, dispersión y curva ROC (sin confirmar)
+
+**Objetivo.** Que el usuario pueda pedirle a la IA histogramas, gráficos de dispersión y curvas ROC, y que, si los datos lo permiten, Python calcule y Recharts dibuje, sin resultados ficticios ni código de la IA.
+
+**Decisiones.**
+- **scikit-learn 1.9.1** (aprobado por el autor) para `roc_curve` y `roc_auc_score`.
+- **NumPy** para el histograma, con la **regla de Sturges**.
+- **Pandas** para la correlación de Pearson y Spearman.
+- **Muestreo reproducible** (semilla 42) para mostrar como máximo 2.000 puntos.
+- **Clase positiva:** la elige el usuario al ejecutar. La IA no ve valores; el backend la valida.
+- **Validación del plan:** se agregaron reglas de forma para que la IA no proponga estos análisis sobre columnas inadecuadas (por ejemplo, una ROC sin etiqueta binaria).
+- **Instrucciones:** se actualizaron para elegir la visualización según la pregunta y explicar qué falta para una ROC.
+- Detalle técnico en [ARCHITECTURE.md](ARCHITECTURE.md), sección "Histograma, dispersión y curva ROC".
+
+**Verificación de los cálculos con valores conocidos:**
+- **Histograma:** 0 a 7 da 4 intervalos de 1,75 con 2 valores cada uno.
+- **Dispersión:** Pearson 0,7746 y Spearman 0,7379 en un caso de referencia.
+- **ROC:** AUC 1 con separación perfecta, y AUC 0,75 calculado a mano (3 de 4 pares positivo-negativo bien ordenados).
+- **En el navegador:** con 12 filas sintéticas, un AUC de 0,944 que coincide con el conteo manual (34 de 36 pares) y los 5 intervalos de Sturges con frecuencias 3, 1, 3, 1, 4.
+
+**Problemas.**
+- No hubo errores de cálculo. Las pruebas anteriores que verificaban que estos gráficos *no* existían se adaptaron, igual que la exigencia de las instrucciones ("entrenar un modelo").
+- **Tiempo límite de las pruebas:** antes del commit, una ejecución con la máquina cargada (la suite del backend corriendo al mismo tiempo) hizo superar el límite de 5 s de Vitest a pruebas largas de punta a punta, como el recorrido local completo, de unos 4 s. Era un tiempo agotado, no un fallo de aserción. Se reprodujo con carga simultánea, y se fijó `testTimeout: 15_000` en la configuración de Vitest; después, 4 de 4 ejecuciones bajo carga pasaron.
+- **Dependencias:** NumPy quedó declarada en `requirements.txt`, porque el motor la importa directamente. `pip check` no encontró dependencias rotas.
 
 ## 7. Demo pública en Cloudflare Pages (commit `1fe248a`)
 

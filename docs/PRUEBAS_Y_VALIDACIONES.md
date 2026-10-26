@@ -822,3 +822,42 @@ Cambios sin confirmar. **Sin llamadas reales a OpenAI ni consumo.** El proveedor
 - La revisión mostró `distinct_values` ("2" y "3-10").
 - El asistente mostró «La IA no está disponible» con el motivo `AI_ENABLED=false`, el chat y «Comenzar conversación» deshabilitados, y ningún texto del asistente DEMO.
 - Con el backend detenido, «Reintentar» mostró «Comprobando…» y luego «No se pudo consultar al backend».
+
+
+## 27. Histograma, dispersión y curva ROC (✅ verificada, 26/10/2026)
+
+Cambios sin confirmar. **Sin llamadas reales a OpenAI ni consumo.** La IA y el motor se simulan solo en las pruebas que lo indican. El fixture `visualResponse.json` es la salida real del motor.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **209 de 209** (189 anteriores, 4 adaptadas, + 20 en `tests/test_visual_analyses.py`) |
+| Frontend (`npm test`) | **173 de 173** en 19 archivos, dos ejecuciones seguidas (167 anteriores, 3 adaptadas, + 6 en `test/visualAnalyses.test.tsx`) |
+| Lint, typecheck y build pública | Sin errores |
+| Estabilidad | Con `testTimeout: 15_000` en Vitest, 4 de 4 ejecuciones con la suite del backend en paralelo: 173 de 173. Antes, un recorrido largo superaba los 5 s por defecto bajo carga |
+| Dependencias | `scikit-learn==1.9.1` y `numpy>=2.0,<3` declaradas; `pip check`: sin dependencias rotas |
+
+| Requisito | Prueba |
+|-----------|--------|
+| Histograma con frecuencias conocidas | 0 a 7: 4 intervalos de 1,75 con 2, 2, 2 y 2. Valores sesgados: 6, 0, 0, 1. Celda vacía excluida. Columna constante: un intervalo y aviso |
+| Histograma con tipos incompatibles | Categórica o código: error comprensible |
+| Dispersión | Puntos exactos. Pearson 0,7745967 y Spearman 0,7378648 (valores de referencia). Unidades en las medidas. Aviso de causalidad |
+| Límite de puntos | 2.500 pares dan 2.000 puntos, con la misma muestra en dos ejecuciones (semilla fija). Correlaciones con los 2.500. Aviso |
+| Pares incompletos | Se excluyen y se avisa |
+| ROC perfecta | AUC = 1; la curva pasa por (0, 1) y va de (0, 0) a (1, 1) |
+| ROC conocida | AUC = 0,75 (calculado a mano) y los puntos exactos de la curva |
+| Clase positiva | Elegir la otra clase da AUC 0,25, con aviso de inversión. Sin elegir: error. Valor inexistente: error |
+| Clases y puntuaciones | Tres clases: error. Puntuación categórica: error. Una sola clase tras excluir faltantes: error |
+| Validación del plan de la IA | ROC sobre una etiqueta no binaria, puntuación no numérica, histograma de una categórica, dispersión con una sola columna o con agrupación: el backend la descarta. Recorrido completo con el proveedor simulado: 502 y ningún plan guardado |
+| Independencia y operaciones anteriores | A (suma e histograma) y B (ROC) por separado, con resultados correctos para cada una |
+| Dashboard | Histograma con las frecuencias del motor. Dispersión con 8 puntos, títulos con unidad e indicadores r 0,947 y ρ 0,952. ROC con los puntos de scikit-learn, AUC 0,75 y la clase positiva. Un pedido de líneas sobre el histograma se explica y no se fabrica. B no muestra cifras de A. Sin solicitudes de red |
+| Clase positiva en la interfaz | Selector con las clases `no` y `si` del perfil local. «Ejecutar análisis» bloqueado hasta elegir. `positive_label: "si"` solo en la columna de etiquetas. No llega a la IA. Ejecutar no vuelve a consultar a la IA |
+
+**Verificación en el navegador.** Motor real (Pandas, NumPy y scikit-learn) y proveedor de IA **simulado** (lanzador fuera del repositorio, sin red ni OpenAI); CSV sintético de 12 filas (`publicidad`, `ventas`, `real` binaria y `score`):
+- **Revisión:** `real` como categórica con `distinct_values` "2".
+- **Plan:** el simulado (histograma, dispersión y ROC) pasó la validación.
+- **Clase positiva:** «Ejecutar análisis» bloqueado hasta elegir «si».
+- **Dashboard:**
+  - indicadores r = 0,96, ρ = 0,96, 12 pares, AUC = 0,94, 6 positivos y 6 negativos;
+  - dispersión con 12 puntos, ROC con su diagonal e histograma de Sturges (5 intervalos: 3, 1, 3, 1, 4);
+  - sin desplazamiento horizontal en móvil (375 px).
+- **Verificación manual del AUC:** 34 de 36 pares positivo-negativo bien ordenados da 0,944.

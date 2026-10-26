@@ -67,7 +67,13 @@ const OPERATION_LABELS: Record<string, string> = {
   time_series: 'Serie temporal',
   frequency: 'Frecuencias',
   distinct_count: 'Valores distintos',
+  histogram: 'Histograma',
+  scatter: 'Dispersión',
+  roc_curve: 'Curva ROC',
 }
+
+/** Operaciones con una visualización propia (no se eligen por dimensiones). */
+const FIXED_CHART: Record<string, ChartType> = { histogram: 'histogram', scatter: 'scatter', roc_curve: 'roc' }
 
 const AGGREGATE_LABELS: Record<string, string> = {
   count: 'Registros',
@@ -82,6 +88,7 @@ const AGGREGATE_LABELS: Record<string, string> = {
 
 const CHART_NAMES: Record<string, string> = {
   bar: 'barras', line: 'líneas', pie: 'torta', histogram: 'histograma', scatter: 'dispersión', box: 'caja', table: 'tabla', kpi: 'indicador',
+  roc: 'curva ROC',
 }
 
 export function operationTitle(op: OperationResult): string {
@@ -90,6 +97,7 @@ export function operationTitle(op: OperationResult): string {
 
 export function measureLabel(m: ResultMeasure): string {
   if (m.aggregate === 'count') return 'Registros'
+  if (m.aggregate === 'value' || m.aggregate === 'fpr' || m.aggregate === 'tpr') return m.column
   return `${AGGREGATE_LABELS[m.aggregate] ?? m.aggregate} ${m.column}`
 }
 
@@ -119,6 +127,7 @@ interface ChartRequest {
 
 /** Tipo de gráfico automático para una operación, o null si conviene solo la tabla. */
 function autoType(op: OperationResult): ChartType | null {
+  if (FIXED_CHART[op.operation]) return FIXED_CHART[op.operation]
   if (op.dimensions.length === 0 || op.dimensions.length > 2) return null
   return op.period ? 'line' : 'bar'
 }
@@ -126,6 +135,16 @@ function autoType(op: OperationResult): ChartType | null {
 /** ¿Se puede construir este tipo con estos resultados? Devuelve el motivo si no. */
 function incompatibility(op: OperationResult, type: string): string | null {
   const dims = op.dimensions.length
+  const fixed = FIXED_CHART[op.operation]
+  if (fixed) {
+    // Histograma, dispersión y ROC tienen una sola representación válida (el histograma también acepta barras).
+    return fixed === type || (fixed === 'histogram' && type === 'bar')
+      ? null
+      : `«${operationTitle(op)}» se representa como ${CHART_NAMES[fixed]}`
+  }
+  if (type === 'histogram' || type === 'scatter' || type === 'roc') {
+    return `el gráfico de ${CHART_NAMES[type]} requiere la operación correspondiente en el plan`
+  }
   switch (type) {
     case 'line':
       return op.period ? null : 'un gráfico de líneas necesita una dimensión temporal (mes o año)'
@@ -154,8 +173,47 @@ function incompatibility(op: OperationResult, type: string): string | null {
 let chartSeq = 0
 
 /** Convierte una operación con resultados en uno o más gráficos de Recharts (uno por unidad). */
+/** Dispersión: cada punto es un par (x, y) calculado por el motor; el eje X es numérico. */
+function scatterChart(op: OperationResult, title?: string): Chart {
+  const [x, y] = op.measures
+  const pearson = op.stats?.pearson
+  return {
+    id: `c${(chartSeq += 1)}`,
+    type: 'scatter',
+    title: title ?? operationTitle(op),
+    description: `${y.column} según ${x.column}${typeof pearson === 'number' ? ` · r de Pearson = ${pearson.toFixed(3)}` : ''} · correlación no implica causalidad`,
+    xKey: 'x',
+    xLabel: x.unit ? `${x.column} (${x.unit})` : x.column,
+    xUnit: x.unit ?? undefined,
+    yLabel: y.unit ? `${y.column} (${y.unit})` : y.column,
+    series: [{ key: 'y', label: y.column, unit: y.unit ?? undefined }],
+    data: op.rows.map((r) => ({ x: r.values[0], y: r.values[1] })),
+    animated: false,
+  }
+}
+
+/** ROC: tasa de falsos positivos (X) contra verdaderos positivos (Y), con la diagonal de referencia. */
+function rocChart(op: OperationResult, title?: string): Chart {
+  const auc = op.stats?.auc
+  return {
+    id: `c${(chartSeq += 1)}`,
+    type: 'roc',
+    title: title ?? operationTitle(op),
+    description: `Clase positiva: «${op.stats?.positive_label}»${typeof auc === 'number' ? ` · AUC = ${auc.toFixed(3)}` : ''} · diagonal = azar`,
+    xKey: 'x',
+    xLabel: 'Tasa de falsos positivos',
+    yLabel: 'Tasa de verdaderos positivos',
+    series: [{ key: 'tpr', label: 'Tasa de verdaderos positivos' }],
+    data: op.rows.map((r) => ({ x: r.values[0], tpr: r.values[1] })),
+    animated: false,
+  }
+}
+
 export function operationCharts(op: OperationResult, type: ChartType, title?: string): { charts: Chart[]; notice: string | null } {
   const charts: Chart[] = []
+  if (op.operation === 'scatter') return { charts: [scatterChart(op, title)], notice: null }
+  if (op.operation === 'roc_curve') return { charts: [rocChart(op, title)], notice: null }
+  if (op.operation === 'histogram') type = 'histogram'
   if (type === 'pie') {
     const m = op.measures[0]
     charts.push({
@@ -222,7 +280,20 @@ export function operationCharts(op: OperationResult, type: ChartType, title?: st
   return { charts, notice: null }
 }
 
+function statKpi(op: OperationResult, key: string, label: string): DashboardKpi[] {
+  const value = op.stats?.[key]
+  return typeof value === 'number' ? [{ id: `${op.operation}-${key}`, label, value, unit: null, description: operationTitle(op) }] : []
+}
+
 function kpisFor(op: OperationResult): DashboardKpi[] {
+  // Indicadores de los estadísticos calculados por el motor (no de las filas del gráfico).
+  if (op.operation === 'scatter') {
+    return [...statKpi(op, 'pearson', 'Correlación de Pearson (r)'), ...statKpi(op, 'spearman', 'Correlación de Spearman (ρ)'), ...statKpi(op, 'n', 'Pares de valores')]
+  }
+  if (op.operation === 'roc_curve') {
+    return [...statKpi(op, 'auc', 'AUC (área bajo la curva ROC)'), ...statKpi(op, 'positives', 'Casos positivos'), ...statKpi(op, 'negatives', 'Casos negativos')]
+  }
+  if (op.operation === 'histogram') return []
   if (op.dimensions.length !== 0 || op.rows.length === 0) return []
   return op.measures.flatMap((m, i) => {
     const value = op.rows[0].values[i]
@@ -232,6 +303,11 @@ function kpisFor(op: OperationResult): DashboardKpi[] {
 
 /** ¿Este pedido del plan corresponde a esta operación (mismos ejes)? */
 function matches(request: ChartRequest, op: OperationResult): boolean {
+  if (FIXED_CHART[op.operation]) {
+    // Histograma, dispersión y ROC se identifican por sus columnas, no por dimensiones.
+    const cols = op.columns
+    return (!request.x || cols.includes(request.x)) && (!request.y || cols.includes(request.y))
+  }
   const xOk = !request.x || op.dimensions.includes(request.x)
   const yOk = !request.y || op.measures.some((m) => m.column === request.y) || (request.y === 'registros' && op.measures.some((m) => m.aggregate === 'count'))
   return xOk && yOk

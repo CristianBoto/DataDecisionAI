@@ -35,18 +35,30 @@ OPERATION_GUIDE: dict[str, str] = {
     "compare_groups": "total de una columna cuantitativa por grupo y la participación (%) de cada grupo sobre el total.",
     "time_series": "suma de las columnas cuantitativas por período (mes, o año si abarca muchos años) de una columna temporal; "
     "puede desglosarse por una categoría agregándola en group_by.",
+    "histogram": "distribución de UNA columna cuantitativa en intervalos (frecuencia de cada intervalo). "
+    "columns = [columna]; group_by vacío.",
+    "scatter": "relación entre DOS columnas cuantitativas: los puntos y la correlación (Pearson y Spearman). "
+    "columns = [eje X, eje Y]; group_by vacío. La correlación no implica causalidad.",
+    "roc_curve": "curva ROC y AUC de un clasificador YA EXISTENTE. columns = [etiqueta real binaria (distinct_values \"2\"), "
+    "puntuación o probabilidad predicha (cuantitativa)]; group_by vacío. La persona elige la clase positiva al ejecutar. "
+    "No entrena modelos: si no hay una columna de puntuaciones, no se puede.",
 }
+
+# Forma exigida a las operaciones que necesitan columnas concretas (se valida en el backend).
+OPERATION_ARITY: dict[str, int] = {"histogram": 1, "scatter": 2, "roc_curve": 2}
 SUPPORTED_OPERATIONS: tuple[str, ...] = tuple(OPERATION_GUIDE)
 Operation = Literal[SUPPORTED_OPERATIONS]  # type: ignore[valid-type]
 
 # Gráficos que el dashboard puede construir con los resultados del motor.
-# (Dispersión e histograma se agregarán cuando el motor devuelva esos datos.)
 CHART_GUIDE: dict[str, str] = {
     "line": "evolución en el tiempo (requiere una agrupación temporal).",
     "bar": "comparación entre categorías (una o dos agrupaciones).",
     "pie": "partes de un total (una agrupación, 2 a 6 grupos, sumas o conteos; nunca promedios).",
     "kpi": "un único valor total (sin agrupaciones).",
     "table": "valores detallados.",
+    "histogram": "distribución de una columna cuantitativa (operación histogram).",
+    "scatter": "relación entre dos columnas cuantitativas (operación scatter).",
+    "roc": "curva ROC de un clasificador (operación roc_curve).",
 }
 SUPPORTED_CHARTS: tuple[str, ...] = tuple(CHART_GUIDE)
 ChartType = Literal[SUPPORTED_CHARTS]  # type: ignore[valid-type]
@@ -115,9 +127,32 @@ def _texts(reply: AIAssistantReply) -> list[str]:
     return texts
 
 
+def _shape_problems(plan: AIPlan, op: AIOperation, cols: dict) -> list[str]:
+    """Histograma, dispersión y ROC solo con las columnas que necesitan (tipos según la revisión)."""
+    arity = OPERATION_ARITY.get(op.operation)
+    if arity is None:
+        return []
+    where = f"El plan «{plan.title}» ({op.operation})"
+    if len(op.columns) != arity or op.group_by:
+        return [f"{where} necesita exactamente {arity} columna(s) y ninguna agrupación."]
+    if any(name not in cols for name in op.columns):
+        return []  # ya informado como columna inexistente
+    kinds = [cols[name].semantic_type for name in op.columns]
+    if op.operation in ("histogram", "scatter") and any(k != "quantitative" for k in kinds):
+        return [f"{where} solo admite columnas cuantitativas."]
+    if op.operation == "roc_curve":
+        label, score = (cols[name] for name in op.columns)
+        if label.distinct_values not in (None, "2"):
+            return [f"{where}: la etiqueta «{label.name}» no es binaria (tiene {label.distinct_values} valores distintos)."]
+        if score.semantic_type != "quantitative":
+            return [f"{where}: «{score.name}» no es una puntuación numérica."]
+    return []
+
+
 def validate_reply(reply: AIAssistantReply, context: AIContext) -> list[str]:
     """Problemas de la respuesta frente al contexto autorizado (lista vacía = válida)."""
     columns = {s.alias: {c.name for c in s.columns} for s in context.sources}
+    details = {s.alias: {c.name: c for c in s.columns} for s in context.sources}
     problems: list[str] = []
 
     if not reply.questions and not reply.plans:
@@ -143,6 +178,8 @@ def validate_reply(reply: AIAssistantReply, context: AIContext) -> list[str]:
             used |= {c for c in (chart.x, chart.y) if c}
         for name in sorted(used - known):
             problems.append(f"El plan «{plan.title}» usa la columna «{name}», que no existe en la fuente {plan.source_alias}.")
+        for op in plan.operations:
+            problems += _shape_problems(plan, op, details[plan.source_alias])
 
     for q in reply.questions:
         if q.source_alias is not None and q.source_alias not in columns:

@@ -409,3 +409,12 @@ Se agregó a la lista blanca del contexto un rango aproximado de valores distint
 - el backend rechaza cualquier otro valor (422).
 
 El modo real ya no tiene respuestas simuladas: si la IA no está disponible, no hay respuestas de ningún tipo.
+
+
+### Histograma, dispersión y curva ROC (Fase 4B.2)
+
+- **Sin datos hacia la IA:** los puntos de la dispersión, las etiquetas y las puntuaciones solo viajan entre el backend local y el navegador del usuario. A OpenAI llegan solo los metadatos de siempre.
+- **Clase positiva:** la elige el usuario, viaja solo al backend (`positive_label`) y el backend la valida contra las dos clases reales.
+- **Sin modelos:** no se entrena ningún modelo ni se generan predicciones; la ROC evalúa puntuaciones existentes.
+- **Límites:** como máximo 2.000 puntos de dispersión, 30 intervalos de histograma y 500 puntos de curva ROC (el AUC usa todos los umbrales).
+- **Dependencia:** scikit-learn 1.9.1, con versión fija en `requirements.txt`.

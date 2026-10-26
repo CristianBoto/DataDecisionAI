@@ -67,7 +67,7 @@ describe('de resultados de Pandas a datos de Recharts', () => {
     const dashboard = sourceA()
     expect(dashboard.charts.some((c) => c.title === 'Dispersión de ventas')).toBe(false)
     expect(dashboard.notices).toEqual([
-      expect.stringMatching(/gráfico de dispersión \(«Dispersión de ventas»\), pero no se puede construir porque .*fila a fila/),
+      expect.stringMatching(/gráfico de dispersión \(«Dispersión de ventas»\), pero no se puede construir porque .*requiere la operación correspondiente/),
     ])
   })
 

@@ -16,9 +16,13 @@ function formatValue(value: number | null, m: ResultMeasure): string {
   return m.unit && m.aggregate !== 'count' && m.aggregate !== 'distinct_count' ? `${formatted} ${m.unit}` : formatted
 }
 
+/** Filas visibles de la tabla de una dispersión (el gráfico y la correlación usan todos los puntos). */
+const MAX_TABLE_POINTS = 100
+
 /** Tabla exacta de una operación: los valores tal como los devolvió Pandas. */
 function OperationTable({ op }: { op: OperationResult }) {
   const title = operationTitle(op)
+  const rows = op.operation === 'scatter' ? op.rows.slice(0, MAX_TABLE_POINTS) : op.rows
   const dimensions = op.dimensions.map((d, i) => (op.period && i === 0 ? `${d} (${op.period === 'month' ? 'mes' : 'año'})` : d))
   return (
     <div className="rounded-xl border border-slate-200 p-3 text-sm" role="group" aria-label={`Resultado: ${title}`}>
@@ -39,7 +43,7 @@ function OperationTable({ op }: { op: OperationResult }) {
             </tr>
           </thead>
           <tbody>
-            {op.rows.map((row, i) => (
+            {rows.map((row, i) => (
               <tr key={i} className="border-t border-slate-100">
                 {row.keys.map((k, j) => (
                   <td key={j} className="py-1 pr-3 text-slate-700">{k}</td>
@@ -55,6 +59,10 @@ function OperationTable({ op }: { op: OperationResult }) {
       <p className="mt-1.5 text-[11px] text-slate-400">
         Columnas: {[...op.group_by, ...op.columns.filter((c) => !op.group_by.includes(c))].join(', ') || '—'}
         {op.rows_used !== null && <> · {op.rows_used} filas usadas</>}
+        {rows.length < op.rows.length && <> · se listan {rows.length} de {op.rows.length} puntos (el gráfico los muestra todos)</>}
+        {op.operation === 'histogram' && op.stats?.bins != null && (
+          <> · {String(op.stats.bins)} intervalos de igual ancho (regla de {String(op.stats.rule)})</>
+        )}
       </p>
       {op.warnings.length > 0 && (
         <ul className="mt-1 space-y-0.5 text-xs text-amber-800">

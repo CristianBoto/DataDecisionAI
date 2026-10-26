@@ -12,7 +12,11 @@ openai==3.37.0
 
 # Ciencia de datos
 pandas>=2.2,<3
+# Histograma (numpy.histogram); el motor la importa directamente.
+numpy>=2.0,<3
 openpyxl>=3.1,<4
+# Curva ROC y AUC (sklearn.metrics); incluye NumPy y SciPy.
+scikit-learn==1.9.1
 
 # Pruebas
 pytest>=8.0

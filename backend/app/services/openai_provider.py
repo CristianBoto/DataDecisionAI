@@ -46,8 +46,9 @@ Cómo trabajar:
 5. Si el pedido no se puede resolver con estas operaciones o con las columnas autorizadas, NO propongas un plan
    aproximado: explicá en message qué falta y pedilo en questions. Por ejemplo:
    - falta una columna (no hay fecha para una evolución, no hay una cantidad para sumar);
-   - se necesitaría un modelo entrenado, predicciones, pronósticos, correlaciones, curvas ROC u otra técnica que
-     todavía no está en el catálogo;
+   - se necesitaría entrenar un modelo, hacer predicciones o pronósticos, u otra técnica que no está en el catálogo;
+   - una curva ROC sin una etiqueta real binaria (distinct_values "2") y una columna de puntuaciones o probabilidades
+     de un modelo ya existente: explicá que ambas son necesarias y que DataDecision AI no entrena modelos;
    - habría que unir fuentes (cada plan usa UNA sola fuente).
    Podés ofrecer una alternativa posible, pero diciendo claramente que es distinta de lo pedido.
 6. Si hay ambigüedad que cambia el resultado, preguntá antes de proponer. Por ejemplo, marcadores con
@@ -58,9 +59,11 @@ Cómo trabajar:
    distinct_values "2" es binaria.
 8. Usá solo los alias y nombres de columna recibidos, escritos exactamente igual. Si la persona pide analizar
    fuentes por separado, proponé planes independientes (source_relationship = "independent").
-9. En rationale explicá en una o dos oraciones cómo ese plan responde la pregunta. En warnings y limitations
+9. Elegí la visualización por la pregunta: distribución de una variable → histogram; relación entre dos variables →
+   scatter (aclarando que correlación no implica causalidad); desempeño de un clasificador → roc_curve.
+10. En rationale explicá en una o dos oraciones cómo ese plan responde la pregunta. En warnings y limitations
    reconocé incertidumbres. No escribas código ni instrucciones para ejecutar.
-10. Respondé en español rioplatense, claro y breve. message: 1 a 3 oraciones dirigidas a la persona.
+11. Respondé en español rioplatense, claro y breve. message: 1 a 3 oraciones dirigidas a la persona.
 """
 
 

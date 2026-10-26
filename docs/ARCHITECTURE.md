@@ -532,3 +532,72 @@ Las instrucciones piden:
 ### Metadato aproximado nuevo
 
 `distinct_values` es la cantidad de valores distintos de cada columna, por rango: `1`, `2`, `3-10`, `11-50`, `51-500` o `>500`. Se calcula en el navegador desde el perfil (`distinctRange`) y aparece en el JSON de la revisión de privacidad. Nunca incluye la cantidad exacta ni los valores. Le permite a la IA distinguir columnas binarias y categorías chicas de columnas casi únicas.
+
+
+## Histograma, dispersión y curva ROC (Fase 4B.2)
+
+Las tres operaciones se agregaron al **catálogo único** (`OPERATION_GUIDE` en `ai_plan.py`), al motor (`OPERATIONS` en `analysis_engine.py`) y al dashboard. La IA las propone, el backend valida el plan, Python calcula y Recharts dibuja. Ningún punto, etiqueta ni puntuación se envía a OpenAI.
+
+### Qué calcula cada función y con qué librería
+
+| Operación | Función | Librería y funciones | Qué devuelve |
+|-----------|---------|----------------------|--------------|
+| `histogram` | `op_histogram` | **NumPy** `np.histogram(valores, bins=k, range=(min, max))`. Cantidad de intervalos por la **regla de Sturges**, k = ⌈log₂ n⌉ + 1 (máximo 30) | Intervalos de igual ancho `[a, b)` (el último incluye el máximo) con su frecuencia |
+| `scatter` | `op_scatter` | **Pandas** `Series.corr(method="pearson")` y `Series.corr(method="spearman")` sobre todos los pares completos. `DataFrame.sample(n=2000, random_state=42)` si hay más puntos | Puntos (x, y), las correlaciones de Pearson y Spearman, y n |
+| `roc_curve` | `op_roc_curve` | **scikit-learn** `sklearn.metrics.roc_curve` (tasas de falsos y verdaderos positivos para cada umbral) y `sklearn.metrics.roc_auc_score` (área bajo la curva) | Puntos de la curva, AUC, casos positivos y negativos, y la clase positiva |
+
+Las tres reutilizan las conversiones existentes: `PreparedSource.numbers` (números, con la interpretación de la revisión y la política de faltantes) y `PreparedSource.texts` (etiquetas, respetando la decisión sobre marcadores como `NA`).
+
+### Por qué estos métodos
+
+- **Sturges:** es determinística, conocida y fácil de explicar. Da intervalos de igual ancho, adecuados para conjuntos chicos y medianos. Con muchos datos se limita a 30 intervalos para que el gráfico se pueda leer.
+- **Pearson y Spearman:**
+  - Pearson mide la asociación **lineal**; Spearman, la **monótona** (por rangos, más robusta ante valores extremos). Mostrar ambas evita conclusiones apresuradas.
+  - Ninguna implica causalidad, y la interfaz lo dice.
+  - Se calculan con todos los pares; solo la visualización se limita a 2.000 puntos, con una muestra reproducible por la semilla fija.
+- **ROC con scikit-learn:** es la implementación estándar y probada. El AUC equivale a la probabilidad de que un caso positivo tenga una puntuación mayor que uno negativo. Las pruebas lo verifican con un caso calculado a mano: 3 de 4 pares, AUC = 0,75.
+
+### Validaciones
+
+**Del plan propuesto por la IA** (`_shape_problems` en `ai_plan.py`). El backend descarta la respuesta si:
+- un histograma no usa exactamente una columna cuantitativa;
+- una dispersión no usa exactamente dos columnas cuantitativas;
+- una ROC no usa una etiqueta binaria (`distinct_values` = `"2"`) y una puntuación cuantitativa;
+- cualquiera de las tres tiene agrupaciones.
+
+Así, la IA no puede proponer estos análisis sobre datos que no los admiten.
+
+**Al ejecutar** (motor):
+
+| Caso | Qué hace el motor |
+|------|-------------------|
+| Faltantes | Se excluyen y se avisa cuántos |
+| Columna constante | Histograma de un solo intervalo; correlación no definida, con aviso |
+| ROC: clases | Exactamente dos clases reales en la etiqueta |
+| ROC: clase positiva | Elegida por el usuario y una de las dos clases. Si después de excluir faltantes queda una sola clase, la curva no está definida |
+| ROC: AUC menor que 0,5 | Aviso de puntuaciones posiblemente invertidas |
+| Tipos | Errores comprensibles: no se histograma una categoría, no se correlaciona un código |
+
+### Clase positiva: decisión del usuario, nunca de la IA
+
+La clase positiva es un **valor del dataset**, y la IA nunca ve valores.
+- En «Ejecutar análisis», el navegador ofrece las dos clases de la columna a partir de los valores de ejemplo del perfil local (`rocLabelColumns` en `analysisRequest.ts`).
+- El análisis no se ejecuta hasta que el usuario elige una.
+- Viaja solo al backend, como `positive_label` en la correspondencia de columnas.
+- El backend verifica que sea una de las dos clases reales.
+
+### Visualización (Recharts)
+
+Las tres se agregaron a `ChartCard`:
+- **Histograma:** barras pegadas, con el intervalo como categoría.
+- **Dispersión:** `ScatterChart` con ejes numéricos, títulos con unidad y un tooltip con ambos valores exactos.
+- **ROC:** línea sobre ejes [0, 1] y `ReferenceLine` diagonal (azar, AUC = 0,5).
+
+Los indicadores salen de los estadísticos del motor (`stats`): r de Pearson, ρ de Spearman y n; AUC y casos positivos y negativos. En la tabla de la dispersión se listan los primeros 100 puntos; el gráfico muestra todos los devueltos.
+
+### Limitaciones
+
+- No se entrenan modelos: la ROC evalúa puntuaciones que ya están en el archivo.
+- Las clases que ofrece el selector salen de los valores de ejemplo del perfil. Si no hay dos, el usuario escribe la clase, y el backend la valida igual.
+- El histograma usa intervalos de igual ancho (Sturges): no se elige el ancho ni la cantidad.
+- La dispersión no distingue grupos por color ni ajusta rectas de regresión.

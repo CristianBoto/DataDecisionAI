@@ -25,7 +25,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable
 
+import numpy as np
 import pandas as pd
+from sklearn.metrics import roc_auc_score, roc_curve
 
 from app.schemas.ai_plan import AIOperation, AIPlan
 from app.schemas.analysis import (
@@ -48,6 +50,11 @@ MAX_MONTHS_FOR_MONTHLY = 36
 # Formatos de fecha aceptados (se elige el que interpreta más valores).
 DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%Y-%m", "%m/%Y", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M")
 MISSING_GROUP = "(sin dato)"
+# Histograma: regla de Sturges (k = ⌈log2 n⌉ + 1), con un máximo de intervalos legible.
+MAX_HISTOGRAM_BINS = 30
+# Dispersión: puntos máximos a mostrar y semilla fija para que el muestreo sea reproducible.
+MAX_SCATTER_POINTS = 2000
+SCATTER_SEED = 42
 
 # Patrones numéricos: "15000", "-3.5", "15.000" (miles), "1.234,56", "1,234.56".
 _THOUSANDS_DOT = re.compile(r"[-+]?\d{1,3}(?:\.\d{3})+")
@@ -335,6 +342,137 @@ def op_distinct_count(src: PreparedSource, op: AIOperation, warnings: list[str])
     return _table(op, [], measures, pd.DataFrame([counts]), int(len(src.df)), None, warnings)
 
 
+def _number_label(value: float) -> str:
+    return f"{value:.6g}"
+
+
+def _arity(op: AIOperation, n: int) -> list[str]:
+    if len(op.columns) != n or op.group_by:
+        raise OperationError(f"La operación necesita exactamente {n} columna(s) y ninguna agrupación.")
+    return op.columns
+
+
+def op_histogram(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
+    """Histograma: frecuencia de una columna cuantitativa en intervalos de igual ancho.
+
+    Cantidad de intervalos por la regla de Sturges, k = ⌈log2 n⌉ + 1 (máximo 30), y
+    conteo con `numpy.histogram`, que asigna cada valor a su intervalo [a, b)
+    (el último incluye el máximo). Los faltantes se excluyen.
+    """
+    (column,) = _arity(op, 1)
+    values = src.numbers(column, warnings).dropna()
+    n = int(len(values))
+    low, high = float(values.min()), float(values.max())
+    if low == high:
+        warnings.append(f"«{column}» tiene un único valor ({_number_label(low)}): el histograma tiene un solo intervalo.")
+        counts, edges = np.array([n]), np.array([low, high])
+    else:
+        bins = min(MAX_HISTOGRAM_BINS, int(np.ceil(np.log2(n))) + 1)
+        counts, edges = np.histogram(values.to_numpy(), bins=bins, range=(low, high))
+    rows = []
+    for i, count in enumerate(counts):
+        closing = "]" if i == len(counts) - 1 else ")"
+        label = f"[{_number_label(edges[i])}, {_number_label(edges[i + 1])}{closing}" if low != high else _number_label(low)
+        rows.append(ResultRow(keys=[label], values=[float(count)]))
+    return OperationResult(
+        operation=op.operation, description=op.description, columns=op.columns, group_by=op.group_by, status="ok",
+        dimensions=[column], measures=[Measure(column=column, aggregate="count")], rows=rows, rows_used=n,
+        stats={"bins": int(len(counts)), "bin_width": float(edges[1] - edges[0]) if low != high else 0.0,
+               "min": low, "max": high, "rule": "Sturges"},
+        warnings=warnings,
+    )
+
+
+def op_scatter(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
+    """Dispersión entre dos columnas cuantitativas, con correlación de Pearson y de Spearman.
+
+    - Pares completos: se descartan las filas con faltantes en alguna de las dos.
+    - Correlación con `Series.corr` sobre TODOS los pares: Pearson mide asociación lineal y
+      Spearman, monótona (por rangos). Ninguna implica causalidad.
+    - Puntos: hasta 2.000, con `DataFrame.sample(random_state=42)` si hay más (reproducible).
+    Los puntos solo viajan del backend local al navegador; nunca a la IA.
+    """
+    x_col, y_col = _arity(op, 2)
+    pairs = pd.DataFrame({"x": src.numbers(x_col, warnings), "y": src.numbers(y_col, warnings)}).dropna()
+    n = int(len(pairs))
+    if n < 2:
+        raise OperationError("Se necesitan al menos 2 filas con valores en ambas columnas.")
+    excluded = int(len(src.df)) - n
+    if excluded:
+        warnings.append(f"Se excluyeron {excluded} filas con valores faltantes o no numéricos en alguna de las dos columnas.")
+    pearson = pairs["x"].corr(pairs["y"], method="pearson")
+    spearman = pairs["x"].corr(pairs["y"], method="spearman")
+    if pd.isna(pearson) or pd.isna(spearman):
+        warnings.append("Una de las columnas es constante: la correlación no está definida.")
+    shown = pairs if n <= MAX_SCATTER_POINTS else pairs.sample(n=MAX_SCATTER_POINTS, random_state=SCATTER_SEED)
+    if n > MAX_SCATTER_POINTS:
+        warnings.append(
+            f"Se muestran {MAX_SCATTER_POINTS} de {n} puntos (muestra aleatoria reproducible, semilla {SCATTER_SEED}); "
+            "las correlaciones usan todos los pares."
+        )
+    warnings.append("La correlación mide asociación (lineal en Pearson, monótona en Spearman); no implica causalidad.")
+    shown = shown.sort_values(["x", "y"])
+    return OperationResult(
+        operation=op.operation, description=op.description, columns=op.columns, group_by=op.group_by, status="ok",
+        dimensions=[], rows=[ResultRow(keys=[], values=[_clean(x), _clean(y)]) for x, y in shown.itertuples(index=False)],
+        measures=[Measure(column=x_col, aggregate="value", unit=src.unit(x_col)),
+                  Measure(column=y_col, aggregate="value", unit=src.unit(y_col))],
+        rows_used=n,
+        stats={"pearson": _clean(pearson), "spearman": _clean(spearman), "n": n, "shown": int(len(shown)),
+               "sampled": n > MAX_SCATTER_POINTS},
+        warnings=warnings,
+    )
+
+
+def op_roc_curve(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
+    """Curva ROC y AUC de un clasificador existente (no se entrena ningún modelo).
+
+    Requiere una columna de etiquetas reales con exactamente dos clases, una columna de
+    puntuaciones numéricas y la clase positiva elegida por el usuario. Usa
+    `sklearn.metrics.roc_curve` (tasas de falsos y verdaderos positivos para cada
+    umbral) y `sklearn.metrics.roc_auc_score` (área bajo la curva).
+    """
+    label_col, score_col = _arity(op, 2)
+    labels = src.texts(label_col)
+    classes = sorted(labels.dropna().unique().tolist())
+    if len(classes) != 2:
+        raise OperationError(f"«{label_col}» tiene {len(classes)} clases: la curva ROC requiere exactamente 2.")
+    positive = src.mapping(label_col).positive_label
+    if positive is None:
+        raise OperationError(f"Elegí la clase positiva de «{label_col}» antes de ejecutar la curva ROC.")
+    if positive not in classes:
+        raise OperationError(f"La clase positiva elegida no es ninguna de las dos clases de «{label_col}».")
+    data = pd.DataFrame({"label": labels, "score": src.numbers(score_col, warnings)}).dropna()
+    excluded = int(len(src.df)) - int(len(data))
+    if excluded:
+        warnings.append(f"Se excluyeron {excluded} filas sin etiqueta o sin puntuación numérica.")
+    y_true = (data["label"] == positive).astype(int)
+    if y_true.nunique() < 2:
+        raise OperationError("Después de excluir faltantes queda una sola clase: la curva ROC no está definida.")
+    fpr, tpr, _ = roc_curve(y_true, data["score"])
+    auc = float(roc_auc_score(y_true, data["score"]))
+    points = list(zip(fpr.tolist(), tpr.tolist()))
+    if len(points) > MAX_RESULT_ROWS:
+        # Se conservan los extremos y puntos equiespaciados de la curva.
+        keep = np.unique(np.linspace(0, len(points) - 1, MAX_RESULT_ROWS).round().astype(int))
+        points = [points[i] for i in keep]
+        warnings.append(f"La curva tiene muchos umbrales: se muestran {len(points)} puntos (el AUC usa todos).")
+    if auc < 0.5:
+        warnings.append("AUC menor que 0,5: las puntuaciones podrían estar invertidas respecto de la clase positiva elegida.")
+    warnings.append("La curva evalúa puntuaciones existentes: DataDecision AI no entrenó ningún modelo.")
+    negative = classes[0] if classes[1] == positive else classes[1]
+    return OperationResult(
+        operation=op.operation, description=op.description, columns=op.columns, group_by=op.group_by, status="ok",
+        dimensions=[], rows=[ResultRow(keys=[], values=[_clean(f), _clean(t)]) for f, t in points],
+        measures=[Measure(column="tasa de falsos positivos", aggregate="fpr"),
+                  Measure(column="tasa de verdaderos positivos", aggregate="tpr")],
+        rows_used=int(len(data)),
+        stats={"auc": round(auc, 6), "positives": int(y_true.sum()), "negatives": int((1 - y_true).sum()),
+               "positive_label": positive, "negative_label": negative, "n": int(len(data))},
+        warnings=warnings,
+    )
+
+
 # Catálogo cerrado: operación del plan → función de cálculo. Debe coincidir con
 # SUPPORTED_OPERATIONS (ai_plan.py), que es lo único que la IA puede proponer.
 OPERATIONS: dict[str, Callable[[PreparedSource, AIOperation, list[str]], OperationResult]] = {
@@ -349,6 +487,9 @@ OPERATIONS: dict[str, Callable[[PreparedSource, AIOperation, list[str]], Operati
     "time_series": op_time_series,
     "frequency": op_frequency,
     "distinct_count": op_distinct_count,
+    "histogram": op_histogram,
+    "scatter": op_scatter,
+    "roc_curve": op_roc_curve,
 }
 
 

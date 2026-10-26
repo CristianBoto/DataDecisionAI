@@ -1,0 +1,295 @@
+{
+  "engine": "pandas",
+  "executed_at": "2026-10-26T12:00:00+00:00",
+  "sources": [
+    {
+      "alias": "A",
+      "rows": 8,
+      "columns": 2
+    },
+    {
+      "alias": "B",
+      "rows": 4,
+      "columns": 2
+    }
+  ],
+  "results": [
+    {
+      "plan_id": "plan-a",
+      "source_alias": "A",
+      "title": "Publicidad y ventas",
+      "status": "ok",
+      "operations": [
+        {
+          "operation": "histogram",
+          "description": "Distribución de ventas",
+          "columns": [
+            "ventas"
+          ],
+          "group_by": [],
+          "status": "ok",
+          "dimensions": [
+            "ventas"
+          ],
+          "measures": [
+            {
+              "column": "ventas",
+              "aggregate": "count",
+              "unit": null
+            }
+          ],
+          "rows": [
+            {
+              "keys": [
+                "[10, 15)"
+              ],
+              "values": [
+                3.0
+              ]
+            },
+            {
+              "keys": [
+                "[15, 20)"
+              ],
+              "values": [
+                1.0
+              ]
+            },
+            {
+              "keys": [
+                "[20, 25)"
+              ],
+              "values": [
+                3.0
+              ]
+            },
+            {
+              "keys": [
+                "[25, 30]"
+              ],
+              "values": [
+                1.0
+              ]
+            }
+          ],
+          "period": null,
+          "rows_used": 8,
+          "stats": {
+            "bins": 4,
+            "bin_width": 5.0,
+            "min": 10.0,
+            "max": 30.0,
+            "rule": "Sturges"
+          },
+          "warnings": [],
+          "error": null
+        },
+        {
+          "operation": "scatter",
+          "description": "Publicidad vs ventas",
+          "columns": [
+            "publicidad",
+            "ventas"
+          ],
+          "group_by": [],
+          "status": "ok",
+          "dimensions": [],
+          "measures": [
+            {
+              "column": "publicidad",
+              "aggregate": "value",
+              "unit": "miles ARS"
+            },
+            {
+              "column": "ventas",
+              "aggregate": "value",
+              "unit": "unidades"
+            }
+          ],
+          "rows": [
+            {
+              "keys": [],
+              "values": [
+                1.0,
+                10.0
+              ]
+            },
+            {
+              "keys": [],
+              "values": [
+                2.0,
+                12.0
+              ]
+            },
+            {
+              "keys": [],
+              "values": [
+                3.0,
+                15.0
+              ]
+            },
+            {
+              "keys": [],
+              "values": [
+                4.0,
+                14.0
+              ]
+            },
+            {
+              "keys": [],
+              "values": [
+                5.0,
+                20.0
+              ]
+            },
+            {
+              "keys": [],
+              "values": [
+                6.0,
+                22.0
+              ]
+            },
+            {
+              "keys": [],
+              "values": [
+                7.0,
+                21.0
+              ]
+            },
+            {
+              "keys": [],
+              "values": [
+                8.0,
+                30.0
+              ]
+            }
+          ],
+          "period": null,
+          "rows_used": 8,
+          "stats": {
+            "pearson": 0.947487,
+            "spearman": 0.952381,
+            "n": 8,
+            "shown": 8,
+            "sampled": false
+          },
+          "warnings": [
+            "La correlación mide asociación (lineal en Pearson, monótona en Spearman); no implica causalidad."
+          ],
+          "error": null
+        }
+      ],
+      "charts": [
+        {
+          "type": "scatter",
+          "x": "publicidad",
+          "y": "ventas",
+          "title": "Relación entre publicidad y ventas"
+        },
+        {
+          "type": "line",
+          "x": "ventas",
+          "y": null,
+          "title": "Ventas en líneas"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "plan_id": "plan-b",
+      "source_alias": "B",
+      "title": "Desempeño del clasificador",
+      "status": "ok",
+      "operations": [
+        {
+          "operation": "roc_curve",
+          "description": "Curva ROC del modelo",
+          "columns": [
+            "real",
+            "score"
+          ],
+          "group_by": [],
+          "status": "ok",
+          "dimensions": [],
+          "measures": [
+            {
+              "column": "tasa de falsos positivos",
+              "aggregate": "fpr",
+              "unit": null
+            },
+            {
+              "column": "tasa de verdaderos positivos",
+              "aggregate": "tpr",
+              "unit": null
+            }
+          ],
+          "rows": [
+            {
+              "keys": [],
+              "values": [
+                0.0,
+                0.0
+              ]
+            },
+            {
+              "keys": [],
+              "values": [
+                0.0,
+                0.5
+              ]
+            },
+            {
+              "keys": [],
+              "values": [
+                0.5,
+                0.5
+              ]
+            },
+            {
+              "keys": [],
+              "values": [
+                0.5,
+                1.0
+              ]
+            },
+            {
+              "keys": [],
+              "values": [
+                1.0,
+                1.0
+              ]
+            }
+          ],
+          "period": null,
+          "rows_used": 4,
+          "stats": {
+            "auc": 0.75,
+            "positives": 2,
+            "negatives": 2,
+            "positive_label": "si",
+            "negative_label": "no",
+            "n": 4
+          },
+          "warnings": [
+            "La curva evalúa puntuaciones existentes: DataDecision AI no entrenó ningún modelo."
+          ],
+          "error": null
+        }
+      ],
+      "charts": [
+        {
+          "type": "roc",
+          "x": "score",
+          "y": "real",
+          "title": "Curva ROC"
+        }
+      ],
+      "warnings": []
+    }
+  ],
+  "notes": [
+    "Calculado con Pandas en el backend local, sobre una copia en memoria de cada archivo.",
+    "La IA no participó del cálculo ni recibió los datos.",
+    "Cada plan usa una sola fuente: las fuentes no se unieron ni relacionaron."
+  ]
+}

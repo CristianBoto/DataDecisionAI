@@ -26,6 +26,8 @@ export function buildExecution(
   review: AnalysisReviewState,
   plans: SessionAIPlan[],
   units: Record<string, string> = {},
+  /** Clase positiva por columna de etiquetas (clave `unitKey`), elegida por el usuario para la curva ROC. */
+  positives: Record<string, string> = {},
 ): PreparedExecution {
   const catalog = buildDatasetCatalog(sources)
   const used = new Set(plans.map((p) => p.plan.source_alias))
@@ -51,6 +53,7 @@ export function buildExecution(
             semantic_type: decision?.semanticType ?? c.semanticType ?? null,
             missing_markers: decision?.markers ?? null,
             unit: units[unitKey(alias, name)]?.trim() || null,
+            positive_label: positives[unitKey(alias, name)] || null,
           }
         })
       return { alias, columns }
@@ -76,6 +79,34 @@ export function quantitativeColumns(prepared: PreparedExecution, plans: SessionA
     )
     for (const column of source.columns) {
       if (column.semantic_type === 'quantitative' && usedNames.has(column.name)) result.push({ alias: source.alias, name: column.name })
+    }
+  }
+  return result
+}
+
+/**
+ * Columnas de etiquetas de las curvas ROC de los planes, con sus clases conocidas en el
+ * navegador (valores de ejemplo del perfil). La clase positiva la elige el usuario: es un
+ * valor del dataset y por eso nunca se envía a la IA, solo al backend al ejecutar.
+ */
+export function rocLabelColumns(
+  prepared: PreparedExecution,
+  plans: SessionAIPlan[],
+  sources: AnalysisSource[],
+): { alias: string; name: string; classes: string[] }[] {
+  const catalog = buildDatasetCatalog(sources)
+  const result: { alias: string; name: string; classes: string[] }[] = []
+  for (const p of plans) {
+    for (const op of p.plan.operations) {
+      if (op.operation !== 'roc_curve' || op.columns.length !== 2) continue
+      const alias = p.plan.source_alias
+      const name = op.columns[0]
+      if (result.some((r) => r.alias === alias && r.name === name)) continue
+      const mapping = prepared.request.sources.find((s) => s.alias === alias)?.columns.find((c) => c.name === name)
+      const datasetId = catalog.sources.find((s) => s.alias === alias)?.datasetId
+      const profile = sources.find((s) => s.dataset.id === datasetId)?.profile
+      const values = profile?.columns.find((c) => c.name === mapping?.original)?.sampleValues ?? []
+      result.push({ alias, name, classes: [...new Set(values.map((v) => v.trim()).filter(Boolean))].sort() })
     }
   }
   return result

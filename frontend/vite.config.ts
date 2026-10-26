@@ -29,6 +29,9 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     css: false,
+    // Los recorridos de punta a punta (cargar → revisar → conversar → confirmar) tardan ~4 s
+    // y, con la máquina cargada, superaban el límite por defecto de 5 s sin fallar ninguna aserción.
+    testTimeout: 15_000,
     // Las pruebas no dependen del .env.local de quien las ejecuta (que puede apuntar a un
     // backend real con la IA habilitada): siempre corren como la demo pública, sin backend.
     env: {

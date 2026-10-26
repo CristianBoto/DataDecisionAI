@@ -35,7 +35,7 @@ export function isRealAIAvailable(status: AIStatus | null): boolean {
 /** Mismo catálogo que el backend (SUPPORTED_OPERATIONS): solo lo que el motor Pandas ejecuta. */
 export type AIOperationName =
   | 'count' | 'distinct_count' | 'sum' | 'mean' | 'median' | 'min' | 'max'
-  | 'frequency' | 'group_by' | 'compare_groups' | 'time_series'
+  | 'frequency' | 'group_by' | 'compare_groups' | 'time_series' | 'histogram' | 'scatter' | 'roc_curve'
 
 export interface AIPlan {
   source_alias: 'A' | 'B' | 'C'

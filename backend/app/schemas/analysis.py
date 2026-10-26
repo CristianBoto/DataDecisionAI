@@ -34,6 +34,9 @@ class ColumnMapping(_Strict):
     missing_markers: MarkerDecision | None = None
     # Unidad indicada por el usuario (por ejemplo, "ARS"); solo informativa.
     unit: str | None = Field(default=None, max_length=16)
+    # Clase positiva elegida por el usuario para una columna de etiquetas (curva ROC).
+    # Es un valor del dataset: viaja solo a este backend, nunca a la IA.
+    positive_label: str | None = Field(default=None, min_length=1, max_length=250)
 
 
 class SourceMapping(_Strict):
@@ -57,7 +60,7 @@ class ExecutionRequest(_Strict):
 
 class Measure(BaseModel):
     column: str
-    # count | sum | mean | median | min | max | distinct_count | share_pct
+    # count | sum | mean | median | min | max | distinct_count | share_pct | value | fpr | tpr
     aggregate: str
     unit: str | None = None
 
@@ -82,6 +85,8 @@ class OperationResult(BaseModel):
     period: Literal["month", "year"] | None = None
     # Filas que entraron en el cálculo.
     rows_used: int | None = None
+    # Estadísticos de la operación (correlaciones, AUC, cantidad de intervalos…), si corresponde.
+    stats: dict[str, float | int | str | bool | None] | None = None
     warnings: list[str] = []
     error: str | None = None
 

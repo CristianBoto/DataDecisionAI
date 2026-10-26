@@ -112,7 +112,7 @@ Cargar → **revisar datos y privacidad** → conversar → confirmar. Las decis
 Objetivo: que datadecisionai.pages.dev tenga las mismas funciones reales que la instalación local (IA, Pandas, dashboards y luego PDF), sin una segunda aplicación ficticia.
 
 1. ✅ **Modo real sin respuestas simuladas, catálogo único e instrucciones** (bitácora, sección 6s).
-2. **Dispersión, histograma y curva ROC** (aprobado; scikit-learn aprobado para ROC):
+2. ✅ **Dispersión, histograma y curva ROC** (bitácora, sección 6t). El plan original fue:
    - **Motor:**
      - `histogram`: intervalos con NumPy;
      - `scatter`: muestra de hasta 2.000 puntos más la correlación;

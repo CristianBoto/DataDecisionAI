@@ -129,9 +129,9 @@ describe('«Ejecutar análisis» (motor Pandas)', () => {
       {
         alias: 'A',
         columns: [
-          { name: 'fecha', original: 'fecha', semantic_type: 'temporal', missing_markers: null, unit: null },
-          { name: 'sector', original: 'sector', semantic_type: 'categorical', missing_markers: null, unit: null },
-          { name: 'ventas', original: 'ventas', semantic_type: 'quantitative', missing_markers: null, unit: 'ARS' },
+          { name: 'fecha', original: 'fecha', semantic_type: 'temporal', missing_markers: null, unit: null, positive_label: null },
+          { name: 'sector', original: 'sector', semantic_type: 'categorical', missing_markers: null, unit: null, positive_label: null },
+          { name: 'ventas', original: 'ventas', semantic_type: 'quantitative', missing_markers: null, unit: 'ARS', positive_label: null },
         ],
       },
     ])
@@ -222,8 +222,8 @@ describe('pedido de ejecución (correspondencia de columnas)', () => {
     expect(prepared.problem).toBeNull()
     expect(prepared.files.A).toBe(file)
     expect(prepared.request.sources[0].columns).toEqual([
-      { name: 'rubro', original: 'sector', semantic_type: 'categorical', missing_markers: null, unit: null },
-      { name: 'ventas', original: 'ventas', semantic_type: 'quantitative', missing_markers: 'treat_as_missing', unit: 'ARS' },
+      { name: 'rubro', original: 'sector', semantic_type: 'categorical', missing_markers: null, unit: null, positive_label: null },
+      { name: 'ventas', original: 'ventas', semantic_type: 'quantitative', missing_markers: 'treat_as_missing', unit: 'ARS', positive_label: null },
     ])
   })
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 import {
   Area,
   AreaChart,
@@ -10,13 +10,16 @@ import {
   LineChart,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
+  Scatter,
+  ScatterChart,
   Tooltip,
   XAxis,
   YAxis,
   type TooltipContentProps,
 } from 'recharts'
-import { BarChart3, LineChart as LineIcon, PieChart as PieIcon, Sigma, Table2, TrendingUp } from 'lucide-react'
+import { Activity, BarChart3, LineChart as LineIcon, PieChart as PieIcon, ScatterChart as ScatterIcon, Sigma, Table2, TrendingUp } from 'lucide-react'
 import type { Chart, ChartSeries, ChartType } from '@/types/domain'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { cn } from '@/lib/cn'
@@ -37,6 +40,27 @@ const TYPE_META: Record<ChartType, { label: string; Icon: typeof BarChart3 }> = 
   area: { label: 'Áreas', Icon: TrendingUp },
   histogram: { label: 'Distribución', Icon: Sigma },
   pie: { label: 'Torta', Icon: PieIcon },
+  scatter: { label: 'Dispersión', Icon: ScatterIcon },
+  roc: { label: 'Curva ROC', Icon: Activity },
+}
+
+/** Tooltip de gráficos con eje X numérico (dispersión y ROC): muestra ambos valores exactos. */
+function PointTooltip({ active, payload, chart }: TooltipContentProps<number, string> & { chart: Chart }) {
+  if (!active || !payload || payload.length === 0) return null
+  const point = payload[0].payload as Record<string, number>
+  const ySeries = chart.series[0]
+  return (
+    <div className="min-w-36 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs shadow-elevated backdrop-blur">
+      <p className="flex justify-between gap-4 text-slate-600">
+        <span>{chart.xLabel ?? chart.xKey}</span>
+        <span className="font-semibold text-slate-900 tabular-nums">{display(point[chart.xKey], { key: 'x', label: '', unit: chart.xUnit })}</span>
+      </p>
+      <p className="flex justify-between gap-4 text-slate-600">
+        <span>{ySeries.label}</span>
+        <span className="font-semibold text-slate-900 tabular-nums">{display(point[ySeries.key], ySeries)}</span>
+      </p>
+    </div>
+  )
 }
 
 /** Valor con su formato y, si se conoce, su unidad (por ejemplo, "23.000 ARS"). */
@@ -123,7 +147,44 @@ function ChartPlot({ chart }: { chart: Chart }) {
     />
   )
 
+  const numericX = (domain?: [number, number]) => (
+    <XAxis
+      type="number"
+      dataKey={chart.xKey}
+      domain={domain ?? ['auto', 'auto']}
+      tick={AXIS_TICK}
+      tickLine={false}
+      axisLine={{ stroke: GRID_COLOR }}
+      tickMargin={8}
+      tickFormatter={(v: number) => formatCompact(v)}
+      label={chart.xLabel ? { value: chart.xLabel, position: 'insideBottom', offset: -12, fill: '#64748b', fontSize: 11 } : undefined}
+    />
+  )
+  const pointTooltip = <Tooltip cursor={{ strokeDasharray: '3 3' }} content={(props) => <PointTooltip {...(props as TooltipContentProps<number, string>)} chart={chart} />} />
+
   switch (chart.type) {
+    case 'scatter':
+      return (
+        <ScatterChart margin={{ top: 8, right: 12, left: 8, bottom: 16 }}>
+          <CartesianGrid stroke={GRID_COLOR} />
+          {numericX()}
+          {React.cloneElement(yAxis, { type: 'number', dataKey: chart.series[0].key, domain: ['auto', 'auto'] })}
+          {pointTooltip}
+          <Scatter data={chart.data} fill={seriesColor(0)} fillOpacity={0.7} isAnimationActive={animated} />
+        </ScatterChart>
+      )
+    case 'roc':
+      return (
+        <LineChart data={chart.data} margin={{ top: 8, right: 12, left: 8, bottom: 16 }}>
+          <CartesianGrid stroke={GRID_COLOR} />
+          {numericX([0, 1])}
+          {React.cloneElement(yAxis, { type: 'number', domain: [0, 1], tickFormatter: (v: number) => String(v) })}
+          {pointTooltip}
+          {/* Diagonal de referencia: un clasificador al azar (AUC = 0,5). */}
+          <ReferenceLine segment={[{ x: 0, y: 0 }, { x: 1, y: 1 }]} stroke="#94a3b8" strokeDasharray="5 5" ifOverflow="extendDomain" />
+          <Line type="linear" dataKey={chart.series[0].key} stroke={seriesColor(0)} strokeWidth={2} dot={false} isAnimationActive={animated} />
+        </LineChart>
+      )
     case 'pie': {
       const s = chart.series[0]
       return (

@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/Card'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useAnalysisEngine } from '@/hooks/useService'
 import type { SessionAIPlan } from '@/lib/aiPlans'
-import { buildExecution, quantitativeColumns, unitKey } from '@/lib/analysisRequest'
+import { buildExecution, quantitativeColumns, rocLabelColumns, unitKey } from '@/lib/analysisRequest'
 import { buildDatasetCatalog } from '@/lib/datasetCatalog'
 import { getErrorMessage } from '@/services'
 
@@ -21,12 +21,13 @@ export function AnalysisExecution({ plans }: { plans: SessionAIPlan[] }) {
   const session = useAnalysisSession()
   const engine = useAnalysisEngine()
   const [units, setUnits] = useState<Record<string, string>>({})
+  const [positives, setPositives] = useState<Record<string, string>>({})
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const review = session.review
   const prepared = useMemo(
-    () => (review ? buildExecution(session.sources, review, plans, units) : null),
-    [session.sources, review, plans, units],
+    () => (review ? buildExecution(session.sources, review, plans, units, positives) : null),
+    [session.sources, review, plans, units, positives],
   )
   const fileNames = useMemo(
     () => Object.fromEntries(buildDatasetCatalog(session.sources).sources.map((s) => [s.alias, s.fileName])),
@@ -48,9 +49,16 @@ export function AnalysisExecution({ plans }: { plans: SessionAIPlan[] }) {
   }
   if (!prepared) return null
   const quantities = quantitativeColumns(prepared, plans)
+  const rocLabels = rocLabelColumns(prepared, plans, session.sources)
+  const missingPositive = rocLabels.filter(({ alias, name }) => !positives[unitKey(alias, name)])
+  const blocker =
+    prepared.problem ??
+    (missingPositive.length
+      ? `Elegí la clase positiva de ${missingPositive.map((r) => `«${r.name}» (fuente ${r.alias})`).join(', ')} para la curva ROC.`
+      : null)
 
   async function run() {
-    if (!engine || !prepared || prepared.problem) return
+    if (!engine || !prepared || blocker) return
     setRunning(true)
     setError(null)
     try {
@@ -90,9 +98,47 @@ export function AnalysisExecution({ plans }: { plans: SessionAIPlan[] }) {
             })}
           </fieldset>
         )}
-        {prepared.problem && <Alert tone="warning">{prepared.problem}</Alert>}
+        {rocLabels.length > 0 && (
+          <fieldset className="flex flex-wrap gap-3">
+            <legend className="mb-1 text-xs font-medium text-slate-700">Clase positiva de la curva ROC</legend>
+            {rocLabels.map(({ alias, name, classes }) => {
+              const key = unitKey(alias, name)
+              const label = `Clase positiva de ${name} (fuente ${alias})`
+              return (
+                <label key={key} className="flex items-center gap-1.5 text-xs text-slate-600">
+                  {name} (fuente {alias})
+                  {classes.length >= 2 ? (
+                    <select
+                      value={positives[key] ?? ''}
+                      onChange={(e) => setPositives((p) => ({ ...p, [key]: e.target.value }))}
+                      aria-label={label}
+                      className="rounded-md border border-slate-300 px-2 py-1 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-none"
+                    >
+                      <option value="">Elegir…</option>
+                      {classes.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      value={positives[key] ?? ''}
+                      onChange={(e) => setPositives((p) => ({ ...p, [key]: e.target.value.slice(0, 250) }))}
+                      placeholder="Valor de la clase positiva"
+                      aria-label={label}
+                      className="w-40 rounded-md border border-slate-300 px-2 py-1 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-none"
+                    />
+                  )}
+                </label>
+              )
+            })}
+            <p className="w-full text-[11px] text-slate-500">
+              El backend verifica que sea una de las dos clases reales de la columna. Este valor no se envía a la IA.
+            </p>
+          </fieldset>
+        )}
+        {blocker && <Alert tone="warning">{blocker}</Alert>}
         {error && <Alert tone="error">{error}</Alert>}
-        <Button icon={<Play className="size-4" />} onClick={() => void run()} loading={running} disabled={Boolean(prepared.problem)}>
+        <Button icon={<Play className="size-4" />} onClick={() => void run()} loading={running} disabled={Boolean(blocker)}>
           {session.analysisRun ? 'Volver a ejecutar análisis' : 'Ejecutar análisis'}
         </Button>
       </Card>

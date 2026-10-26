@@ -399,12 +399,15 @@ def test_instructions_list_exactly_the_engine_catalog_and_the_rules():
 
     for name in SUPPORTED_OPERATIONS + SUPPORTED_CHARTS:
         assert f"- {name}:" in INSTRUCTIONS
-    for absent in ("std", "correlation", "top_n", "scatter"):
+    for absent in ("std", "correlation", "top_n", "box"):
         assert f"- {absent}:" not in INSTRUCTIONS
     # Responder la pregunta concreta, no repetir planes y explicar lo imposible en lugar de aproximarlo.
     assert "Partí de la pregunta concreta" in INSTRUCTIONS
     assert "en lugar de repetirlo" in INSTRUCTIONS
-    assert "NO propongas un plan" in INSTRUCTIONS and "modelo entrenado" in INSTRUCTIONS
+    assert "NO propongas un plan" in INSTRUCTIONS and "entrenar un modelo" in INSTRUCTIONS
+    # ROC: sin etiqueta real binaria y puntuaciones de un modelo existente, explicar y pedir lo que falta.
+    assert "etiqueta real binaria" in INSTRUCTIONS and "DataDecision AI no entrena modelos" in INSTRUCTIONS
+    assert "no implica causalidad" in INSTRUCTIONS
 
 
 @pytest.mark.parametrize("value", ["1", "2", "3-10", "11-50", "51-500", ">500"])

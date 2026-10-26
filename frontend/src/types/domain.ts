@@ -185,7 +185,7 @@ export interface ProposedIndicator {
   columns: string[]
 }
 
-export type ChartType = 'bar' | 'line' | 'area' | 'histogram' | 'pie'
+export type ChartType = 'bar' | 'line' | 'area' | 'histogram' | 'pie' | 'scatter' | 'roc'
 
 export interface ProposedChart {
   id: string
@@ -273,6 +273,8 @@ export interface Chart {
   xLabel?: string
   /** Título del eje Y (por ejemplo, la unidad). */
   yLabel?: string
+  /** Unidad del eje X numérico (dispersión). */
+  xUnit?: string
   /** false: se dibuja completo de inmediato (resultados reales; también para imprimir o exportar). */
   animated?: boolean
   series: ChartSeries[]

@@ -27,7 +27,7 @@ import { approvedAIPlans, collectAIPlans, conversationClarifications } from '@/l
 import { buildDatasetCatalog } from '@/lib/datasetCatalog'
 import { getErrorMessage } from '@/services'
 
-const CHART_TYPE_LABEL = { bar: 'Barras', line: 'Líneas', area: 'Áreas', histogram: 'Distribución', pie: 'Torta' }
+const CHART_TYPE_LABEL = { bar: 'Barras', line: 'Líneas', area: 'Áreas', histogram: 'Distribución', pie: 'Torta', scatter: 'Dispersión', roc: 'Curva ROC' }
 
 function Section({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
   return (

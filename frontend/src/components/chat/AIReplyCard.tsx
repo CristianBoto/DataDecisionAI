@@ -18,6 +18,9 @@ const OPERATION_LABELS: Record<AIOperationName, string> = {
   group_by: 'Agrupación',
   time_series: 'Serie temporal',
   compare_groups: 'Comparación de grupos',
+  histogram: 'Histograma',
+  scatter: 'Dispersión',
+  roc_curve: 'Curva ROC',
 }
 
 const CHART_LABELS: Record<string, string> = {
@@ -29,6 +32,7 @@ const CHART_LABELS: Record<string, string> = {
   box: 'Caja',
   table: 'Tabla',
   kpi: 'Indicador',
+  roc: 'Curva ROC',
 }
 
 const RELATIONSHIP_LABELS: Record<AIReply['source_relationship'], string> = {

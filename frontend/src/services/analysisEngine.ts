@@ -18,6 +18,8 @@ export interface ColumnMapping {
   semantic_type: string | null
   missing_markers: 'pending' | 'treat_as_missing' | 'valid_value' | null
   unit?: string | null
+  /** Clase positiva elegida por el usuario (curva ROC). Viaja solo al backend, nunca a la IA. */
+  positive_label?: string | null
 }
 
 export interface ExecutionRequest {
@@ -42,6 +44,8 @@ export interface OperationResult {
   rows: { keys: string[]; values: (number | null)[] }[]
   period: 'month' | 'year' | null
   rows_used: number | null
+  /** Estadísticos de la operación: correlaciones (dispersión), AUC (ROC), intervalos (histograma). */
+  stats?: Record<string, number | string | boolean | null> | null
   warnings: string[]
   error: string | null
 }
