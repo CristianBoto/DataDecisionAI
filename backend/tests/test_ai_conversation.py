@@ -136,7 +136,7 @@ def test_budget_and_request_limits_still_apply_with_a_permission():
 
 
 def test_context_size_limit_applies_with_a_permission():
-    client, _ = make_client(ai_enabled=True, provider=FakeProvider(), ai_max_input_tokens=2500)
+    client, _ = make_client(ai_enabled=True, provider=FakeProvider(), ai_max_input_tokens=3500)
     cid = start_conversation(client)["conversation_id"]
     long_history = [{"role": "user", "content": "x" * 2000}] * 8
     response = send(client, cid, {**context(), "message": "Hola", "history": long_history})

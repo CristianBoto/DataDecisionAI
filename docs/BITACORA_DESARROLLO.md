@@ -32,6 +32,7 @@ Autor: Damián Boto. Documento de base para la exposición final.
 | 6p. Primeras llamadas reales, plan aprobado en «Confirmar» y autorización por conversación | Cambios sin confirmar; problemas detectados por el autor en las primeras pruebas reales |
 | 6q. Fase 4A — Motor de análisis real con Python y Pandas | Cambios sin confirmar |
 | 6r. Fase 4B — Dashboard interactivo con resultados reales | Cambios sin confirmar |
+| 6s. Modo real sin respuestas simuladas, catálogo único e instrucciones de la IA | Cambios sin confirmar; problema señalado por el autor |
 | 7. Decisión de minimización de datos para la IA | Registrada en [SEGURIDAD.md](SEGURIDAD.md) y [ARCHITECTURE.md](ARCHITECTURE.md); implementación pendiente |
 
 ---
@@ -577,6 +578,29 @@ Se comprobó en pruebas automáticas y en la aplicación.
 - **Sin desplazamiento automático:** el desplazamiento suave hacia el dashboard no se producía en el navegador integrado. Se usa desplazamiento inmediato, que además respeta a quien reduce las animaciones.
 - **Barra que tapaba el dashboard en móvil:** la barra "Propuesta confirmada" seguía fija abajo y tapaba parte del dashboard. Después de confirmar queda estática, y la ejecución y el dashboard aparecen debajo de ella.
 - **Gráfico pedido imposible:** cuando el plan pide un gráfico que no se puede construir, la operación conserva su visualización estándar y el aviso lo dice explícitamente. Así no hay un reemplazo silencioso ni se pierde el gráfico de esa operación.
+
+## 6s. Modo real sin respuestas simuladas, catálogo único e instrucciones de la IA (sin confirmar)
+
+**Problema señalado por el autor.** El objetivo es una plataforma de análisis guiada por OpenAI real, no un chatbot DEMO. En las pruebas aparecían respuestas simuladas, y propuestas que se repetían en lugar de responder la pregunta.
+
+**Diagnóstico.**
+- **Caída silenciosa al DEMO:** `AssistantPage` usaba la IA real solo si el backend confirmaba que estaba disponible. En cualquier otro caso volvía, sin avisar, al asistente DEMO de guion fijo, que propone siempre los mismos indicadores. Eso pasaba mientras se consultaba el estado, con el backend inaccesible o con la IA deshabilitada.
+- **Catálogo desalineado:** la IA podía proponer 16 operaciones, pero el motor ejecuta 11. También podía pedir gráficos que el dashboard no construye.
+- **Instrucciones genéricas:** no pedían partir de la pregunta concreta, y el historial solo llevaba los títulos de los planes.
+
+**Corrección.**
+- En modo real se eliminó el asistente DEMO y se muestran el motivo y «Reintentar» cuando la IA no está disponible.
+- Se quitaron también el dataset de ejemplo y la propuesta DEMO en «Confirmar».
+- Hay un catálogo único de operaciones y gráficos, compartido por la IA y el motor, verificado por una prueba.
+- Se reescribieron las instrucciones de la IA, y el historial ahora incluye las operaciones de cada plan.
+- Se agregó el metadato aproximado `distinct_values`.
+- Detalle en [ARCHITECTURE.md](ARCHITECTURE.md), sección "Modo real sin respuestas simuladas y catálogo único".
+
+**El proveedor simulado** se usa **solo en las pruebas automáticas** y en verificaciones locales con un lanzador fuera del repositorio. **Nunca** como respaldo del modo real.
+
+**Problemas encontrados al verificar.**
+- **Motivo desactualizado al reintentar:** durante el reintento seguía visible el motivo anterior. Ahora se muestra «Comprobando la conexión con la IA…» mientras se consulta.
+- **Indicador confuso:** con la IA no disponible se veía el indicador «Autorización por mensaje». Ahora solo aparece cuando la IA está disponible.
 
 ## 7. Demo pública en Cloudflare Pages (commit `1fe248a`)
 

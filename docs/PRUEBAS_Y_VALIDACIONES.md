@@ -793,3 +793,32 @@ Cambios sin confirmar. **Sin llamadas reales a OpenAI ni consumo.** Las pruebas 
 - **Móvil (375 px), carga nueva:** los gráficos ocupan el ancho del contenedor, sin desplazamiento horizontal.
 - **Tras ejecutar:** el dashboard queda a la vista.
 - **Problemas detectados y corregidos:** las líneas quedaban sin dibujar por la animación; el desplazamiento suave no se producía; y la barra fija tapaba el dashboard en móvil (bitácora, sección 6r).
+
+
+## 26. Modo real sin respuestas simuladas y catálogo único (✅ verificada, 26/10/2026)
+
+Cambios sin confirmar. **Sin llamadas reales a OpenAI ni consumo.** El proveedor simulado se usa solo en las pruebas.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **189 de 189** (169 anteriores, 2 adaptadas, + 20 nuevas) |
+| Frontend (`npm test`) | **167 de 167** en 18 archivos, dos ejecuciones seguidas (151 anteriores; 5 pruebas de la "prueba de autorización" se reemplazaron por 5 de "IA no disponible"; + 16 en `test/realMode.test.tsx`) |
+| Lint, typecheck y build pública | Sin errores |
+
+| Requisito | Prueba |
+|-----------|--------|
+| Sin caída al DEMO | Con `AI_ENABLED=false`, sin clave o sin proveedor: alerta con el motivo exacto y «No se muestran respuestas simuladas»; insignia «IA no disponible»; «Comenzar conversación» y el chat deshabilitados. No se llama a `getConversation` ni a `sendMessage` del servicio DEMO, ni a `prepare` |
+| Backend inaccesible | «No se pudo consultar al backend…». Con «Reintentar» y el backend disponible, se habilita la IA real |
+| Mientras se comprueba | «Comprobando la conexión con la IA…», con el chat deshabilitado y sin saludo DEMO |
+| Sin datos ficticios en modo real | No se ofrece el dataset de ejemplo. «Confirmar» no consulta ni muestra la propuesta DEMO. La franja dice "Ejecución con backend… sin respuestas ni resultados simulados" |
+| Demo pública | Conserva su dataset de ejemplo y su franja identificada |
+| Catálogo único | Operaciones del motor igual a las de la IA. `std`, `percentage`, `top_n`, `correlation`, `missing_summary` y `exec_python` rechazadas por el esquema. Gráficos `scatter`, `histogram`, `box` y `roc` rechazados hasta que existan. El motor sigue informando una operación desconocida |
+| Instrucciones | Listan exactamente el catálogo y piden partir de la pregunta, no repetir planes y explicar lo imposible ("modelo entrenado") en lugar de aproximarlo |
+| Historial | El turno anterior incluye las operaciones del plan (`sum(monto por pais)`) |
+| Metadato aproximado | `distinct_values` acepta solo rangos y rechaza cantidades exactas (422). En el frontend, 2 valores dan "2", 102.254 dan ">500" y sin perfil no se envía |
+
+**Verificación en el navegador.** Backend real (sin proveedor simulado) con `AI_ENABLED=false` y sin clave; frontend con `VITE_DEMO_MODE=false`. Imposible llamar a OpenAI.
+- «Cargar» no ofreció el dataset de ejemplo.
+- La revisión mostró `distinct_values` ("2" y "3-10").
+- El asistente mostró «La IA no está disponible» con el motivo `AI_ENABLED=false`, el chat y «Comenzar conversación» deshabilitados, y ningún texto del asistente DEMO.
+- Con el backend detenido, «Reintentar» mostró «Comprobando…» y luego «No se pudo consultar al backend».

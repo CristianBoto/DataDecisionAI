@@ -88,14 +88,8 @@ async function reachAssistant(aiGateway: AIGatewayClient | null, files = [ventas
   await completeReview(user, 'Comparar montos por país')
   await waitFor(() => expect(router.state.location.pathname).toBe('/analisis/asistente'))
   const composer = await screen.findByRole('textbox', { name: /Mensaje/i })
-  await waitFor(() => expect(composer).toBeEnabled())
+  if (!aiGateway) await waitFor(() => expect(composer).toBeEnabled())
   return { user, router, composer, service }
-}
-
-async function openAuthorization(user: ReturnType<typeof userEvent.setup>) {
-  const box = screen.getByRole('group', { name: 'Envío a la IA real' })
-  await user.click(within(box).getByText(/Enviar a la IA real/))
-  return box
 }
 
 describe('paso 3: resumen compacto en lugar del formulario completo', () => {
@@ -143,8 +137,9 @@ describe('paso 3: resumen compacto en lugar del formulario completo', () => {
 
 describe('objetivo confirmado y «Comenzar conversación»', () => {
   it('muestra el objetivo como resumen, sin copiarlo en el chat ni enviarlo solo', async () => {
-    const gateway = fakeGateway()
+    const gateway = realGateway()
     const { composer } = await reachAssistant(gateway, [ventas()])
+    await screen.findByText(/IA real · gpt-6-luna/)
     const card = screen.getByRole('region', { name: 'Objetivo confirmado' })
     expect(card).toHaveTextContent('Comparar montos por país')
     expect(within(card).getByRole('button', { name: 'Comenzar conversación' })).toBeInTheDocument()
@@ -180,109 +175,83 @@ describe('objetivo confirmado y «Comenzar conversación»', () => {
   })
 })
 
-describe('prueba de autorización con la IA deshabilitada (backend sin OpenAI)', () => {
-  it('el contenido incluye el mensaje y las columnas autorizadas; cada cambio invalida y el permiso es de un uso', async () => {
+describe('modo real sin IA disponible: error claro, nunca respuestas simuladas', () => {
+  /** El asistente DEMO no debe intervenir: ni saludo, ni respuestas, ni propuesta simulada. */
+  function expectNoDemo(service: ReturnType<typeof createDemoService>, spies: { conv: unknown; send: unknown }) {
+    expect(screen.queryByText('Conversación de demostración')).not.toBeInTheDocument()
+    expect(screen.queryByText(/Asistente simulado/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Entiendo tu objetivo/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/«Enviar» conversa con el asistente DEMO/)).not.toBeInTheDocument()
+    expect(spies.conv).not.toHaveBeenCalled()
+    expect(spies.send).not.toHaveBeenCalled()
+    void service
+  }
+
+  async function reachWith(status: Parameters<typeof vi.fn>[0]) {
     const gateway = fakeGateway()
-    const { user, composer } = await reachAssistant(gateway)
-    await user.type(composer, '¿Cómo varía el monto por país?')
-
-    const box = await openAuthorization(user)
-    const shown = JSON.parse(within(box).getByTestId('message-payload-preview').textContent ?? '{}')
-    expect(shown.message).toBe('¿Cómo varía el monto por país?')
-    expect(shown.objective).toBe('Comparar montos por país')
-    expect(shown.sources[0].columns.map((c: { name: string }) => c.name)).toEqual(['pais', 'monto'])
-
-    await user.click(within(box).getByRole('button', { name: 'Validar este mensaje' }))
-    expect(gateway.prepare).toHaveBeenCalledTimes(1)
-    expect(await within(box).findByRole('button', { name: 'Autorizar este envío' })).toBeInTheDocument()
-
-    // Cambiar el mensaje invalida la validación anterior.
-    await user.type(composer, ' Y por año')
-    await waitFor(() => expect(gateway.cancel).toHaveBeenCalledWith('req1'))
-    expect(within(box).queryByRole('button', { name: 'Autorizar este envío' })).not.toBeInTheDocument()
-
-    // Validar y autorizar este mensaje: un solo uso.
-    await user.click(within(box).getByRole('button', { name: 'Validar este mensaje' }))
-    await user.click(await within(box).findByRole('button', { name: 'Autorizar este envío' }))
-    expect(await within(box).findByText(/Prueba finalizada/)).toBeInTheDocument()
-    expect(gateway.authorize).toHaveBeenCalledTimes(1)
-    expect(gateway.authorize).toHaveBeenCalledWith('req2', '2'.repeat(64))
-  })
-
-  it('avisa que es una prueba y termina en un estado final claro, sin borrar nada', async () => {
-    const gateway = fakeGateway()
-    vi.mocked(gateway.authorize).mockRejectedValue(
-      new ApiError('La IA externa está deshabilitada (AI_ENABLED=false). No se envió nada.', { status: 403 }),
+    gateway.status.mockImplementation(status as never)
+    const service = createDemoService({ delayMs: 0 })
+    const spies = { conv: vi.spyOn(service, 'getConversation'), send: vi.spyOn(service, 'sendMessage') }
+    const user = userEvent.setup()
+    const router = createMemoryRouter(routes, { initialEntries: ['/analisis/cargar'] })
+    render(
+      <AppProviders service={service} aiGateway={gateway}>
+        <RouterProvider router={router} />
+      </AppProviders>,
     )
-    const { user, composer } = await reachAssistant(gateway, [ventas()])
-    // Una conversación previa con el asistente DEMO.
-    await startConversation(user)
-    expect(await screen.findByText(/Entiendo tu objetivo/)).toBeInTheDocument()
-    await waitFor(() => expect(composer).toBeEnabled())
-    await user.type(composer, '¿Qué país tiene más ventas?')
+    await user.upload(await screen.findByTestId('file-input'), [ventas()])
+    await waitFor(() => expect(screen.getAllByLabelText('Archivo listo')).toHaveLength(1))
+    await goToReview(user)
+    await completeReview(user, 'Comparar montos por país')
+    await waitFor(() => expect(router.state.location.pathname).toBe('/analisis/asistente'))
+    return { gateway, service, spies, user }
+  }
 
-    const box = await openAuthorization(user)
-    expect(within(box).getByText(/no habrá respuesta de IA ni se enviará ningún dato/)).toBeInTheDocument()
-
-    await user.click(within(box).getByRole('button', { name: 'Validar este mensaje' }))
-    await user.click(await within(box).findByRole('button', { name: 'Autorizar este envío' }))
-    expect(
-      await within(box).findByText(/Prueba finalizada\. La IA está deshabilitada y no se envió ningún dato\./),
-    ).toBeInTheDocument()
-
-    // Estado final: no se invita a repetir el proceso para conseguir una respuesta.
-    expect(within(box).queryByRole('button', { name: 'Validar este mensaje' })).not.toBeInTheDocument()
-    expect(within(box).queryByRole('button', { name: 'Autorizar este envío' })).not.toBeInTheDocument()
-    // Se conserva todo: conversación, mensaje escrito, objetivo y decisiones.
-    expect(screen.getByText(/Entiendo tu objetivo/)).toBeInTheDocument()
-    expect(screen.getByText('Comparar montos por país')).toBeInTheDocument()
-    expect(composer).toHaveValue('¿Qué país tiene más ventas?')
-    expect(screen.getByRole('region', { name: 'Resumen de la revisión de datos' })).toHaveTextContent('2 de 3 columnas autorizadas')
-    expect(gateway.authorize).toHaveBeenCalledTimes(1)
-
-    // Otro mensaje es otro envío y empieza de cero.
-    await user.type(composer, ' ¿Y por mes?')
-    expect(within(box).getByRole('button', { name: 'Validar este mensaje' })).toBeInTheDocument()
-    expect(within(box).queryByText(/Prueba finalizada/)).not.toBeInTheDocument()
-  })
-
-  it('el rechazo 501 (sin proveedor) también es un estado final sin envío', async () => {
-    const gateway = fakeGateway()
-    vi.mocked(gateway.status).mockResolvedValue({ ai_enabled: true, provider_configured: true, external_calls_implemented: false })
-    vi.mocked(gateway.authorize).mockRejectedValue(new ApiError('No implementado', { status: 501 }))
-    const { user, composer } = await reachAssistant(gateway, [ventas()])
-    await user.type(composer, 'Hola')
-    const box = await openAuthorization(user)
-    await user.click(within(box).getByRole('button', { name: 'Validar este mensaje' }))
-    await user.click(await within(box).findByRole('button', { name: 'Autorizar este envío' }))
-    expect(await within(box).findByText(/todavía no está implementada y no se envió ningún dato/)).toBeInTheDocument()
-    expect(within(box).queryByRole('button', { name: 'Validar este mensaje' })).not.toBeInTheDocument()
-  })
-
-  it('panel compacto: acciones antes del JSON, JSON con altura máxima y fuera de la tarjeta del chat', async () => {
-    const { user } = await reachAssistant(fakeGateway(), [ventas()])
-    const box = await openAuthorization(user)
-    const validate = within(box).getByRole('button', { name: 'Validar este mensaje' })
-    const preview = within(box).getByTestId('message-payload-preview')
-    expect(validate.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(preview.className).toMatch(/max-h-/)
-    expect(preview.className).toMatch(/overflow-auto/)
-    expect(preview).toHaveAttribute('tabindex', '0')
-    // No está dentro de la tarjeta del chat, que tiene altura fija y recorta su contenido.
-    expect(box.closest('.overflow-hidden')).toBeNull()
-  })
-
-  it('«Enviar» usa el asistente DEMO y no valida ni autoriza nada por su cuenta', async () => {
-    const gateway = fakeGateway()
-    const { user, composer } = await reachAssistant(gateway)
-    expect(screen.getByText('«Enviar» conversa con el asistente DEMO, en este equipo. No usa OpenAI.')).toBeInTheDocument()
-    await startConversation(user)
-    expect(await screen.findByText(/Entiendo tu objetivo/)).toBeInTheDocument()
-    await waitFor(() => expect(composer).toBeEnabled())
-    await user.type(composer, 'Por país{Enter}')
-    await waitFor(() => expect(screen.getAllByText('Por país').length).toBeGreaterThan(0))
+  it.each([
+    [{ ai_enabled: false, provider_configured: false, external_calls_implemented: true }, /AI_ENABLED=false/],
+    [{ ai_enabled: true, provider_configured: false, external_calls_implemented: true }, /Falta configurar OPENAI_API_KEY/],
+    [{ ai_enabled: true, provider_configured: true, external_calls_implemented: false }, /no tiene un proveedor de IA disponible/],
+  ])('si el backend informa %o, muestra el motivo y no simula respuestas', async (status, message) => {
+    const { gateway, service, spies, user } = await reachWith(async () => status)
+    const alert = await screen.findByText('La IA no está disponible')
+    expect(alert.closest('[role="alert"]')).toHaveTextContent(message)
+    expect(alert.closest('[role="alert"]')).toHaveTextContent('No se muestran respuestas simuladas')
+    expect(screen.getByText('IA no disponible')).toBeInTheDocument()
+    const start = screen.getByRole('button', { name: 'Comenzar conversación' })
+    expect(start).toBeDisabled()
+    await user.click(start)
+    expect(screen.getByRole('textbox', { name: /Mensaje/i })).toBeDisabled()
     expect(gateway.prepare).not.toHaveBeenCalled()
-    expect(gateway.authorize).not.toHaveBeenCalled()
+    expect(screen.queryByRole('group', { name: 'Envío a la IA real' })).not.toBeInTheDocument()
+    expectNoDemo(service, spies)
+  })
+
+  it('si el backend no responde, lo informa y permite reintentar sin simular nada', async () => {
+    let fail = true
+    const { service, spies, user } = await reachWith(async () => {
+      if (fail) throw new ApiError('No se pudo conectar con el backend en http://127.0.0.1:8000.', { status: null })
+      return {
+        ai_enabled: true, provider_configured: true, external_calls_implemented: true, model: 'gpt-6-luna',
+        budget_usd: 1, spent_usd: 0, remaining_usd: 1, requests_used: 0, max_requests: 25, max_output_tokens: 2500,
+      }
+    })
+    const alert = (await screen.findByText('La IA no está disponible')).closest('[role="alert"]') as HTMLElement
+    expect(alert).toHaveTextContent('No se pudo consultar al backend')
+    expectNoDemo(service, spies)
+
+    fail = false
+    await user.click(within(alert).getByRole('button', { name: 'Reintentar' }))
+    expect(await screen.findByText(/IA real · gpt-6-luna/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Comenzar conversación' })).toBeEnabled())
+    expect(screen.queryByText('La IA no está disponible')).not.toBeInTheDocument()
+  })
+
+  it('mientras comprueba la IA, no habilita el chat ni muestra el asistente DEMO', async () => {
+    const { service, spies } = await reachWith(() => new Promise(() => undefined))
+    expect(await screen.findByText('Comprobando la conexión con la IA…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Comenzar conversación' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: /Mensaje/i })).toBeDisabled()
+    expectNoDemo(service, spies)
   })
 })
 
@@ -291,6 +260,7 @@ describe('IA real (proveedor falso, sin consumo)', () => {
     const gateway = realGateway()
     const ctx = await reachAssistant(gateway)
     await screen.findByText(/IA real · gpt-6-luna/)
+    await waitFor(() => expect(ctx.composer).toBeEnabled())
     return { gateway, ...ctx }
   }
 
@@ -347,6 +317,8 @@ describe('IA real (proveedor falso, sin consumo)', () => {
     expect(second.message).toBe('Los NA son faltantes. Quiero ver por año.')
     expect(second.history?.map((t: { role: string }) => t.role)).toEqual(['user', 'assistant'])
     expect(second.history?.[1].content).toContain('¿Los NA de pais son faltantes o un país válido?')
+    // El historial lleva las operaciones de cada plan: la IA puede ajustarlo en lugar de repetirlo.
+    expect(second.history?.[1].content).toContain('Operaciones: sum(monto por pais)')
     expect(gateway.authorize).toHaveBeenCalledTimes(1)
 
     await user.click(within(panel).getByRole('button', { name: 'Autorizar solo este mensaje' }))

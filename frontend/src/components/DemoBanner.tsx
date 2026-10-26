@@ -6,11 +6,11 @@ export function DemoBanner() {
   const { mode, profiling } = useService()
   if (mode !== 'demo') return null
   if (profiling === 'backend') {
-    // Ejecución local con backend: el perfilado es real; el resto de la sesión vive en el navegador.
+    // Con backend todo es real: perfilado y cálculos con Pandas, conversación con OpenAI.
     return (
       <div role="note" className="bg-sky-100 px-4 py-1.5 text-center text-xs font-medium text-sky-950">
-        <strong>Ejecución local:</strong> perfilado real con Pandas en tu backend · los resultados y gráficos de
-        ejemplo siguen siendo ficticios
+        <strong>Ejecución con backend:</strong> datos, IA y cálculos reales (OpenAI y Pandas) · sin respuestas ni
+        resultados simulados
       </div>
     )
   }

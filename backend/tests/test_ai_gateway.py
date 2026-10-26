@@ -82,7 +82,7 @@ def test_prepared_payload_is_exactly_the_whitelisted_content():
     assert payload["message"] is None  # solo presente en la autorización de un mensaje
     assert set(payload["sources"][0]) == {"alias", "columns", "size_range"}
     assert set(payload["sources"][0]["columns"][0]) == {
-        "name", "format", "semantic_type", "semantic_confidence", "user_corrected", "missing_markers",
+        "name", "format", "semantic_type", "semantic_confidence", "user_corrected", "missing_markers", "distinct_values",
     }
     assert prepared["payload_sha256"] == payload_hash(AIContext.model_validate(payload))
     assert prepared["ai_enabled"] is False

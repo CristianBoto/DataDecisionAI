@@ -139,10 +139,10 @@
           "error": null
         },
         {
-          "operation": "correlation",
-          "description": "Correlación",
+          "operation": "sum",
+          "description": "Suma inválida",
           "columns": [
-            "ventas"
+            "sector"
           ],
           "group_by": [],
           "status": "error",
@@ -152,7 +152,7 @@
           "period": null,
           "rows_used": null,
           "warnings": [],
-          "error": "La operación «correlation» todavía no está disponible en el motor de cálculo."
+          "error": "«sector» es una columna categórica: esta operación requiere una columna cuantitativa."
         }
       ],
       "charts": [

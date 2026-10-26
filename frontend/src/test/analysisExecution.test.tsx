@@ -39,7 +39,7 @@ const PLAN: AIAuthorizeResult['reply']['plans'][number] = {
     { operation: 'time_series', columns: ['ventas'], group_by: ['fecha'], description: 'Ventas totales por mes' },
     { operation: 'group_by', columns: ['ventas'], group_by: ['sector'], description: 'Ventas totales por sector' },
     { operation: 'sum', columns: ['ventas'], group_by: [], description: 'Total general' },
-    { operation: 'correlation', columns: ['ventas'], group_by: [], description: 'Correlación' },
+    { operation: 'sum', columns: ['sector'], group_by: [], description: 'Suma inválida' },
   ],
   charts: [{ type: 'line', x: 'fecha', y: 'ventas', title: 'Ventas por mes' }],
   limitations: ['Datos sintéticos.'],
@@ -152,8 +152,8 @@ describe('«Ejecutar análisis» (motor Pandas)', () => {
     expect(bySector).toHaveTextContent('28.500 ARS')
     expect(within(results).getByRole('group', { name: /^Resultado: Suma · Total general/ })).toHaveTextContent('82.500 ARS')
     // Operación incompatible: se informa, no se reemplaza.
-    const failed = within(results).getByRole('group', { name: /^Resultado: .*(correlation|Correlación)/ })
-    expect(failed).toHaveTextContent('No se pudo calcular: La operación «correlation» todavía no está disponible')
+    const failed = within(results).getByRole('group', { name: /^Resultado: Suma · Suma inválida/ })
+    expect(failed).toHaveTextContent('No se pudo calcular: «sector» es una columna categórica')
     expect(within(results).getByText('Parcial')).toBeInTheDocument()
     expect(screen.getByText('La IA no participó del cálculo ni recibió los datos.')).toBeInTheDocument()
   })

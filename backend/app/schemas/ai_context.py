@@ -21,6 +21,9 @@ SemanticType = Literal["quantitative", "categorical", "identifier", "temporal", 
 Confidence = Literal["high", "medium", "low"]
 # Decisión del usuario sobre marcadores como "NA" (se registra; no se aplica todavía).
 MarkerDecision = Literal["pending", "treat_as_missing", "valid_value"]
+# Cantidad aproximada de valores distintos de una columna (rango, nunca los valores):
+# permite a la IA distinguir binarias, categorías chicas y columnas casi únicas.
+DistinctRange = Literal["1", "2", "3-10", "11-50", "51-500", ">500"]
 # Tamaño aproximado, solo si el usuario lo incluye: nunca la cantidad exacta.
 SizeRange = Literal["<1k", "1k-10k", "10k-100k", "100k-1M", ">1M"]
 
@@ -44,6 +47,8 @@ class ColumnContext(_Strict):
     user_corrected: bool = False
     # Presente solo si la columna tiene posibles marcadores de ausencia; nunca sus valores.
     missing_markers: MarkerDecision | None = None
+    # Valores distintos, por rango (aproximado y visible en la revisión de privacidad).
+    distinct_values: DistinctRange | None = None
 
     @field_validator("name")
     @classmethod

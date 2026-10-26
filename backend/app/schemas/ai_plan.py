@@ -18,26 +18,38 @@ from app.schemas.ai_context import AIContext
 
 Alias = Literal["A", "B", "C"]
 
-# Catálogo cerrado: lo único que el motor Pandas podrá ejecutar más adelante.
-Operation = Literal[
-    "count",
-    "distinct_count",
-    "sum",
-    "mean",
-    "median",
-    "min",
-    "max",
-    "std",
-    "percentage",
-    "frequency",
-    "group_by",
-    "time_series",
-    "top_n",
-    "compare_groups",
-    "correlation",
-    "missing_summary",
-]
-ChartType = Literal["bar", "line", "pie", "histogram", "scatter", "box", "table", "kpi"]
+# Catálogo ÚNICO de operaciones: la IA solo puede proponer lo que el motor Pandas
+# ejecuta (`OPERATIONS` en analysis_engine.py; una prueba verifica que coincidan).
+# Para cada una: qué calcula y qué columnas necesita. Esta descripción se envía
+# a la IA como parte de sus instrucciones.
+OPERATION_GUIDE: dict[str, str] = {
+    "count": "cantidad de registros (filas); con group_by, por grupo. No necesita columnas cuantitativas.",
+    "distinct_count": "cantidad de valores distintos de cada columna de columns.",
+    "sum": "suma de columnas cuantitativas; con group_by, por grupo.",
+    "mean": "promedio de columnas cuantitativas; con group_by, por grupo.",
+    "median": "mediana de columnas cuantitativas; con group_by, por grupo.",
+    "min": "mínimo de columnas cuantitativas; con group_by, por grupo.",
+    "max": "máximo de columnas cuantitativas; con group_by, por grupo.",
+    "frequency": "cantidad de registros por cada valor de una columna categórica (o combinación de columnas).",
+    "group_by": "suma de las columnas cuantitativas de columns por cada categoría de group_by (conteo si no hay cuantitativas).",
+    "compare_groups": "total de una columna cuantitativa por grupo y la participación (%) de cada grupo sobre el total.",
+    "time_series": "suma de las columnas cuantitativas por período (mes, o año si abarca muchos años) de una columna temporal; "
+    "puede desglosarse por una categoría agregándola en group_by.",
+}
+SUPPORTED_OPERATIONS: tuple[str, ...] = tuple(OPERATION_GUIDE)
+Operation = Literal[SUPPORTED_OPERATIONS]  # type: ignore[valid-type]
+
+# Gráficos que el dashboard puede construir con los resultados del motor.
+# (Dispersión e histograma se agregarán cuando el motor devuelva esos datos.)
+CHART_GUIDE: dict[str, str] = {
+    "line": "evolución en el tiempo (requiere una agrupación temporal).",
+    "bar": "comparación entre categorías (una o dos agrupaciones).",
+    "pie": "partes de un total (una agrupación, 2 a 6 grupos, sumas o conteos; nunca promedios).",
+    "kpi": "un único valor total (sin agrupaciones).",
+    "table": "valores detallados.",
+}
+SUPPORTED_CHARTS: tuple[str, ...] = tuple(CHART_GUIDE)
+ChartType = Literal[SUPPORTED_CHARTS]  # type: ignore[valid-type]
 SourceRelationship = Literal["single", "independent", "compare", "concatenate", "relate", "unclear"]
 
 MAX_PLANS = 6

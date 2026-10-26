@@ -107,6 +107,34 @@ Cargar → **revisar datos y privacidad** → conversar → confirmar. Las decis
 - El punto de conexión en la interfaz ya existe: el panel «Enviar a la IA real» (`MessageAuthorization`) y el hook `useAIAuthorization`. Hoy terminan en «Prueba finalizada…» (403/501); en 3B.2 ese estado final se reemplaza por la respuesta estructurada y validada de la IA, sin cambiar la autorización de un solo uso.
 - Pendiente para la fase de cálculo: aplicar las decisiones en Pandas sobre copias (por ejemplo, tratar `NA` como faltante solo donde el usuario lo indicó).
 
+## Hacia una sola aplicación real (decisión del autor)
+
+Objetivo: que datadecisionai.pages.dev tenga las mismas funciones reales que la instalación local (IA, Pandas, dashboards y luego PDF), sin una segunda aplicación ficticia.
+
+1. ✅ **Modo real sin respuestas simuladas, catálogo único e instrucciones** (bitácora, sección 6s).
+2. **Dispersión, histograma y curva ROC** (aprobado; scikit-learn aprobado para ROC):
+   - **Motor:**
+     - `histogram`: intervalos con NumPy;
+     - `scatter`: muestra de hasta 2.000 puntos más la correlación;
+     - `roc_curve`: `roc_curve` y `roc_auc_score` de scikit-learn.
+   - **Validación de la ROC en el backend:**
+     - etiquetas con exactamente dos clases;
+     - clase positiva elegida por el usuario al ejecutar (la IA no ve valores);
+     - puntuaciones numéricas;
+     - sin columna de puntuaciones, la IA explica que hace falta un modelo entrenado.
+   - **Catálogo:** se agregan esas operaciones y los tipos de gráfico, más un metadato aproximado de rango (por ejemplo, "valores entre 0 y 1").
+   - **Dashboard:** se reutiliza Recharts: barras para el histograma, `ScatterChart` para la dispersión, y líneas con diagonal de referencia más el AUC para la ROC.
+   - **Pruebas:** contra valores conocidos (AUC de 1 con separación perfecta y un caso calculado a mano).
+3. **Despliegue seguro del backend** para la web pública:
+   - FastAPI con HTTPS y la clave como secreto del servidor;
+   - frontend con `VITE_DEMO_MODE=false` y `VITE_API_BASE_URL`;
+   - `CORS_ORIGINS` con el dominio;
+   - **control de acceso** (código de invitación o login), presupuesto y límites por usuario y por IP;
+   - estado persistente: planes, permisos y presupuesto;
+   - aviso de privacidad;
+   - límite de gasto en OpenAI Platform.
+4. **PDF** (Fase 4C).
+
 ## Fase 4A — Motor de análisis con Pandas (implementada)
 
 Los planes aprobados se ejecutan con Pandas sobre los archivos reenviados al confirmar. Ver [ARCHITECTURE.md](ARCHITECTURE.md), sección "Motor de análisis con Pandas".

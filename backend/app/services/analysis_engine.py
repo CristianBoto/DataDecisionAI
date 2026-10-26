@@ -335,7 +335,8 @@ def op_distinct_count(src: PreparedSource, op: AIOperation, warnings: list[str])
     return _table(op, [], measures, pd.DataFrame([counts]), int(len(src.df)), None, warnings)
 
 
-# Catálogo cerrado: operación del plan → función de cálculo.
+# Catálogo cerrado: operación del plan → función de cálculo. Debe coincidir con
+# SUPPORTED_OPERATIONS (ai_plan.py), que es lo único que la IA puede proponer.
 OPERATIONS: dict[str, Callable[[PreparedSource, AIOperation, list[str]], OperationResult]] = {
     "count": op_count,
     "sum": _simple_aggregate("sum"),

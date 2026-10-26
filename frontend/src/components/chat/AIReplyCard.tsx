@@ -14,15 +14,10 @@ const OPERATION_LABELS: Record<AIOperationName, string> = {
   median: 'Mediana',
   min: 'Mínimo',
   max: 'Máximo',
-  std: 'Desvío estándar',
-  percentage: 'Porcentaje',
   frequency: 'Frecuencias',
   group_by: 'Agrupación',
   time_series: 'Serie temporal',
-  top_n: 'Ranking',
   compare_groups: 'Comparación de grupos',
-  correlation: 'Correlación',
-  missing_summary: 'Resumen de faltantes',
 }
 
 const CHART_LABELS: Record<string, string> = {

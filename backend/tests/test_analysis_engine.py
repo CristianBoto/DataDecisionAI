@@ -151,8 +151,6 @@ def test_invalid_request_is_rejected():
     (op("sum", ["sector"]), "categórica"),
     (op("mean", ["fecha"]), "temporal"),
     (op("time_series", ["ventas"], ["sector"]), "requiere una columna temporal"),
-    (op("std", ["ventas"]), "todavía no está disponible"),
-    (op("correlation", ["ventas"]), "todavía no está disponible"),
 ])
 def test_incompatible_operations_are_reported_and_not_replaced(operation, fragment):
     client, app = make_client()
@@ -283,3 +281,37 @@ def test_date_parsing_picks_the_matching_format():
     dates, invalid = to_dates(pd.Series(["01/02/2026", "15/03/2026", "no es fecha"]))
     assert invalid == 1
     assert [d.strftime("%Y-%m-%d") for d in dates.dropna()] == ["2026-02-01", "2026-03-15"]
+
+
+# --- Catálogo único: la IA solo puede proponer lo que el motor ejecuta ------------
+
+def test_ai_catalog_matches_the_engine():
+    from app.schemas.ai_plan import SUPPORTED_OPERATIONS
+    from app.services.analysis_engine import OPERATIONS
+
+    assert set(OPERATIONS) == set(SUPPORTED_OPERATIONS)
+
+
+@pytest.mark.parametrize("operation", ["std", "percentage", "top_n", "correlation", "missing_summary", "exec_python"])
+def test_operations_the_engine_cannot_run_cannot_reach_a_plan(operation):
+    with pytest.raises(ValueError):
+        AIPlan.model_validate(plan(op(operation, ["ventas"])))
+
+
+@pytest.mark.parametrize("chart", ["scatter", "histogram", "box", "roc"])
+def test_charts_the_dashboard_cannot_build_cannot_reach_a_plan(chart):
+    data = plan(op("sum", ["ventas"]))
+    data["charts"] = [{"type": chart, "x": "ventas", "y": None, "title": "x"}]
+    with pytest.raises(ValueError):
+        AIPlan.model_validate(data)
+
+
+def test_unknown_operations_are_still_reported_defensively():
+    """Si una operación desconocida llegara igual (por ejemplo, un plan viejo), se informa sin reemplazarla."""
+    from app.schemas.ai_plan import AIOperation
+    from app.services.analysis_engine import PreparedSource, run_operation
+    import pandas as pd
+
+    src = PreparedSource(alias="A", df=pd.DataFrame({"ventas": ["1"]}), columns={})
+    result = run_operation(src, AIOperation.model_construct(operation="std", columns=[], group_by=[], description=""))
+    assert result.status == "error" and "todavía no está disponible" in result.error

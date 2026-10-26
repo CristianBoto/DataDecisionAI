@@ -399,3 +399,13 @@ Credenciales (502), cuota o saldo (429), límite temporal (429), modelo inexiste
 - **Sin persistencia:** los archivos se procesan en memoria y se descartan; los originales no se modifican. El navegador guarda el `File` solo en memoria.
 - **Demo pública:** sin motor, porque no tiene backend.
 - **Limitación:** el control de `Origin` no es autenticación. El backend debe usarse solo en el propio equipo.
+
+
+### Metadato `distinct_values` (Fase 4B.1)
+
+Se agregó a la lista blanca del contexto un rango aproximado de valores distintos por columna (`1`, `2`, `3-10`, `11-50`, `51-500`, `>500`):
+- se calcula en el navegador y aparece en el JSON que el usuario revisa antes de autorizar;
+- no revela la cantidad exacta ni ningún valor;
+- el backend rechaza cualquier otro valor (422).
+
+El modo real ya no tiene respuestas simuladas: si la IA no está disponible, no hay respuestas de ningún tipo.

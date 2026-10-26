@@ -22,7 +22,7 @@ import { AnalysisExecution } from '@/components/analysis/AnalysisExecution'
 import { AIPlanDetails } from '@/components/chat/AIReplyCard'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useAsync } from '@/hooks/useAsync'
-import { useService } from '@/hooks/useService'
+import { useAIGateway, useService } from '@/hooks/useService'
 import { approvedAIPlans, collectAIPlans, conversationClarifications } from '@/lib/aiPlans'
 import { buildDatasetCatalog } from '@/lib/datasetCatalog'
 import { getErrorMessage } from '@/services'
@@ -191,9 +191,9 @@ function AIPlanConfirmation() {
 export function ConfirmPage() {
   const navigate = useNavigate()
   const service = useService()
-  const { projectId, sources, reviewConfirmed, aiChat } = useAnalysisSession()
-  // Con la IA real, la propuesta son los planes de la conversación (sesión), no la del servicio DEMO.
-  const realAIConversation = aiChat.some((t) => t.result)
+  const { projectId, sources, reviewConfirmed } = useAnalysisSession()
+  // Modo real (hay backend): la propuesta son los planes de la IA real en la sesión, nunca la del servicio DEMO.
+  const realAIConversation = Boolean(useAIGateway())
   const proposal = useAsync(
     () => (projectId && !realAIConversation ? service.getCurrentProposal(projectId) : Promise.resolve(null)),
     [projectId, service, realAIConversation],

@@ -45,7 +45,7 @@ describe('contexto mínimo para la IA', () => {
       sources: [{ alias: 'A', size_range: null, columns: expect.any(Array) }],
     })
     expect(payload.sources[0].columns.map((c) => Object.keys(c).sort())).toEqual(
-      Array(3).fill(['format', 'missing_markers', 'name', 'semantic_confidence', 'semantic_type', 'user_corrected']),
+      Array(3).fill(['distinct_values', 'format', 'missing_markers', 'name', 'semantic_confidence', 'semantic_type', 'user_corrected']),
     )
   })
 

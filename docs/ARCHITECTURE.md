@@ -485,3 +485,50 @@ La demo usa sus propios resultados de ejemplo, marcados como ficticios (franja "
 - Torta solo si el plan la pide y las proporciones son válidas.
 - Los resultados viven en la sesión: se pierden al recargar.
 - Exportación a PDF: Fase 4C.
+
+
+## Modo real sin respuestas simuladas y catálogo único (Fase 4B.1)
+
+### Dos modos, sin mezcla
+
+| Modo | Cuándo | Asistente | Datos y resultados |
+|------|--------|-----------|--------------------|
+| **Demo pública** | Sin backend (`createDefaultAIGateway()` devuelve `null`) | Guion fijo, identificado como simulado | Dataset de ejemplo y resultados ficticios, con la franja "Demo pública" |
+| **Real** | Con backend (local o privado) | **Solo OpenAI real.** Si no está disponible, se muestra el motivo y el chat queda deshabilitado | Archivos del usuario, Pandas y dashboard real. Sin dataset de ejemplo ni propuesta simulada |
+
+En modo real (`AssistantPage`):
+- **Sin asistente DEMO:** el hook `useConversation` ni se consulta, porque recibe `null`.
+- **Antes de habilitar el chat:** se consulta `/api/ai/status`. Mientras tanto se muestra «Comprobando la conexión con la IA…».
+- **Si la IA no está disponible** (`describeAIProblem`), se explica el motivo:
+  - backend inaccesible;
+  - `AI_ENABLED=false`;
+  - falta `OPENAI_API_KEY`;
+  - sin proveedor.
+
+  Hay un botón «Reintentar», «Comenzar conversación» y el chat quedan deshabilitados, y no aparece ninguna respuesta simulada.
+- **Lo que se quitó:** la "prueba de autorización" con la IA deshabilitada (Fase 3B.1), que convivía con el asistente DEMO.
+
+`ConfirmPage` en modo real siempre muestra los planes de la IA real, aunque no haya ninguno, nunca la propuesta del servicio DEMO. `UploadPage` no ofrece el dataset de ejemplo cuando hay backend.
+
+### Catálogo único de operaciones y gráficos
+
+`backend/app/schemas/ai_plan.py` define `OPERATION_GUIDE` y `CHART_GUIDE`: qué hace cada operación y cada gráfico. De ahí salen:
+- los tipos que acepta la respuesta estructurada de la IA (`Operation` y `ChartType`): la IA **no puede** proponer otra cosa;
+- la lista que reciben las instrucciones de la IA (`openai_provider.py`, `_build_instructions`);
+- una prueba que verifica que el motor (`OPERATIONS` en `analysis_engine.py`) implemente exactamente esas operaciones.
+
+Se quitaron del catálogo las operaciones que el motor no ejecuta (desvío estándar, porcentaje, ranking, correlación, resumen de faltantes). También los gráficos que el dashboard no construye (dispersión, caja, histograma); se volverán a agregar cuando el motor los calcule.
+
+### Instrucciones de la IA
+
+Las instrucciones piden:
+1. Partir de la pregunta concreta: qué medir, en qué grupos y en qué período.
+2. Proponer pocas operaciones que la respondan, sin análisis genéricos.
+3. Ajustar el plan anterior en lugar de repetirlo, para lo cual el historial incluye las operaciones de cada plan.
+4. Si falta una columna, se necesita un modelo entrenado, otra técnica o unir fuentes: **no** proponer un plan aproximado, sino explicar y pedir lo que falta.
+5. Preguntar ante ambigüedades que cambian el resultado.
+6. Respetar los tipos: no sumar códigos ni agrupar por columnas casi únicas.
+
+### Metadato aproximado nuevo
+
+`distinct_values` es la cantidad de valores distintos de cada columna, por rango: `1`, `2`, `3-10`, `11-50`, `51-500` o `>500`. Se calcula en el navegador desde el perfil (`distinctRange`) y aparece en el JSON de la revisión de privacidad. Nunca incluye la cantidad exacta ni los valores. Le permite a la IA distinguir columnas binarias y categorías chicas de columnas casi únicas.

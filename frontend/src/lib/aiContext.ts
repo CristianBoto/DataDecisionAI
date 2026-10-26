@@ -30,6 +30,21 @@ export interface AIColumnContext {
   user_corrected: boolean
   /** Solo si la columna tiene posibles marcadores de ausencia (sin enviar sus valores). */
   missing_markers: MarkerDecision | null
+  /** Valores distintos por rango (aproximado: nunca la cantidad exacta ni los valores). */
+  distinct_values?: DistinctRange | null
+}
+
+export type DistinctRange = '1' | '2' | '3-10' | '11-50' | '51-500' | '>500'
+
+/** Rango aproximado de valores distintos: suficiente para elegir agrupaciones, sin revelar el dato exacto. */
+export function distinctRange(count: number | null | undefined): DistinctRange | null {
+  if (count === null || count === undefined || count < 1) return null
+  if (count === 1) return '1'
+  if (count === 2) return '2'
+  if (count <= 10) return '3-10'
+  if (count <= 50) return '11-50'
+  if (count <= 500) return '51-500'
+  return '>500'
 }
 
 export interface AISourceContext {
@@ -138,6 +153,7 @@ export function buildAIContext(
             semantic_confidence: corrected ? null : (c.semanticConfidence ?? null),
             user_corrected: corrected,
             missing_markers: decision?.markers ?? null,
+            distinct_values: distinctRange(c.distinct),
           }
         })
       if (columns.length === 0) return null // una fuente sin columnas autorizadas no se menciona

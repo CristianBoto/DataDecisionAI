@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { ArrowRight, Bot, CheckCircle2, MessagesSquare, Play, ShieldAlert, ShieldCheck, ShieldOff, Sparkles, User } from 'lucide-react'
 import { DataReviewSummary } from '@/components/ai/DataReviewSummary'
-import { AuthorizedSend, MessageAuthorization } from '@/components/ai/MessageAuthorization'
+import { AuthorizedSend } from '@/components/ai/MessageAuthorization'
 import { AIReplyCard } from '@/components/chat/AIReplyCard'
 import { ChatComposer } from '@/components/chat/ChatComposer'
 import { ChatMessage, TypingIndicator } from '@/components/chat/ChatMessage'
@@ -26,10 +26,20 @@ import { isRealAIAvailable, type AIAuthorizeResult, type AIStatus } from '@/serv
 
 const MODIFY_PREFIX = 'Quisiera modificar: '
 
-/** Lo que la IA ya dijo, en texto, para darle continuidad a la conversación. */
+/**
+ * Lo que la IA ya dijo, en texto, para darle continuidad a la conversación: su mensaje,
+ * sus preguntas y cada plan con sus operaciones, así puede ajustarlo en vez de repetirlo.
+ */
 function turnText(result: AIAuthorizeResult): string {
   const questions = result.reply.questions.map((q) => `- ${q.question}`).join('\n')
-  const plans = result.reply.plans.map((p) => `- Plan propuesto (fuente ${p.source_alias}): ${p.title}`).join('\n')
+  const plans = result.reply.plans
+    .map((p) => {
+      const ops = p.operations
+        .map((op) => `${op.operation}(${op.columns.join(', ')}${op.group_by.length ? ` por ${op.group_by.join(', ')}` : ''})`)
+        .join('; ')
+      return `- Plan propuesto (fuente ${p.source_alias}): ${p.title}. Operaciones: ${ops}`
+    })
+    .join('\n')
   return [result.reply.message, questions, plans].filter(Boolean).join('\n').slice(0, MAX_OBJECTIVE_CHARS)
 }
 
@@ -42,6 +52,19 @@ function invalidatesGrant(err: unknown): boolean {
   return err.status === 403 || err.status === 404 || err.status === 410 || /autoriz/i.test(err.message)
 }
 
+/** Motivo comprensible por el que la IA real no está disponible (o si todavía se está comprobando). */
+function describeAIProblem(status: AIStatus | null, statusError: string | null): { checking: boolean; message: string } {
+  if (statusError) return { checking: false, message: `No se pudo consultar al backend: ${statusError}` }
+  if (!status) return { checking: true, message: '' }
+  if (!status.ai_enabled) {
+    return { checking: false, message: 'La IA está deshabilitada en el backend (AI_ENABLED=false). Habilitala en backend/.env y reiniciá el backend.' }
+  }
+  if (!status.provider_configured) {
+    return { checking: false, message: 'Falta configurar OPENAI_API_KEY en backend/.env (la clave nunca se carga en el navegador).' }
+  }
+  return { checking: false, message: 'El backend no tiene un proveedor de IA disponible.' }
+}
+
 const timeLabel = (ms: number) => new Date(ms).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
 
 export function AssistantPage() {
@@ -51,9 +74,14 @@ export function AssistantPage() {
   const session = useAnalysisSession()
   const { projectId, dataset, profile, sources, review, reviewConfirmed, aiChat, approvedPlanIds, aiConversationGrant: grant } = session
   const aiGateway = useAIGateway()
-  const { messages, proposal, loading, sending, error, send, retry } = useConversation(projectId)
+  // Modo real: hay backend (instalación local o privada). Ahí NUNCA se usa el asistente DEMO.
+  // El asistente de respuestas fijas existe solo en la demo pública (sin backend).
+  const realMode = Boolean(aiGateway)
+  const { messages, proposal, loading, sending, error, send, retry } = useConversation(realMode ? null : projectId)
   const [draft, setDraft] = useState('')
   const [aiStatus, setAIStatus] = useState<AIStatus | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
+  const [statusAttempt, setStatusAttempt] = useState(0)
   // Mensaje que espera la autorización del usuario para ir a OpenAI.
   const [outgoing, setOutgoing] = useState<{ text: string; fromComposer: boolean } | null>(null)
   // Envío directo dentro de una conversación autorizada.
@@ -76,15 +104,25 @@ export function AssistantPage() {
   useEffect(() => {
     if (!aiGateway) return
     let cancelled = false
+    setStatusError(null)
     aiGateway.status().then(
-      (status) => !cancelled && setAIStatus(status),
-      () => !cancelled && setAIStatus(null),
+      (status) => {
+        if (!cancelled) setAIStatus(status)
+      },
+      (err: unknown) => {
+        if (!cancelled) {
+          setAIStatus(null)
+          setStatusError(getErrorMessage(err))
+        }
+      },
     )
     return () => {
       cancelled = true
     }
-  }, [aiGateway])
-  const realAI = Boolean(aiGateway) && isRealAIAvailable(aiStatus)
+  }, [aiGateway, statusAttempt])
+  // La IA se puede usar solo si el backend confirma que está habilitada, con clave y proveedor.
+  const aiReady = realMode && isRealAIAvailable(aiStatus)
+  const aiProblem = realMode && !aiReady ? describeAIProblem(aiStatus, statusError) : null
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'end' })
@@ -143,7 +181,7 @@ export function AssistantPage() {
   }
 
   const objective = review?.objective.trim() ?? ''
-  const started = realAI ? aiChat.length > 0 : messages.some((m) => m.role === 'user')
+  const started = realMode ? aiChat.length > 0 : messages.some((m) => m.role === 'user')
   const showStart = Boolean(objective) && !started && !outgoing
 
   const grantActive = Boolean(grant && grant.expiresAt > now && aiGateway?.sendInConversation)
@@ -161,13 +199,15 @@ export function AssistantPage() {
 
   function startConversation() {
     // El objetivo se escribió una sola vez, en la revisión: no hace falta copiarlo.
-    if (!realAI) return void send(objective)
+    if (!realMode) return void send(objective) // solo en la demo pública
+    if (!aiReady) return // sin IA disponible no hay respuestas: ni reales ni simuladas
     if (grantLive()) void sendInConversation(objective, false)
     else requestAuthorization(objective, false)
   }
 
   function handleComposerSend(text: string) {
-    if (!realAI) return void send(text)
+    if (!realMode) return void send(text) // solo en la demo pública
+    if (!aiReady) return
     // Cada envío nace de una acción explícita del usuario: con permiso, va directo; sin él, se pide autorización.
     if (grantLive()) void sendInConversation(text, true)
     else requestAuthorization(text, true)
@@ -245,7 +285,7 @@ export function AssistantPage() {
   }
 
   const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant')
-  const suggestions = !realAI && !sending && lastAssistant?.suggestions ? lastAssistant.suggestions : []
+  const suggestions = !realMode && !sending && lastAssistant?.suggestions ? lastAssistant.suggestions : []
   const proposedPlans = collectAIPlans(aiChat, approvedPlanIds).length
 
   return (
@@ -254,10 +294,16 @@ export function AssistantPage() {
         eyebrow={
           <>
             <Badge tone="blue">Paso 3 de 4</Badge>
-            {realAI ? (
-              <Badge tone="green" icon={<ShieldCheck className="size-3" aria-hidden />}>
-                IA real · {aiStatus?.model}
-              </Badge>
+            {realMode ? (
+              aiReady ? (
+                <Badge tone="green" icon={<ShieldCheck className="size-3" aria-hidden />}>
+                  IA real · {aiStatus?.model}
+                </Badge>
+              ) : (
+                <Badge tone="red" icon={<ShieldAlert className="size-3" aria-hidden />}>
+                  {aiProblem?.checking ? 'Comprobando la IA…' : 'IA no disponible'}
+                </Badge>
+              )
             ) : (
               mode === 'demo' && <DemoBadge label="Asistente simulado" />
             )}
@@ -266,7 +312,7 @@ export function AssistantPage() {
         title="Contale al asistente qué necesitás"
         description="El asistente revisa tus datos, te hace preguntas y arma una propuesta para que la apruebes."
         actions={
-          !realAI &&
+          !realMode &&
           proposal && (
             <Button onClick={() => navigate('/analisis/confirmar')} iconRight={<ArrowRight className="size-4" />}>
               Revisar propuesta
@@ -275,11 +321,38 @@ export function AssistantPage() {
         }
       />
 
-      {realAI ? (
+      {realMode && aiProblem ? (
+        aiProblem.checking ? (
+          <Alert tone="info" title="Comprobando la conexión con la IA…">
+            Consultando al backend si OpenAI está habilitado. El chat se activa cuando lo confirme.
+          </Alert>
+        ) : (
+          <Alert
+            tone="error"
+            title="La IA no está disponible"
+            action={
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  // Mientras se vuelve a consultar se muestra «Comprobando…», no el motivo anterior.
+                  setAIStatus(null)
+                  setStatusError(null)
+                  setStatusAttempt((n) => n + 1)
+                }}
+              >
+                Reintentar
+              </Button>
+            }
+          >
+            {aiProblem.message} No se muestran respuestas simuladas: el asistente necesita OpenAI real.
+          </Alert>
+        )
+      ) : realMode ? (
         <Alert tone="info" title="Asistente con IA real (OpenAI)">
           Cada mensaje requiere tu autorización: antes de enviarlo ves el contenido exacto y su costo máximo estimado.
           Solo se envían el objetivo, el mensaje y los metadatos autorizados, nunca tus archivos ni sus valores. La IA
-          propone; los cálculos se harán con Pandas cuando apruebes un plan, en la próxima etapa.
+          propone; los cálculos los hace Pandas en tu backend cuando apruebes y ejecutes un plan.
           {aiStatus?.remaining_usd != null && aiStatus.budget_usd != null && (
             <> Presupuesto local disponible: USD {aiStatus.remaining_usd.toFixed(4)} de {aiStatus.budget_usd.toFixed(2)}.</>
           )}
@@ -305,7 +378,7 @@ export function AssistantPage() {
               </span>
               <div>
                 <p className="text-sm font-semibold text-slate-900">
-                  {realAI ? 'Asistente de requisitos · IA real' : 'Asistente de requisitos'}
+                  {realMode ? 'Asistente de requisitos · IA real' : 'Asistente de requisitos'}
                 </p>
                 <p className="text-xs text-slate-500">Te ayuda a definir el análisis · Nunca inventa datos</p>
               </div>
@@ -320,11 +393,15 @@ export function AssistantPage() {
                   <p className="text-xs font-semibold tracking-wide text-blue-700 uppercase">Tu objetivo confirmado</p>
                   <p className="mt-1 leading-relaxed whitespace-pre-wrap text-slate-800">{objective}</p>
                   <div className="mt-3 flex flex-wrap items-center gap-3">
-                    <Button icon={<Play className="size-4" />} onClick={startConversation} disabled={sending || loading}>
+                    <Button
+                      icon={<Play className="size-4" />}
+                      onClick={startConversation}
+                      disabled={realMode ? !aiReady : sending || loading}
+                    >
                       Comenzar conversación
                     </Button>
                     <span className="text-xs text-slate-500">
-                      {realAI
+                      {realMode
                         ? 'Antes de enviarlo vas a ver el contenido y el costo estimado.'
                         : 'Lo escribiste en la revisión: no hace falta copiarlo.'}
                     </span>
@@ -332,7 +409,7 @@ export function AssistantPage() {
                 </section>
               )}
 
-              {realAI ? (
+              {realMode ? (
                 aiChat.map((turn) =>
                   turn.role === 'user' ? (
                     <div key={turn.id} className="flex flex-row-reverse gap-3">
@@ -379,7 +456,7 @@ export function AssistantPage() {
                   </div>
                 ))
               )}
-              {realAI && justApproved && (
+              {realMode && justApproved && (
                 <section aria-label="Plan aprobado" className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm">
                   <p className="flex items-center gap-1.5 font-semibold text-emerald-900">
                     <CheckCircle2 className="size-4" aria-hidden /> Plan aprobado correctamente.
@@ -400,12 +477,12 @@ export function AssistantPage() {
             </div>
 
             <div className="border-t border-slate-100 bg-white p-4">
-              {aiError && realAI && (
+              {aiError && realMode && (
                 <Alert tone="error" className="mb-3">
                   {aiError}
                 </Alert>
               )}
-              {error && !realAI && (
+              {error && !realMode && (
                 <Alert tone="error" className="mb-3" action={<Button size="sm" variant="outline" onClick={retry}>Reintentar</Button>}>
                   {error}
                 </Alert>
@@ -430,16 +507,16 @@ export function AssistantPage() {
                 value={draft}
                 onValueChange={setDraft}
                 onSend={handleComposerSend}
-                disabled={sending || loading || aiSending || Boolean(outgoing)}
+                disabled={realMode ? !aiReady || aiSending || Boolean(outgoing) : sending || loading}
                 placeholder={
-                  realAI
+                  realMode
                     ? 'Respondé las preguntas o pedí cambios…'
                     : proposal
                       ? 'Pedí cambios a la propuesta o hacé una pregunta…'
                       : 'Ej.: Quiero saber qué productos se venden más en verano'
                 }
               />
-              {realAI ? (
+              {realMode && aiReady ? (
                 <div
                   role="status"
                   aria-label="Estado de la autorización"
@@ -475,7 +552,7 @@ export function AssistantPage() {
                     </>
                   )}
                 </div>
-              ) : (
+              ) : realMode ? null : (
                 <p className="mt-1 flex items-center gap-1.5 px-1 text-[11px] text-slate-500">
                   <Bot className="size-3" aria-hidden />
                   {mode === 'demo'
@@ -486,7 +563,7 @@ export function AssistantPage() {
             </div>
           </Card>
           {/* Fuera de la tarjeta del chat (altura fija): al abrirse no empuja los botones fuera de la vista. */}
-          {realAI && aiGateway && review && outgoing && (
+          {realMode && aiGateway && review && outgoing && (
             <AuthorizedSend
               sources={sources}
               review={review}
@@ -498,13 +575,12 @@ export function AssistantPage() {
               notice={grantNotice}
             />
           )}
-          {!realAI && review && <MessageAuthorization sources={sources} review={review} message={draft} gateway={aiGateway} />}
         </div>
 
         <aside className="space-y-4">
           <Card className="p-5">
             <p className="text-sm font-semibold text-slate-900">Estado de la propuesta</p>
-            {realAI ? (
+            {realMode ? (
               <p className="mt-2 text-xs leading-relaxed text-slate-600">
                 {proposedPlans === 0
                   ? 'Todavía no hay planes. Comenzá la conversación y respondé las preguntas del asistente.'

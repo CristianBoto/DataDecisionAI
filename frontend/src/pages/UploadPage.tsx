@@ -211,7 +211,8 @@ export function UploadPage() {
     navigate('/analisis/revisar')
   }
 
-  const showDemoSample = service.mode === 'demo' && !items.some((i) => i.isDemo)
+  // El dataset de ejemplo (ficticio) existe solo en la demo pública; con backend se trabaja con datos reales.
+  const showDemoSample = service.mode === 'demo' && !usesBackendProfiling && !items.some((i) => i.isDemo)
 
   return (
     <div className="space-y-6">
@@ -233,8 +234,7 @@ export function UploadPage() {
           {service.mode === 'demo' && usesBackendProfiling && (
             <Alert tone="info" title="Perfilado real con el backend local">
               Cada archivo se envía por separado a FastAPI ({appConfig.apiBaseUrl}) para leerlo con Pandas y no se
-              guarda. Los resultados siguen en modo DEMO; el asistente usa la IA real solo si está habilitada en el
-              backend.
+              guarda. El asistente usa OpenAI y los cálculos se hacen con Pandas en ese mismo backend.
             </Alert>
           )}
 

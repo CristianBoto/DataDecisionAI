@@ -390,3 +390,32 @@ def test_connection_error_records_no_cost():
     assert response.status_code == 502
     assert app.state.ai_budget.spent_usd == 0
     assert not app.state.ai_budget.usage_file.exists()
+
+
+# --- Instrucciones y metadatos aproximados ------------------------------------------
+
+def test_instructions_list_exactly_the_engine_catalog_and_the_rules():
+    from app.schemas.ai_plan import SUPPORTED_CHARTS, SUPPORTED_OPERATIONS
+
+    for name in SUPPORTED_OPERATIONS + SUPPORTED_CHARTS:
+        assert f"- {name}:" in INSTRUCTIONS
+    for absent in ("std", "correlation", "top_n", "scatter"):
+        assert f"- {absent}:" not in INSTRUCTIONS
+    # Responder la pregunta concreta, no repetir planes y explicar lo imposible en lugar de aproximarlo.
+    assert "Partí de la pregunta concreta" in INSTRUCTIONS
+    assert "en lugar de repetirlo" in INSTRUCTIONS
+    assert "NO propongas un plan" in INSTRUCTIONS and "modelo entrenado" in INSTRUCTIONS
+
+
+@pytest.mark.parametrize("value", ["1", "2", "3-10", "11-50", "51-500", ">500"])
+def test_distinct_values_are_approximate_ranges(value):
+    col = {"name": "x", "format": "text", "distinct_values": value}
+    client, _ = make_client()
+    assert prepare(client, context(source("A", col))).status_code == 201
+
+
+@pytest.mark.parametrize("value", ["37", 37, "muchos"])
+def test_exact_counts_are_not_accepted_as_distinct_values(value):
+    col = {"name": "x", "format": "text", "distinct_values": value}
+    client, _ = make_client()
+    assert prepare(client, context(source("A", col))).status_code == 422
