@@ -129,14 +129,17 @@ def test_budget_and_request_limits_still_apply_with_a_permission():
     assert send(client, cid, {**context(), "message": "uno"}).status_code == 200
     assert send(client, cid, {**context(), "message": "dos"}).status_code == 429  # límite diario del visitante
 
-    client, app = make_client(ai_enabled=True, provider=FakeProvider(), budget_usd=0.0016)  # alcanza para un envío (máx. ≈ USD 0,0014) y no para dos
+    from tests.ai_helpers import max_cost_per_request
+
+    # Alcanza para un envío (reserva el máximo estimado y cuesta USD 0,00032) y no para dos.
+    client, app = make_client(ai_enabled=True, provider=FakeProvider(), budget_usd=round(max_cost_per_request() * 1.1, 6))
     cid = start_conversation(client)["conversation_id"]
     response = send(client, cid, {**context(), "message": "otra"})
     assert response.status_code == 402 and "Presupuesto insuficiente en tu cuota" in response.json()["detail"]
 
 
 def test_context_size_limit_applies_with_a_permission():
-    client, _ = make_client(ai_enabled=True, provider=FakeProvider(), ai_max_input_tokens=3500)
+    client, _ = make_client(ai_enabled=True, provider=FakeProvider(), ai_max_input_tokens=4500)
     cid = start_conversation(client)["conversation_id"]
     long_history = [{"role": "user", "content": "x" * 2000}] * 8
     response = send(client, cid, {**context(), "message": "Hola", "history": long_history})

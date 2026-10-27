@@ -24,6 +24,9 @@ MarkerDecision = Literal["pending", "treat_as_missing", "valid_value"]
 # Cantidad aproximada de valores distintos de una columna (rango, nunca los valores):
 # permite a la IA distinguir binarias, categorías chicas y columnas casi únicas.
 DistinctRange = Literal["1", "2", "3-10", "11-50", "51-500", ">500"]
+# Si una medida se puede sumar entre filas (importes, cantidades) o no (tasas, %, promedios, stocks).
+Additivity = Literal["additive", "non_additive"]
+MAX_SPLIT_COLUMNS = 5
 # Tamaño aproximado, solo si el usuario lo incluye: nunca la cantidad exacta.
 SizeRange = Literal["<1k", "1k-10k", "10k-100k", "100k-1M", ">1M"]
 
@@ -49,6 +52,19 @@ class ColumnContext(_Strict):
     missing_markers: MarkerDecision | None = None
     # Valores distintos, por rango (aproximado y visible en la revisión de privacidad).
     distinct_values: DistinctRange | None = None
+    # Metadatos de las medidas, revisados por el usuario (no son valores del dataset):
+    # unidad ("ARS", "%"), si se puede sumar y de qué columnas depende su significado
+    # (por ejemplo, una columna "indicador": valores de distintos indicadores no se combinan).
+    unit: str | None = Field(default=None, min_length=1, max_length=24)
+    additivity: Additivity | None = None
+    split_by: list[str] = Field(default_factory=list, max_length=MAX_SPLIT_COLUMNS)
+
+    @field_validator("unit")
+    @classmethod
+    def plain_unit(cls, value: str | None) -> str | None:
+        if value is not None and any(ord(ch) < 32 for ch in value):
+            raise ValueError("La unidad contiene caracteres no permitidos.")
+        return value
 
     @field_validator("name")
     @classmethod
@@ -69,6 +85,15 @@ class SourceContext(_Strict):
     alias: Literal["A", "B", "C"]
     columns: list[ColumnContext] = Field(min_length=1, max_length=MAX_COLUMNS_PER_SOURCE)
     size_range: SizeRange | None = None
+
+    @model_validator(mode="after")
+    def split_columns_exist(self) -> SourceContext:
+        names = {c.name for c in self.columns}
+        for column in self.columns:
+            unknown = [n for n in column.split_by if n not in names or n == column.name]
+            if unknown:
+                raise ValueError(f"«{column.name}» depende de columnas que no se comparten: {', '.join(unknown)}.")
+        return self
 
 
 class AIContext(_Strict):

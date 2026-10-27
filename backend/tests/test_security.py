@@ -24,6 +24,7 @@ from tests.ai_helpers import (  # noqa: F401 - no_network se activa en todo el m
     context,
     login,
     make_client,
+    max_cost_per_request,
     no_network,
     prepare,
 )
@@ -314,9 +315,11 @@ def test_daily_quota_is_per_visitor():
 
 
 def test_user_budget_and_global_budget_are_enforced():
-    # Cada envío reserva como máximo ≈ USD 0,0014 y cuesta USD 0,00032: la cuota de cada
-    # visitante alcanza para uno; el global, para dos (el tercero ya no entra).
-    alice, app = make_client(ai_enabled=True, provider=FakeProvider(), budget_usd=0.002, user_budget_usd=0.0016)
+    # Cada envío reserva el máximo estimado y cuesta USD 0,00032: la cuota de cada visitante
+    # alcanza para uno; el global, para dos (el tercero ya no entra).
+    maximum = max_cost_per_request()
+    total = round(maximum + 0.0005, 6)
+    alice, app = make_client(ai_enabled=True, provider=FakeProvider(), budget_usd=total, user_budget_usd=round(maximum * 1.1, 6))
     bob = second_visitor(app)
     carol = second_visitor(app)
     assert authorize(alice, prepare(alice, context()).json()).status_code == 200
@@ -325,7 +328,7 @@ def test_user_budget_and_global_budget_are_enforced():
     assert authorize(bob, prepare(bob, context()).json()).status_code == 200
     final = authorize(carol, prepare(carol, context()).json())
     assert final.status_code == 402 and "global" in final.json()["detail"]
-    assert app.state.ai_budget.global_spent_usd() <= 0.002
+    assert app.state.ai_budget.global_spent_usd() <= total
 
 
 def test_global_daily_request_limit():

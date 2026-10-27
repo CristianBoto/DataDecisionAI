@@ -29,7 +29,7 @@ from typing import Protocol
 
 from app.core.config import Settings
 from app.schemas.ai_context import AIContext
-from app.schemas.ai_plan import AIPlan, validate_reply
+from app.schemas.ai_plan import AIPlan, prune_reply, validate_reply
 from app.services.ai_budget import AIBudget, cost_usd, estimate_tokens, model_prices
 from app.services.ai_errors import AIGatewayError
 from app.services.openai_provider import INSTRUCTIONS, ProviderCallError, ProviderResult, build_input
@@ -310,13 +310,17 @@ def _send(context: AIContext, provider: AIProvider, budget: AIBudget, plans: AIP
     problems = validate_reply(result.reply, context)
     if problems:
         raise AIGatewayError(502, "La respuesta de la IA no superó la validación y se descartó. " + " ".join(problems[:3]))
+    # Operaciones sin sentido estadístico para los datos revisados: se quitan y se informa por qué.
+    pruned, notes = prune_reply(result.reply, context)
+    if not pruned.plans and not pruned.questions:
+        raise AIGatewayError(502, "La respuesta de la IA no superó la validación y se descartó. " + " ".join(notes[:3]))
 
-    reply = result.reply.model_dump(mode="json")
-    if result.reply.source_relationship in ("relate", "concatenate"):
+    reply = pruned.model_dump(mode="json")
+    if pruned.source_relationship in ("relate", "concatenate"):
         reply["warnings"].append("Unir o relacionar fuentes no está disponible en esta etapa: cada plan usa una sola fuente.")
     return {
         "reply": reply,
-        "plan_ids": [plans.save(plan, owner) for plan in result.reply.plans],
+        "plan_ids": [plans.save(plan, owner) for plan in pruned.plans],
         "usage": {
             "model": settings.openai_model,
             "input_tokens": result.input_tokens,

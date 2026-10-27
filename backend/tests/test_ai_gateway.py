@@ -83,6 +83,7 @@ def test_prepared_payload_is_exactly_the_whitelisted_content():
     assert set(payload["sources"][0]) == {"alias", "columns", "size_range"}
     assert set(payload["sources"][0]["columns"][0]) == {
         "name", "format", "semantic_type", "semantic_confidence", "user_corrected", "missing_markers", "distinct_values",
+        "unit", "additivity", "split_by",  # metadatos de las medidas revisados por la persona (no valores)
     }
     assert prepared["payload_sha256"] == payload_hash(AIContext.model_validate(payload))
     assert prepared["ai_enabled"] is False

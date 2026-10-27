@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from app.schemas.ai_context import AIContext
+from app.services.operation_rules import FIXED_SHAPE, ColumnMeta, operation_problem
 
 Alias = Literal["A", "B", "C"]
 
@@ -45,7 +46,7 @@ OPERATION_GUIDE: dict[str, str] = {
 }
 
 # Forma exigida a las operaciones que necesitan columnas concretas (se valida en el backend).
-OPERATION_ARITY: dict[str, int] = {"histogram": 1, "scatter": 2, "roc_curve": 2}
+OPERATION_ARITY: dict[str, int] = dict(FIXED_SHAPE)
 SUPPORTED_OPERATIONS: tuple[str, ...] = tuple(OPERATION_GUIDE)
 Operation = Literal[SUPPORTED_OPERATIONS]  # type: ignore[valid-type]
 
@@ -127,32 +128,48 @@ def _texts(reply: AIAssistantReply) -> list[str]:
     return texts
 
 
-def _shape_problems(plan: AIPlan, op: AIOperation, cols: dict) -> list[str]:
-    """Histograma, dispersión y ROC solo con las columnas que necesitan (tipos según la revisión)."""
-    arity = OPERATION_ARITY.get(op.operation)
-    if arity is None:
-        return []
-    where = f"El plan «{plan.title}» ({op.operation})"
-    if len(op.columns) != arity or op.group_by:
-        return [f"{where} necesita exactamente {arity} columna(s) y ninguna agrupación."]
-    if any(name not in cols for name in op.columns):
-        return []  # ya informado como columna inexistente
-    kinds = [cols[name].semantic_type for name in op.columns]
-    if op.operation in ("histogram", "scatter") and any(k != "quantitative" for k in kinds):
-        return [f"{where} solo admite columnas cuantitativas."]
-    if op.operation == "roc_curve":
-        label, score = (cols[name] for name in op.columns)
-        if label.distinct_values not in (None, "2"):
-            return [f"{where}: la etiqueta «{label.name}» no es binaria (tiene {label.distinct_values} valores distintos)."]
-        if score.semantic_type != "quantitative":
-            return [f"{where}: «{score.name}» no es una puntuación numérica."]
-    return []
+def context_meta(context: AIContext) -> dict[str, dict[str, ColumnMeta]]:
+    """Metadatos revisados de cada columna autorizada, por fuente (los mismos que usa el motor)."""
+    return {
+        s.alias: {
+            c.name: ColumnMeta(c.semantic_type, c.additivity, tuple(c.split_by), c.distinct_values)
+            for c in s.columns
+        }
+        for s in context.sources
+    }
+
+
+def prune_reply(reply: AIAssistantReply, context: AIContext) -> tuple[AIAssistantReply, list[str]]:
+    """Quita las operaciones sin sentido estadístico (mismas reglas que el motor) y lo informa.
+
+    Un plan sin operaciones válidas se descarta entero. Nada se reemplaza en silencio:
+    cada descarte queda escrito en las limitaciones del plan o en las advertencias.
+    """
+    meta = context_meta(context)
+    notes: list[str] = []
+    plans: list[AIPlan] = []
+    for plan in reply.plans:
+        columns = meta.get(plan.source_alias, {})
+        kept, dropped = [], []
+        for op in plan.operations:
+            problem = operation_problem(op.operation, op.columns, op.group_by, columns)
+            if problem:
+                dropped.append(f"Se descartó la operación {op.operation} («{op.description[:80]}») del plan «{plan.title}»: {problem}.")
+            else:
+                kept.append(op)
+        notes += dropped
+        if kept:
+            plans.append(plan.model_copy(update={"operations": kept, "limitations": [*plan.limitations, *dropped]}))
+    discarded = len(reply.plans) - len(plans)
+    warnings = list(reply.warnings)
+    if discarded:
+        warnings.append(f"Se descartaron {discarded} plan(es) sin operaciones válidas para los datos revisados.")
+    return reply.model_copy(update={"plans": plans, "warnings": warnings}), notes
 
 
 def validate_reply(reply: AIAssistantReply, context: AIContext) -> list[str]:
     """Problemas de la respuesta frente al contexto autorizado (lista vacía = válida)."""
     columns = {s.alias: {c.name for c in s.columns} for s in context.sources}
-    details = {s.alias: {c.name: c for c in s.columns} for s in context.sources}
     problems: list[str] = []
 
     if not reply.questions and not reply.plans:
@@ -178,8 +195,6 @@ def validate_reply(reply: AIAssistantReply, context: AIContext) -> list[str]:
             used |= {c for c in (chart.x, chart.y) if c}
         for name in sorted(used - known):
             problems.append(f"El plan «{plan.title}» usa la columna «{name}», que no existe en la fuente {plan.source_alias}.")
-        for op in plan.operations:
-            problems += _shape_problems(plan, op, details[plan.source_alias])
 
     for q in reply.questions:
         if q.source_alias is not None and q.source_alias not in columns:

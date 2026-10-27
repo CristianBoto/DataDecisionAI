@@ -76,6 +76,13 @@ def test_trade_like_dataset_is_classified_with_general_rules():
     assert any("'PPRO'" in w and "código" in w for w in report["warnings"])
 
 
+def test_distinct_integers_are_ids_only_when_nearly_consecutive():
+    rows = [f"{1001 + i},{450 + i * 37 % 900}" for i in range(72)]
+    report = profile_dataset(rows_csv("nro,importe", rows), "ventas.csv")
+    assert column(report, "nro")["semantic_type"] == "identifier"
+    assert column(report, "importe")["semantic_type"] == "quantitative"
+
+
 def test_leading_zeros_mean_code_not_quantity():
     report = profile_dataset(rows_csv("zona", ["001", "002", "010"]), "datos.csv")
     zona = column(report, "zona")

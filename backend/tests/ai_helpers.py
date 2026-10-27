@@ -162,3 +162,11 @@ def authorize(client, prepared):
         json={"payload_sha256": prepared["payload_sha256"], "confirm": True},
         headers=ORIGIN,
     )
+
+
+def max_cost_per_request() -> float:
+    """Costo máximo estimado de un envío del contexto de prueba (se recalcula si cambian las instrucciones)."""
+    from app.schemas.ai_context import AIContext
+    from app.services.ai_gateway import estimate_request
+
+    return estimate_request(AIContext.model_validate(context()), Settings(_env_file=None))[1]

@@ -14,6 +14,7 @@ import pandas as pd
 from openpyxl import load_workbook
 
 from app.services.column_semantics import classify_column, suspected_missing_mask
+from app.services.measure_hints import measure_hints
 
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_XLSX_UNCOMPRESSED_BYTES = 60 * 1024 * 1024
@@ -259,6 +260,27 @@ def profile_dataset(content: bytes, filename: str, *, max_bytes: int | None = No
             warnings.append(f"La columna '{column}' {semantics.ambiguity}")
         if column.startswith("Unnamed:"):
             warnings.append(f"La columna '{column}' no tiene un encabezado claro.")
+
+    # Sugerencias sobre las medidas (unidad, aditividad, dependencia, marcadores numéricos).
+    hints = measure_hints(df, {c["name"]: c["semantic_type"] for c in column_profiles})
+    for column in column_profiles:
+        h = hints.get(column["name"])
+        column.update({
+            "unit_suggestion": h.unit if h else None,
+            "unit_reason": h.unit_reason if h else None,
+            "additivity_suggestion": h.additivity if h else None,
+            "additivity_reason": h.additivity_reason if h else None,
+            "split_by_suggestion": h.split_by if h else [],
+            "split_reason": h.split_reason if h else None,
+            "missing_value_suggestions": h.missing_values if h else [],
+        })
+        if h and h.split_by:
+            warnings.append(f"La columna '{column['name']}': {h.split_reason}")
+        if h and h.missing_values:
+            values = ", ".join(f"'{v}'" for v in h.missing_values)
+            warnings.append(
+                f"La columna '{column['name']}' tiene valores como {values}, fuera del rango del resto: podrían indicar ausencia."
+            )
 
     duplicate_rows = int(df.duplicated().sum())
     if duplicate_rows:

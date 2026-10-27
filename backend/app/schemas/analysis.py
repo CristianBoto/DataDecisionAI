@@ -16,7 +16,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.schemas.ai_context import MAX_SOURCES, MarkerDecision, SemanticType
+from app.schemas.ai_context import MAX_SOURCES, MAX_SPLIT_COLUMNS, Additivity, MarkerDecision, SemanticType
 
 
 class _Strict(BaseModel):
@@ -32,8 +32,16 @@ class ColumnMapping(_Strict):
     semantic_type: SemanticType | None = None
     # Decisión del usuario sobre marcadores como "NA".
     missing_markers: MarkerDecision | None = None
-    # Unidad indicada por el usuario (por ejemplo, "ARS"); solo informativa.
-    unit: str | None = Field(default=None, max_length=16)
+    # Unidad indicada por el usuario (por ejemplo, "ARS"). Si la medida depende de otra
+    # columna (split_by), no se aplica una unidad única: la indica cada categoría.
+    unit: str | None = Field(default=None, max_length=24)
+    # ¿Se puede sumar entre filas? None = sin decidir (se trata como aditiva).
+    additivity: Additivity | None = None
+    # Columnas que definen qué mide cada valor: los valores de distintas categorías nunca se combinan.
+    split_by: list[str] = Field(default_factory=list, max_length=MAX_SPLIT_COLUMNS)
+    # Valores que el usuario declaró como faltantes (por ejemplo, "-99"). Son valores del
+    # dataset: viajan solo a este backend, nunca a la IA.
+    missing_values: list[str] = Field(default_factory=list, max_length=20)
     # Clase positiva elegida por el usuario para una columna de etiquetas (curva ROC).
     # Es un valor del dataset: viaja solo a este backend, nunca a la IA.
     positive_label: str | None = Field(default=None, min_length=1, max_length=250)
@@ -42,6 +50,16 @@ class ColumnMapping(_Strict):
 class SourceMapping(_Strict):
     alias: Literal["A", "B", "C"]
     columns: list[ColumnMapping] = Field(min_length=1, max_length=250)
+
+    @model_validator(mode="after")
+    def split_columns_exist(self) -> SourceMapping:
+        names = {c.name for c in self.columns}
+        for column in self.columns:
+            if any(n not in names or n == column.name for n in column.split_by):
+                raise ValueError(f"«{column.name}» depende de columnas que no están en la fuente {self.alias}.")
+            if any(len(v) > 50 for v in column.missing_values):
+                raise ValueError("Un valor faltante declarado es demasiado largo.")
+        return self
 
 
 class ExecutionRequest(_Strict):
@@ -81,8 +99,11 @@ class OperationResult(BaseModel):
     dimensions: list[str] = []
     measures: list[Measure] = []
     rows: list[ResultRow] = []
-    # Período de las agrupaciones temporales (si hubo).
-    period: Literal["month", "year"] | None = None
+    # Período de las agrupaciones temporales (si hubo) y qué dimensión es la temporal.
+    period: Literal["day", "month", "quarter", "semester", "year"] | None = None
+    temporal_dimension: str | None = None
+    # Dimensiones que definen QUÉ se mide (indicador, unidad): no se mezclan en un mismo eje.
+    split_dimensions: list[str] = []
     # Filas que entraron en el cálculo.
     rows_used: int | None = None
     # Estadísticos de la operación (correlaciones, AUC, cantidad de intervalos…), si corresponde.

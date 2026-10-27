@@ -257,10 +257,11 @@ def test_unauthorized_origin_and_oversized_files_are_rejected():
 
 def test_large_group_results_are_truncated():
     client, app = make_client()
-    csv = "sector,ventas\n" + "".join(f"S{i},1\n" for i in range(600))
+    # 30 sectores × 20 regiones = 600 combinaciones (cada columna tiene pocos valores: se puede agrupar).
+    csv = "sector,region\n" + "".join(f"S{i},R{j}\n" for i in range(30) for j in range(20))
     columns = [{"name": "sector", "original": "sector", "semantic_type": "categorical"},
-               {"name": "ventas", "original": "ventas", "semantic_type": "quantitative"}]
-    plan_id = store_plan(app, plan(op("frequency", ["sector"]), columns=("sector", "ventas")))
+               {"name": "region", "original": "region", "semantic_type": "categorical"}]
+    plan_id = store_plan(app, plan(op("frequency", ["sector", "region"]), columns=("sector", "region")))
     operation = execute(client, [plan_id], {"A": ("s.csv", csv.encode())}, sources=[{"alias": "A", "columns": columns}]).json()["results"][0]["operations"][0]
     assert len(operation["rows"]) == 500 and any("primeros 500" in w for w in operation["warnings"])
 

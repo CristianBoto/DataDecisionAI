@@ -15,6 +15,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from app.services.value_parsing import NUMBER_RE, PERIOD_RE, parse_decorated
+
 # Marcadores textuales que PODRÍAN indicar ausencia. No se convierten en
 # faltantes: "NA" puede ser un código válido (por ejemplo, Namibia).
 SUSPECTED_MISSING_TOKENS = frozenset({
@@ -29,7 +31,7 @@ MOSTLY_NUMERIC = 0.5
 # Mínimo de valores para aplicar reglas basadas en patrones (longitud fija, unicidad).
 MIN_VALUES_FOR_PATTERNS = 20
 
-NUMBER_RE = r"[-+]?(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?"
+PLAIN_NUMBER_RE = r"[-+]?(?:\d{1,3}(?:[.,]\d{3})+|\d+)(?:[.,]\d+)?"
 INTEGER_RE = r"[-+]?\d+"
 LEADING_ZERO_RE = r"0\d+"
 DATE_RE = (
@@ -114,14 +116,24 @@ def _classify(name: str, values: pd.Series) -> ColumnSemantics:
     if share(unique.str.lower().isin(BOOLEAN_TOKENS)) >= CONSISTENT:
         return ColumnSemantics("boolean", "categorical", "high", "Valores de tipo sí/no o verdadero/falso.")
 
-    date_ratio = share(unique.str.fullmatch(DATE_RE))
+    date_ratio = share(unique.str.fullmatch(DATE_RE) | unique.str.fullmatch(PERIOD_RE, flags=re.IGNORECASE))
     if date_ratio >= CONSISTENT:
-        return ColumnSemantics("date", "temporal", "high", f"El {_pct(date_ratio)} de los valores tiene formato de fecha.")
+        return ColumnSemantics(
+            "date", "temporal", "high", f"El {_pct(date_ratio)} de los valores tiene formato de fecha o período (mes, trimestre, semestre)."
+        )
 
     numeric_mask = unique.str.fullmatch(NUMBER_RE)
     numeric_ratio = share(numeric_mask)
 
     if numeric_ratio >= CONSISTENT:
+        plain = unique[numeric_mask].str.fullmatch(PLAIN_NUMBER_RE)
+        if share(numeric_mask & ~plain.reindex(unique.index, fill_value=False)) >= MOSTLY_NUMERIC:
+            # "$ 1.200", "12,5 %", "USD 30": el símbolo indica una cantidad (con su unidad).
+            symbols = sorted({parse_decorated(v)[1] or "" for v in unique[numeric_mask]} - {""})
+            return ColumnSemantics(
+                "numeric", "quantitative", "high",
+                f"Valores numéricos con símbolo de moneda o porcentaje ({', '.join(symbols)}).",
+            )
         return _classify_numeric(words, unique[numeric_mask], total, distinct)
 
     if numeric_ratio >= MOSTLY_NUMERIC:
@@ -167,8 +179,12 @@ def _classify_numeric(words: set[str], values: pd.Series, total: int, distinct: 
         return ColumnSemantics("numeric", "identifier", "medium", "El nombre sugiere un código y los valores son enteros.")
 
     if total >= MIN_VALUES_FOR_PATTERNS:
-        if distinct == total:
-            return ColumnSemantics("numeric", "identifier", "medium", "Todos los valores son enteros distintos: se comporta como identificador.")
+        # Distintos y casi consecutivos (1001, 1002…): numeración. Importes distintos pero dispersos no lo son.
+        if distinct == total and high - low + 1 <= 2 * distinct:
+            return ColumnSemantics(
+                "numeric", "identifier", "medium",
+                "Todos los valores son enteros distintos y casi consecutivos: se comporta como identificador.",
+            )
         fixed_length = int(digits.iloc[0]) if digits.nunique() == 1 else None
         if fixed_length == 4 and 1800 <= low and high <= 2100:
             return ColumnSemantics(

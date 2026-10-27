@@ -1,4 +1,4 @@
-"""Motor de análisis con Pandas (Fase 4A).
+"""Motor de análisis con Pandas (Fases 4A y 4C: motor generalista).
 
 Principio: **Pandas calcula, la IA interpreta y propone, el usuario confirma.**
 
@@ -7,11 +7,27 @@ usuario aprobó. No interpreta texto ni ejecuta código: cada operación del
 catálogo cerrado se resuelve con una función de Python escrita acá
 (`OPERATIONS`). No hay `eval`, `exec`, SQL ni código del modelo.
 
+Es GENERALISTA: no conoce nombres de columnas ni temáticas. Todo sale de la
+interpretación revisada por la persona (`ColumnMapping`):
+- tipo semántico (cuantitativa, categórica, temporal, código, texto);
+- unidad, aditividad (se puede sumar o no) y columnas que definen qué mide cada
+  valor (`split_by`, por ejemplo un "indicador" en un archivo de formato largo);
+- marcadores de faltantes decididos por la persona.
+
 Flujo de `execute_analysis`:
 1. Leer cada archivo con `read_dataset` (los mismos controles que el perfilado).
 2. Por cada plan aprobado: verificar la fuente y que todas sus columnas existan.
-3. Por cada operación: validar tipos y decisiones de la revisión, y calcular.
+3. Por cada operación: aplicar las reglas estadísticas (`operation_rules`) y calcular.
 4. Devolver tablas (dimensiones + medidas) y errores parciales comprensibles.
+
+Reglas de agregación:
+- Una medida que depende de otra columna (`split_by`) se agrupa SIEMPRE también por
+  esa columna: valores de distintos indicadores o unidades nunca se suman entre sí.
+- Una medida no aditiva (tasa, %, promedio, índice, stock) nunca se suma: si una
+  agrupación reúne varias filas, se informa el promedio y se avisa.
+- Una suma de un grupo sin ningún valor es "sin dato", no cero.
+- Los períodos se agrupan con su granularidad natural (año, semestre, trimestre o mes);
+  los datos diarios se resumen por mes.
 
 Los DataFrames viven solo en memoria durante el pedido: no se modifican los
 archivos originales ni se guarda nada.
@@ -20,7 +36,6 @@ archivos originales ni se guarda nada.
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable
@@ -42,25 +57,31 @@ from app.schemas.analysis import (
 )
 from app.services.column_semantics import SUSPECTED_MISSING_TOKENS
 from app.services.dataset_profiler import read_dataset
+from app.services.measure_hints import UNIT_TOKENS
+from app.services.operation_rules import ColumnMeta, grouping_columns, operation_problem, value_columns
+from app.services.value_parsing import (
+    GRANULARITY_LABELS,
+    coarser,
+    parse_decorated,
+    parse_number,
+    parse_periods,
+    period_labels,
+)
+
+__all__ = ["parse_number", "to_dates", "execute_analysis", "OPERATIONS"]
 
 # Filas máximas por resultado (una tabla más larga no es útil para revisar y pesa en la respuesta).
 MAX_RESULT_ROWS = 500
-# Si las fechas abarcan más de este número de meses, las series se agrupan por año.
-MAX_MONTHS_FOR_MONTHLY = 36
-# Formatos de fecha aceptados (se elige el que interpreta más valores).
-DATE_FORMATS = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%Y-%m", "%m/%Y", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M")
+# Si una serie tiene más períodos que esto, se agrupa con una granularidad más gruesa.
+MAX_PERIODS = 60
 MISSING_GROUP = "(sin dato)"
 # Histograma: regla de Sturges (k = ⌈log2 n⌉ + 1), con un máximo de intervalos legible.
 MAX_HISTOGRAM_BINS = 30
 # Dispersión: puntos máximos a mostrar y semilla fija para que el muestreo sea reproducible.
 MAX_SCATTER_POINTS = 2000
 SCATTER_SEED = 42
-
-# Patrones numéricos: "15000", "-3.5", "15.000" (miles), "1.234,56", "1,234.56".
-_THOUSANDS_DOT = re.compile(r"[-+]?\d{1,3}(?:\.\d{3})+")
-_THOUSANDS_COMMA = re.compile(r"[-+]?\d{1,3}(?:,\d{3})+")
-_PLAIN = re.compile(r"[-+]?\d+(?:[.,]\d+)?")
-_MIXED = re.compile(r"[-+]?\d{1,3}(?:[.,]\d{3})*[.,]\d+")
+# Unidades que no se suman entre filas aunque la medida sea aditiva en otras categorías.
+NON_ADDITIVE_UNITS = frozenset({"%", "‰", "porcentaje", "tasa", "indice", "índice", "puntos", "pp"})
 
 
 class PlanError(ValueError):
@@ -73,58 +94,34 @@ class OperationError(ValueError):
 
 # --- Conversión de texto a números y fechas -----------------------------------
 
-def parse_number(text: str) -> float | None:
-    """Convierte un texto a número aceptando separadores de miles y decimales.
-
-    "15000" → 15000; "15.000" → 15000 (miles); "1.234,56" → 1234.56;
-    "1,234.56" → 1234.56; "3,5" → 3.5. Devuelve None si no es un número.
-    """
-    value = text.strip().replace(" ", "")
-    if not value:
-        return None
-    if _THOUSANDS_DOT.fullmatch(value):
-        return float(value.replace(".", ""))
-    if _THOUSANDS_COMMA.fullmatch(value):
-        return float(value.replace(",", ""))
-    if _MIXED.fullmatch(value) and "." in value and "," in value:
-        # El último separador es el decimal; el otro, de miles.
-        decimal = "," if value.rfind(",") > value.rfind(".") else "."
-        thousands = "." if decimal == "," else ","
-        return float(value.replace(thousands, "").replace(decimal, "."))
-    if _PLAIN.fullmatch(value):
-        return float(value.replace(",", "."))
-    return None
-
-
-def to_numbers(texts: pd.Series) -> tuple[pd.Series, int]:
-    """Serie de texto → serie numérica (float). Devuelve también cuántos valores no se pudieron convertir.
+def to_numbers(texts: pd.Series) -> tuple[pd.Series, int, str | None]:
+    """Serie de texto → números (float), cantidad de valores no convertibles y unidad común de las celdas.
 
     Se convierte cada valor DISTINTO una sola vez (`map` sobre los únicos): es
     equivalente a recorrer todas las filas y mucho más rápido.
     """
     present = texts.dropna()
-    lookup = {value: parse_number(value) for value in present.unique()}
-    numbers = texts.map(lambda v: lookup.get(v) if isinstance(v, str) else None).astype("float64")
-    invalid = int(present.map(lambda v: lookup[v] is None).sum())
-    return numbers, invalid
+    lookup = {value: parse_decorated(value) for value in present.unique()}
+    numbers = texts.map(lambda v: lookup[v][0] if isinstance(v, str) else None).astype("float64")
+    invalid = int(present.map(lambda v: lookup[v][0] is None).sum())
+    units = {u for _, u in lookup.values() if u}
+    return numbers, invalid, (units.pop() if len(units) == 1 else None)
 
 
 def to_dates(texts: pd.Series) -> tuple[pd.Series, int]:
-    """Serie de texto → fechas (`pd.to_datetime` con formato explícito).
+    """Serie de texto → inicio de cada período o fecha, y cuántos valores no se pudieron leer."""
+    parsed = parse_periods(texts)
+    return parsed.starts, parsed.invalid
 
-    Se prueba cada formato de `DATE_FORMATS` y se usa el que interpreta más
-    valores; los que no coinciden quedan como NaT y se informan.
-    """
-    present = texts.dropna()
-    best, best_ok = pd.Series(pd.NaT, index=texts.index, dtype="datetime64[ns]"), -1
-    for fmt in DATE_FORMATS:
-        parsed = pd.to_datetime(texts, format=fmt, errors="coerce")
-        ok = int(parsed.notna().sum())
-        if ok > best_ok:
-            best, best_ok = parsed, ok
-        if ok == len(present):
-            break
-    return best, len(present) - max(best_ok, 0)
+
+def distinct_range(count: int) -> str:
+    if count <= 2:
+        return str(max(count, 1))
+    if count <= 10:
+        return "3-10"
+    if count <= 50:
+        return "11-50"
+    return "51-500" if count <= 500 else ">500"
 
 
 # --- Fuente preparada ------------------------------------------------------------
@@ -148,7 +145,8 @@ class PreparedSource:
         """Valores como texto, con las celdas faltantes como NaN.
 
         Política de faltantes: la celda vacía siempre es faltante. Los marcadores
-        como "NA" solo se tratan como faltantes si el usuario lo decidió en la revisión.
+        como "NA" solo se tratan como faltantes si el usuario lo decidió en la revisión,
+        igual que los valores que declaró como faltantes (por ejemplo, "-99").
         """
         key = ("texts", name)
         if key not in self._cache:
@@ -157,14 +155,34 @@ class PreparedSource:
             missing = series.eq("")
             if column.missing_markers == "treat_as_missing":
                 missing |= series.str.lower().isin(SUSPECTED_MISSING_TOKENS)
+            if column.missing_values:
+                missing |= series.isin({v.strip() for v in column.missing_values})
             self._cache[key] = series.mask(missing)
         return self._cache[key]
 
     def semantic(self, name: str) -> str | None:
         return self.mapping(name).semantic_type
 
+    def meta(self, names: list[str]) -> dict[str, ColumnMeta]:
+        """Metadatos para las reglas estadísticas (los mismos que ve la validación de la IA)."""
+        result = {}
+        for name in names:
+            column = self.columns.get(name)
+            if column is not None:
+                distinct = int(self.texts(name).nunique())
+                result[name] = ColumnMeta(
+                    column.semantic_type, column.additivity, tuple(column.split_by), distinct_range(distinct), distinct,
+                )
+        return result
+
     def unit(self, name: str) -> str | None:
-        return self.mapping(name).unit
+        """Unidad de la medida: la del usuario o la de las celdas. Nunca una única si depende de otra columna."""
+        column = self.mapping(name)
+        if column.split_by:
+            return None
+        if column.unit:
+            return column.unit
+        return self._cache.get(("numbers", name), (None, 0, None))[2]
 
     def numbers(self, name: str, warnings: list[str]) -> pd.Series:
         """Columna cuantitativa como números. Respeta la interpretación de la revisión."""
@@ -177,7 +195,7 @@ class PreparedSource:
         key = ("numbers", name)
         if key not in self._cache:
             self._cache[key] = to_numbers(self.texts(name))
-        numbers, invalid = self._cache[key]
+        numbers, invalid, _ = self._cache[key]
         if invalid:
             hint = "" if self.mapping(name).missing_markers != "pending" else " (hay marcadores de ausencia sin decidir en la revisión)"
             warnings.append(f"«{name}»: {invalid} valores no numéricos se excluyeron del cálculo{hint}.")
@@ -185,29 +203,31 @@ class PreparedSource:
             raise OperationError(f"«{name}» no tiene valores numéricos válidos.")
         return numbers
 
-    def group_keys(self, name: str, warnings: list[str]) -> tuple[pd.Series, str | None]:
-        """Etiquetas para agrupar por la columna `name`.
+    def group_keys(self, name: str, warnings: list[str]) -> tuple[pd.Series, str | None, bool]:
+        """Etiquetas para agrupar por la columna `name`: (etiquetas, granularidad, ¿se resumieron períodos?).
 
-        - Temporal con fechas → período "AAAA-MM" (o "AAAA" si abarca muchos años).
-        - Temporal con años enteros (por ejemplo, 2024) → el año.
-        - Otras (categóricas, texto, códigos) → el valor tal cual.
-        Los faltantes se agrupan como "(sin dato)".
+        - Temporal → período con su granularidad natural (año, semestre, trimestre o mes; los días,
+          por mes). Si hay demasiados períodos, se usa una granularidad más gruesa y se avisa.
+        - Otras (categóricas, códigos) → el valor tal cual.
+        Los faltantes y las fechas ilegibles se agrupan como "(sin dato)".
         """
         texts = self.texts(name)
         if self.semantic(name) != "temporal":
-            return texts.fillna(MISSING_GROUP), None
-        years = texts.str.fullmatch(r"\d{4}")
-        if years.fillna(False).sum() == texts.notna().sum():
-            return texts.fillna(MISSING_GROUP), "year"
-        dates, invalid = to_dates(texts)
-        if dates.notna().sum() == 0:
-            raise OperationError(f"«{name}» no tiene fechas válidas para agrupar por período.")
-        if invalid:
-            warnings.append(f"«{name}»: {invalid} fechas inválidas quedaron en el grupo «{MISSING_GROUP}».")
-        months = (dates.max().year - dates.min().year) * 12 + dates.max().month - dates.min().month + 1
-        period = "year" if months > MAX_MONTHS_FOR_MONTHLY else "month"
-        labels = dates.dt.strftime("%Y" if period == "year" else "%Y-%m")
-        return labels.where(dates.notna(), MISSING_GROUP), period
+            return texts.fillna(MISSING_GROUP), None, False
+        parsed = parse_periods(texts)
+        if parsed.granularity is None:
+            raise OperationError(f"«{name}» no tiene fechas ni períodos válidos (año, mes, trimestre o fecha) para agrupar.")
+        if parsed.invalid:
+            warnings.append(f"«{name}»: {parsed.invalid} fechas inválidas quedaron en el grupo «{MISSING_GROUP}».")
+        if parsed.mixed:
+            warnings.append(f"«{name}» mezcla períodos de distinta granularidad: se agrupó por {GRANULARITY_LABELS[parsed.granularity]}.")
+        natural = parsed.granularity
+        granularity = "month" if natural == "day" else natural
+        while (labels := period_labels(parsed.starts, granularity)).nunique() > MAX_PERIODS and coarser(granularity):
+            granularity = coarser(granularity)
+        if granularity not in (natural, "month"):
+            warnings.append(f"«{name}» tiene demasiados períodos: se agrupó por {GRANULARITY_LABELS[granularity]}.")
+        return labels.fillna(MISSING_GROUP), granularity, granularity != natural
 
 
 # --- Cálculos --------------------------------------------------------------------
@@ -220,7 +240,8 @@ def _clean(value) -> float | None:
 
 
 def _table(op: AIOperation, dimensions: list[str], measures: list[Measure], frame: pd.DataFrame,
-           rows_used: int, period: str | None, warnings: list[str]) -> OperationResult:
+           rows_used: int, period: str | None, warnings: list[str], *,
+           temporal_dimension: str | None = None, split_dimensions: list[str] | None = None) -> OperationResult:
     """Convierte un DataFrame de resultados (índice = grupos) en la tabla de respuesta."""
     rows: list[ResultRow] = []
     if dimensions:
@@ -235,43 +256,101 @@ def _table(op: AIOperation, dimensions: list[str], measures: list[Measure], fram
     return OperationResult(
         operation=op.operation, description=op.description, columns=op.columns, group_by=op.group_by,
         status="ok", dimensions=dimensions, measures=measures, rows=rows, period=period,
+        temporal_dimension=temporal_dimension, split_dimensions=split_dimensions or [],
         rows_used=rows_used, warnings=warnings,
     )
 
 
+def _non_additive_unit(values: tuple) -> bool:
+    """¿La categoría de una medida dependiente indica una unidad que no se suma (%, tasa, índice)?"""
+    for value in values:
+        words = set(str(value).lower().replace("(", " ").replace(")", " ").split())
+        if words & NON_ADDITIVE_UNITS or str(value).strip() in NON_ADDITIVE_UNITS:
+            return True
+    return False
+
+
 def _grouped(src: PreparedSource, op: AIOperation, group_cols: list[str], value_cols: list[str],
-             aggregate: str, warnings: list[str]) -> OperationResult:
+             aggregate: str, warnings: list[str], *, implicit: bool = False) -> OperationResult:
     """Agregación general: `aggregate` de cada columna de `value_cols`, por los grupos de `group_cols`.
 
-    Con aggregate="count" cuenta registros. Usa `DataFrame.groupby(...).agg(...)`:
-    agrupa las filas por las etiquetas y aplica la función a cada grupo.
+    `implicit=True` cuando la operación no pidió una función concreta (agrupación, serie
+    temporal): una medida no aditiva se promedia en lugar de sumarse. Con aggregate="count"
+    cuenta registros. Usa `DataFrame.groupby(...)`: agrupa las filas por las etiquetas y
+    aplica la función a cada grupo.
     """
-    data = pd.DataFrame(index=src.df.index)
-    period = None
-    for column in group_cols:
-        data[f"g:{column}"], column_period = src.group_keys(column, warnings)
-        period = period or column_period
-    measures: list[Measure] = []
-    if aggregate == "count":
-        data["v:registros"] = 1
-        measures.append(Measure(column="registros", aggregate="count"))
-    else:
+    # Columnas que definen qué mide cada valor: se agregan a la agrupación (nunca se combinan).
+    splits: list[str] = []
+    if aggregate != "count":
         for column in value_cols:
-            data[f"v:{column}"] = src.numbers(column, warnings)
-            measures.append(Measure(column=column, aggregate=aggregate, unit=src.unit(column)))
-    value_keys = [c for c in data.columns if c.startswith("v:")]
-    group_keys = [c for c in data.columns if c.startswith("g:")]
-    rows_used = int(len(data)) if aggregate == "count" else int(data[value_keys].notna().any(axis=1).sum())
+            for split in src.mapping(column).split_by:
+                if split not in group_cols and split not in splits:
+                    splits.append(split)
+        if splits:
+            names = ", ".join(f"«{s}»" for s in splits)
+            warnings.append(f"Se separó por {names}: cada categoría mide algo distinto y sus valores no se combinan entre sí.")
+    groups = list(group_cols) + splits
 
-    if group_keys:
-        result = data.groupby(group_keys, sort=True)[value_keys].agg(aggregate)
-    else:
-        result = data[value_keys].agg(aggregate).to_frame().T
-    return _table(op, group_cols, measures, result, rows_used, period, warnings)
+    data = pd.DataFrame(index=src.df.index)
+    period, temporal_dim, summarized = None, None, False
+    for column in groups:
+        data[f"g:{column}"], granularity, coarse = src.group_keys(column, warnings)
+        if granularity and period is None:
+            period, temporal_dim, summarized = granularity, column, coarse
+    group_keys = [f"g:{c}" for c in groups]
 
+    if aggregate == "count":
+        if group_keys:
+            result = data.groupby(group_keys, sort=True).size().to_frame("v:registros")
+        else:
+            result = pd.DataFrame({"v:registros": [len(data)]})
+        return _table(op, groups, [Measure(column="registros", aggregate="count")], result, int(len(data)), period, warnings,
+                      temporal_dimension=temporal_dim, split_dimensions=splits)
 
-def _quantitative(src: PreparedSource, columns: list[str]) -> list[str]:
-    return [c for c in columns if src.semantic(c) == "quantitative"]
+    measures: list[Measure] = []
+    columns: dict[str, pd.Series] = {}
+    used = pd.Series(False, index=data.index)
+    for column in value_cols:
+        numbers = src.numbers(column, warnings)
+        used |= numbers.notna()
+        mapping = src.mapping(column)
+        if mapping.split_by and mapping.unit:
+            warnings.append(f"«{column}» tiene unidades distintas según {', '.join(mapping.split_by)}: no se aplica la unidad única «{mapping.unit}».")
+        agg = aggregate
+        if aggregate == "sum" and mapping.additivity == "non_additive" and implicit:
+            agg = "mean"
+        if not group_keys:
+            value = getattr(numbers, agg)() if agg != "sum" else numbers.sum(min_count=1)
+            columns[f"v:{column}"] = pd.Series([value])
+            measures.append(Measure(column=column, aggregate=agg, unit=src.unit(column)))
+            continue
+        grouped = numbers.groupby([data[k] for k in group_keys], sort=True)
+        counts = grouped.count()
+        values = grouped.sum(min_count=1) if agg == "sum" else grouped.agg(agg)
+        averaged: list[str] = []
+        if agg == "sum" and splits:
+            # Categorías cuya unidad no se suma (por ejemplo, "%"): promedio si el grupo reúne varias filas.
+            split_positions = [groups.index(s) for s in splits]
+            means = grouped.mean()
+            for key in values.index:
+                key_tuple = key if isinstance(key, tuple) else (key,)
+                if counts[key] > 1 and _non_additive_unit(tuple(key_tuple[i] for i in split_positions)):
+                    values[key] = means[key]
+                    averaged.append(" / ".join(str(key_tuple[i]) for i in split_positions))
+        if averaged:
+            listed = ", ".join(sorted(set(averaged))[:5])
+            warnings.append(f"Para {listed} se informa el promedio y no la suma: sus valores son porcentajes, tasas o índices.")
+        if agg == "mean" and aggregate == "sum" and (counts > 1).any():
+            warnings.append(f"«{column}» no es aditiva (tasa, porcentaje, promedio o stock): se informa el promedio de cada grupo, no la suma.")
+        if summarized and mapping.additivity == "non_additive" and agg == "mean":
+            warnings.append(f"«{column}»: cada período agrupado muestra el promedio de los datos originales.")
+        if implicit and (counts <= 1).all():
+            agg = "value"  # cada grupo tiene un solo dato: es el valor tal cual, sin agregar
+        columns[f"v:{column}"] = values
+        measures.append(Measure(column=column, aggregate=agg, unit=src.unit(column)))
+    result = pd.DataFrame(columns)
+    return _table(op, groups, measures, result, int(used.sum()), period, warnings,
+                  temporal_dimension=temporal_dim, split_dimensions=splits)
 
 
 def op_count(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
@@ -282,64 +361,74 @@ def op_count(src: PreparedSource, op: AIOperation, warnings: list[str]) -> Opera
 def _simple_aggregate(aggregate: str) -> Callable:
     def run(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
         """Suma, promedio, mediana, mínimo o máximo de columnas cuantitativas (total o por grupos)."""
-        values = [c for c in op.columns if c not in op.group_by]
-        if not values:
-            raise OperationError("La operación no indica ninguna columna cuantitativa para calcular.")
+        values = value_columns(op.operation, op.columns, op.group_by, src.meta(op.columns + op.group_by))
         return _grouped(src, op, op.group_by, values, aggregate, warnings)
     return run
 
 
+def _groups_and_values(src: PreparedSource, op: AIOperation) -> tuple[list[str], list[str]]:
+    meta = src.meta(op.columns + op.group_by)
+    return (grouping_columns(op.operation, op.columns, op.group_by, meta),
+            value_columns(op.operation, op.columns, op.group_by, meta))
+
+
 def op_group_by(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
-    """Agrupación por categorías: suma de las columnas cuantitativas por grupo (o conteo si no hay)."""
-    groups = op.group_by or [c for c in op.columns if src.semantic(c) != "quantitative"]
-    if not groups:
-        raise OperationError("La agrupación no indica por qué columna agrupar.")
-    values = _quantitative(src, [c for c in op.columns if c not in groups])
-    ignored = [c for c in op.columns if c not in groups and c not in values]
-    if ignored:
-        warnings.append(f"No se agregan columnas no cuantitativas: {', '.join(ignored)}.")
-    return _grouped(src, op, groups, values, "sum" if values else "count", warnings)
+    """Agrupación por categorías: suma de las medidas por grupo (promedio si no son aditivas; conteo si no hay)."""
+    groups, values = _groups_and_values(src, op)
+    return _grouped(src, op, groups, values, "sum" if values else "count", warnings, implicit=True)
 
 
 def op_compare_groups(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
-    """Comparación entre grupos: total por grupo y su participación (%) sobre el total."""
+    """Comparación entre grupos: total por grupo y su participación (%) sobre el total.
+
+    Si la medida depende de otra columna (indicador, unidad), la participación se calcula
+    dentro de cada categoría de esa columna: nunca sobre un total que mezcle magnitudes.
+    """
     result = op_group_by(src, op, warnings)
     if result.rows and result.measures:
-        total = sum(row.values[0] or 0 for row in result.rows)
+        split_positions = [result.dimensions.index(s) for s in result.split_dimensions]
+        totals: dict[tuple, float] = {}
         for row in result.rows:
+            key = tuple(row.keys[i] for i in split_positions)
+            totals[key] = totals.get(key, 0.0) + (row.values[0] or 0)
+        for row in result.rows:
+            total = totals[tuple(row.keys[i] for i in split_positions)]
             row.values.append(round((row.values[0] or 0) / total * 100, 4) if total else None)
         result.measures.append(Measure(column=result.measures[0].column, aggregate="share_pct", unit="%"))
-        if len(result.rows) < 2:
+        groups = len(result.rows) / max(len(totals), 1)
+        if groups < 2:
             result.warnings.append("Hay un solo grupo: no hay con qué comparar.")
     return result
 
 
 def op_time_series(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
-    """Serie temporal: suma de las columnas cuantitativas por período (mes o año), en orden cronológico."""
-    candidates = op.group_by + [c for c in op.columns if c not in op.group_by]
-    temporal = [c for c in candidates if src.semantic(c) == "temporal"]
-    if not temporal:
-        raise OperationError("La serie temporal requiere una columna temporal (fecha, mes o año).")
-    groups = [temporal[0]] + [c for c in op.group_by if c != temporal[0]]
-    values = _quantitative(src, [c for c in op.columns if c not in groups])
-    return _grouped(src, op, groups, values, "sum" if values else "count", warnings)
+    """Serie temporal: medidas por período (con su granularidad natural), en orden cronológico."""
+    groups, values = _groups_and_values(src, op)
+    return _grouped(src, op, groups, values, "sum" if values else "count", warnings, implicit=True)
 
 
 def op_frequency(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
     """Frecuencias: cantidad de registros por cada valor (o combinación de valores)."""
     groups = op.group_by or op.columns
-    if not groups:
-        raise OperationError("Las frecuencias requieren al menos una columna.")
     return _grouped(src, op, groups, [], "count", warnings)
 
 
 def op_distinct_count(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
-    """Cantidad de valores distintos de cada columna (sin contar faltantes)."""
-    if not op.columns:
-        raise OperationError("La operación no indica columnas.")
-    counts = {f"v:{c}": src.texts(c).nunique() for c in op.columns}
-    measures = [Measure(column=c, aggregate="distinct_count") for c in op.columns]
-    return _table(op, [], measures, pd.DataFrame([counts]), int(len(src.df)), None, warnings)
+    """Cantidad de valores distintos de cada columna (sin contar faltantes), total o por grupos."""
+    values = [c for c in op.columns if c not in op.group_by]
+    measures = [Measure(column=c, aggregate="distinct_count") for c in values]
+    if not op.group_by:
+        counts = {f"v:{c}": src.texts(c).nunique() for c in values}
+        return _table(op, [], measures, pd.DataFrame([counts]), int(len(src.df)), None, warnings)
+    period, temporal_dim = None, None
+    keys = []
+    for column in op.group_by:
+        labels, granularity, _ = src.group_keys(column, warnings)
+        keys.append(labels)
+        if granularity and period is None:
+            period, temporal_dim = granularity, column
+    result = pd.DataFrame({f"v:{c}": src.texts(c).groupby(keys, sort=True).nunique() for c in values})
+    return _table(op, list(op.group_by), measures, result, int(len(src.df)), period, warnings, temporal_dimension=temporal_dim)
 
 
 def _number_label(value: float) -> str:
@@ -501,6 +590,10 @@ def run_operation(src: PreparedSource, op: AIOperation) -> OperationResult:
             raise OperationError(f"La operación «{op.operation}» todavía no está disponible en el motor de cálculo.")
         for column in op.columns + op.group_by:
             src.mapping(column)
+        # Mismas reglas que validaron el plan de la IA: última barrera antes de calcular.
+        problem = operation_problem(op.operation, op.columns, op.group_by, src.meta(op.columns + op.group_by))
+        if problem:
+            raise OperationError(problem[0].upper() + problem[1:] + ".")
         return runner(src, op, warnings)
     except OperationError as exc:
         return OperationResult(

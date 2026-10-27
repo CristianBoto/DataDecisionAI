@@ -70,7 +70,7 @@ def mandatory_case_reply(payload: dict) -> AIAssistantReply:
         "plans": [
             {"source_alias": "A", "title": "Evolución de indicadores por provincia",
              "rationale": "Permite comparar provincias a lo largo del tiempo.", "columns_needed": ["provincia", "anio", "indicador", "valor"],
-             "operations": [{"operation": "time_series", "columns": ["valor"], "group_by": ["provincia", "indicador"],
+             "operations": [{"operation": "time_series", "columns": ["anio", "valor"], "group_by": ["provincia", "indicador"],
                              "description": "Valor por año"}],
              "charts": [{"type": "line", "x": "anio", "y": "valor", "title": "Indicadores por año"}],
              "limitations": ["Los NA de valor están sin decidir."]},
@@ -427,8 +427,12 @@ def test_instructions_list_exactly_the_engine_catalog_and_the_rules():
     for absent in ("std", "correlation", "top_n", "box"):
         assert f"- {absent}:" not in INSTRUCTIONS
     # Responder la pregunta concreta, no repetir planes y explicar lo imposible en lugar de aproximarlo.
-    assert "Partí de la pregunta concreta" in INSTRUCTIONS
+    assert "Partí de la decisión que la persona quiere tomar y de su pregunta concreta" in INSTRUCTIONS
+    assert "no incluyas todas las disponibles" in INSTRUCTIONS
     assert "en lugar de repetirlo" in INSTRUCTIONS
+    # Medidas: no sumar lo no aditivo, respetar la dependencia (formato largo) y no inventar unidades.
+    assert 'additivity "non_additive": nunca uses sum' in INSTRUCTIONS
+    assert "split_by no vacío" in INSTRUCTIONS and "No inventes unidades" in INSTRUCTIONS
     assert "NO propongas un plan" in INSTRUCTIONS and "entrenar un modelo" in INSTRUCTIONS
     # ROC: sin etiqueta real binaria y puntuaciones de un modelo existente, explicar y pedir lo que falta.
     assert "etiqueta real binaria" in INSTRUCTIONS and "DataDecision AI no entrena modelos" in INSTRUCTIONS

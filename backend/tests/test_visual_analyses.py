@@ -9,7 +9,7 @@ import json
 import pytest
 
 from app.schemas.ai_context import AIContext
-from app.schemas.ai_plan import AIAssistantReply, AIPlan, validate_reply
+from app.schemas.ai_plan import AIAssistantReply, AIPlan, prune_reply, validate_reply
 from tests.ai_helpers import ORIGIN, FakeProvider, make_client, no_network, prepare, reply_for  # noqa: F401
 
 
@@ -209,8 +209,12 @@ def reply_with(operation):
     (op("histogram", ["x"], ["x"]), [{"name": "x", "format": "numeric", "semantic_type": "quantitative"}], "ninguna agrupación"),
 ])
 def test_impossible_visual_plans_are_discarded(operation, columns, fragment):
-    problems = validate_reply(reply_with(operation), context_with(*columns))
-    assert any(fragment in p for p in problems), problems
+    # Las columnas existen (la validación estricta no objeta nada); la operación imposible se quita
+    # del plan, y el plan, al quedar vacío, también. El motivo queda informado.
+    context = context_with(*columns)
+    assert validate_reply(reply_with(operation), context) == []
+    pruned, notes = prune_reply(reply_with(operation), context)
+    assert pruned.plans == [] and any(fragment in n for n in notes), notes
 
 
 def test_valid_visual_plans_pass_validation():
