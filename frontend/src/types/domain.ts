@@ -35,6 +35,8 @@ export type ColumnType = 'numeric' | 'text' | 'date' | 'boolean' | 'unknown'
 /** Rol estadístico estimado de la columna. Es una inferencia, nunca una certeza. */
 export type SemanticType = 'quantitative' | 'categorical' | 'identifier' | 'temporal' | 'text' | 'unknown'
 export type SemanticConfidence = 'high' | 'medium' | 'low'
+/** ¿Una medida se puede sumar entre filas (importes, cantidades) o no (tasas, %, promedios, stocks)? */
+export type Additivity = 'additive' | 'non_additive'
 
 export interface ColumnProfile {
   name: string
@@ -55,6 +57,16 @@ export interface ColumnProfile {
   /** Cantidad de valores distintos (puede ser null si no se calculó). */
   uniqueCount: number | null
   sampleValues: string[]
+  /** Sugerencias del backend sobre las medidas (solo columnas cuantitativas), con su motivo. */
+  unitSuggestion?: string | null
+  unitReason?: string | null
+  additivitySuggestion?: Additivity | null
+  additivityReason?: string | null
+  /** Columnas que definen qué mide cada valor (formato largo: indicador, unidad). */
+  splitBySuggestion?: string[]
+  splitReason?: string | null
+  /** Valores numéricos que podrían ser marcadores de ausencia (por ejemplo, -99). */
+  missingValueSuggestions?: string[]
 }
 
 export type IssueSeverity = 'info' | 'warning' | 'error'

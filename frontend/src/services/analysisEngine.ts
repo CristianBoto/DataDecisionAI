@@ -18,6 +18,12 @@ export interface ColumnMapping {
   semantic_type: string | null
   missing_markers: 'pending' | 'treat_as_missing' | 'valid_value' | null
   unit?: string | null
+  /** ¿Se puede sumar? (tasas, %, promedios y stocks no). */
+  additivity?: 'additive' | 'non_additive' | null
+  /** Columnas (nombres para la IA) que definen qué mide cada valor: nunca se combinan entre sí. */
+  split_by?: string[]
+  /** Valores declarados faltantes por el usuario. Viajan solo al backend, nunca a la IA. */
+  missing_values?: string[]
   /** Clase positiva elegida por el usuario (curva ROC). Viaja solo al backend, nunca a la IA. */
   positive_label?: string | null
 }
@@ -42,7 +48,10 @@ export interface OperationResult {
   dimensions: string[]
   measures: ResultMeasure[]
   rows: { keys: string[]; values: (number | null)[] }[]
-  period: 'month' | 'year' | null
+  period: 'day' | 'month' | 'quarter' | 'semester' | 'year' | null
+  /** Dimensión temporal (si hay) y dimensiones que definen qué se mide (indicador, unidad). */
+  temporal_dimension?: string | null
+  split_dimensions?: string[]
   rows_used: number | null
   /** Estadísticos de la operación: correlaciones (dispersión), AUC (ROC), intervalos (histograma). */
   stats?: Record<string, number | string | boolean | null> | null

@@ -41,7 +41,12 @@ describe('requisitos de cada paso', () => {
     expect(loaded.asistente.reason).toMatch(/confirmá la revisión/)
 
     const ready = stepAccess({ sources: [{} as never], reviewConfirmed: true, projectId: 'p1' })
-    expect(Object.values(ready).every((s) => s.available)).toBe(true)
+    expect([ready.cargar, ready.revisar, ready.asistente, ready.confirmar].every((s) => s.available)).toBe(true)
+    // Resultados: solo después de ejecutar el análisis.
+    expect(ready.resultados.available).toBe(false)
+    expect(ready.resultados.reason).toMatch(/ejecutá el análisis/)
+    const executed = stepAccess({ sources: [{} as never], reviewConfirmed: true, projectId: 'p1', analysisRun: {} as never })
+    expect(executed.resultados.available).toBe(true)
   })
 })
 

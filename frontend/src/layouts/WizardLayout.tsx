@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
-import { Check, ClipboardCheck, ClipboardList, Lock, MessagesSquare, Upload, X, type LucideIcon } from 'lucide-react'
+import { BarChart3, Check, ClipboardCheck, ClipboardList, Lock, MessagesSquare, Upload, X, type LucideIcon } from 'lucide-react'
 import { DemoBanner } from '@/components/DemoBanner'
 import { Logo } from '@/components/ui/Logo'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
@@ -11,6 +11,7 @@ const ICONS: Record<StepKey, LucideIcon> = {
   revisar: ClipboardList,
   asistente: MessagesSquare,
   confirmar: ClipboardCheck,
+  resultados: BarChart3,
 }
 
 export function WizardLayout() {

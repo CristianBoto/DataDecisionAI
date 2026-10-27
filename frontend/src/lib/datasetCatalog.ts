@@ -1,4 +1,4 @@
-import type { ColumnType, Dataset, DatasetProfile, ProfileOrigin, SemanticConfidence, SemanticType } from '@/types/domain'
+import type { Additivity, ColumnType, Dataset, DatasetProfile, ProfileOrigin, SemanticConfidence, SemanticType } from '@/types/domain'
 import { getCompleteness, getSuspectedMissingCells } from './profileMetrics'
 
 /**
@@ -36,6 +36,10 @@ export interface CatalogColumn {
   missing: number
   suspectedMissing: number
   distinct: number | null
+  /** Sugerencias sobre la medida (columnas cuantitativas); la persona las confirma en la revisión. */
+  unitSuggestion?: string | null
+  additivitySuggestion?: Additivity | null
+  splitBySuggestion?: string[]
 }
 
 export interface CatalogSource {
@@ -111,6 +115,9 @@ export function buildDatasetCatalog(sources: AnalysisSource[]): DatasetCatalog {
       missing: column.nullCount,
       suspectedMissing: column.suspectedMissingCount ?? 0,
       distinct: column.uniqueCount,
+      unitSuggestion: column.unitSuggestion ?? null,
+      additivitySuggestion: column.additivitySuggestion ?? null,
+      splitBySuggestion: column.splitBySuggestion ?? [],
     })),
   }))
 

@@ -1,4 +1,4 @@
-import type { ColumnType, DataQualityIssue, DatasetProfile, SemanticConfidence, SemanticType } from '@/types/domain'
+import type { Additivity, ColumnType, DataQualityIssue, DatasetProfile, SemanticConfidence, SemanticType } from '@/types/domain'
 import { inferColumnType } from '@/lib/csv'
 import { ApiError } from './errors'
 import { HttpClient } from './httpClient'
@@ -23,6 +23,14 @@ export interface BackendColumnProfile {
   semantic_type?: SemanticType
   semantic_confidence?: SemanticConfidence
   semantic_reason?: string
+  // Sugerencias sobre las medidas (motor generalista).
+  unit_suggestion?: string | null
+  unit_reason?: string | null
+  additivity_suggestion?: Additivity | null
+  additivity_reason?: string | null
+  split_by_suggestion?: string[]
+  split_reason?: string | null
+  missing_value_suggestions?: string[]
 }
 
 export interface BackendProfileResponse {
@@ -91,6 +99,13 @@ export function adaptBackendProfile(response: BackendProfileResponse, datasetId:
       semanticReason: column.semantic_reason,
       uniqueCount: column.distinct,
       sampleValues: column.examples,
+      unitSuggestion: column.unit_suggestion ?? null,
+      unitReason: column.unit_reason ?? null,
+      additivitySuggestion: column.additivity_suggestion ?? null,
+      additivityReason: column.additivity_reason ?? null,
+      splitBySuggestion: column.split_by_suggestion ?? [],
+      splitReason: column.split_reason ?? null,
+      missingValueSuggestions: column.missing_value_suggestions ?? [],
     })),
     previewRows: response.preview,
     issues: response.warnings.map(toIssue),

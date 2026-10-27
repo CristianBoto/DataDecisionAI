@@ -96,7 +96,7 @@ export function ReviewPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow={<Badge tone="blue">Paso 2 de 4</Badge>}
+        eyebrow={<Badge tone="blue">Paso 2 de 5</Badge>}
         title="Revisá tus datos y la privacidad"
         description="Confirmá cómo se interpretan tus columnas y qué información mínima se compartiría con la IA. Por defecto se aceptan las sugerencias: corregí solo lo que haga falta."
         actions={

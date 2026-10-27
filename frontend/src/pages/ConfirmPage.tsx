@@ -88,7 +88,7 @@ function AIPlanConfirmation() {
       <PageHeader
         eyebrow={
           <>
-            <Badge tone="blue">Paso 4 de 4</Badge>
+            <Badge tone="blue">Paso 4 de 5</Badge>
             <Badge tone="green" icon={<CheckCircle2 className="size-3" aria-hidden />}>
               {approved.length === 1 ? '1 plan aprobado' : `${approved.length} planes aprobados`}
             </Badge>
@@ -271,7 +271,7 @@ export function ConfirmPage() {
       <PageHeader
         eyebrow={
           <>
-            <Badge tone="blue">Paso 4 de 4</Badge>
+            <Badge tone="blue">Paso 4 de 5</Badge>
             <FeasibilityBadge value={p.feasibility} />
             {p.isDemo && <DemoBadge label="Propuesta simulada" />}
           </>

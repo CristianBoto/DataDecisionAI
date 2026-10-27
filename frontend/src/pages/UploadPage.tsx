@@ -15,6 +15,7 @@ import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useService } from '@/hooks/useService'
 import { appConfig } from '@/lib/config'
 import { buildDatasetCatalog, MAX_SOURCES, MAX_TOTAL_UPLOAD_MB } from '@/lib/datasetCatalog'
+import { SAMPLE_DATASETS, sampleFile } from '@/lib/sampleDatasets'
 import { validateDatasetFile } from '@/lib/fileValidation'
 import { getErrorMessage } from '@/services'
 
@@ -52,6 +53,9 @@ export function UploadPage() {
     session.projectName || (session.dataset ? `Análisis de ${session.dataset.name}` : ''),
   )
   const [nameTouched, setNameTouched] = useState(false)
+  const [sampleKey, setSampleKey] = useState(SAMPLE_DATASETS[0].key)
+  // Empezar de nuevo descarta trabajo: primero se pide confirmación.
+  const [confirmingReset, setConfirmingReset] = useState(false)
 
   const usesBackendProfiling = service.profiling === 'backend'
   const uploading = items.some((i) => i.status === 'uploading')
@@ -193,6 +197,7 @@ export function UploadPage() {
   }
 
   function handleResetAll() {
+    setConfirmingReset(false)
     session.sources.forEach((s) => service.discardDataset(s.dataset.id))
     session.reset()
     setItems([])
@@ -217,7 +222,7 @@ export function UploadPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow={<Badge tone="blue">Paso 1 de 4</Badge>}
+        eyebrow={<Badge tone="blue">Paso 1 de 5</Badge>}
         title="Cargá tu dataset"
         description={`Subí hasta ${MAX_SOURCES} archivos CSV o Excel con datos en forma de tabla: una fila por registro y una columna por variable. Cada archivo se analiza por separado.`}
       />
@@ -250,6 +255,42 @@ export function UploadPage() {
               </p>
               <Button variant="outline" size="sm" disabled={busy} onClick={() => void handleDemoDataset()}>
                 Usar dataset de ejemplo
+              </Button>
+            </div>
+          )}
+
+          {usesBackendProfiling && items.length < MAX_SOURCES && (
+            <div className="flex flex-col gap-3 rounded-2xl border border-violet-200 bg-violet-50/60 p-4 sm:flex-row sm:items-end" role="group" aria-label="Datos sintéticos de prueba">
+              <FlaskConical className="size-5 shrink-0 text-violet-700" aria-hidden />
+              <label className="flex flex-1 flex-col gap-1 text-sm text-violet-950">
+                <span>
+                  ¿Querés probar sin tus datos? Cargá un <strong>dataset sintético de prueba</strong> (datos inventados,
+                  identificados en el nombre del archivo). Se procesa igual que un archivo propio.
+                </span>
+                <select
+                  aria-label="Dataset sintético de prueba"
+                  value={sampleKey}
+                  onChange={(e) => setSampleKey(e.target.value as typeof sampleKey)}
+                  className="h-9 rounded-lg border border-violet-300 bg-white px-2 text-sm"
+                >
+                  {SAMPLE_DATASETS.map((d) => (
+                    <option key={d.key} value={d.key}>
+                      {d.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs text-violet-800">{SAMPLE_DATASETS.find((d) => d.key === sampleKey)?.description}</span>
+              </label>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  const sample = SAMPLE_DATASETS.find((d) => d.key === sampleKey)
+                  if (sample) void handleFiles([sampleFile(sample)])
+                }}
+              >
+                Cargar datos de prueba
               </Button>
             </div>
           )}
@@ -371,9 +412,28 @@ export function UploadPage() {
                 <Button type="submit" className="w-full" disabled={uploading} iconRight={<ArrowRight className="size-4" />}>
                   Continuar con la revisión
                 </Button>
-                <Button variant="ghost" className="w-full" icon={<RefreshCw className="size-4" />} disabled={busy} onClick={handleResetAll}>
-                  Empezar de nuevo
-                </Button>
+                {confirmingReset ? (
+                  <Alert
+                    tone="warning"
+                    title="¿Empezar de nuevo?"
+                    action={
+                      <span className="flex gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setConfirmingReset(false)}>
+                          Cancelar
+                        </Button>
+                        <Button size="sm" onClick={handleResetAll}>
+                          Sí, descartar
+                        </Button>
+                      </span>
+                    }
+                  >
+                    Se descartan los archivos cargados y, si los hay, la revisión, la conversación y los resultados.
+                  </Alert>
+                ) : (
+                  <Button variant="ghost" className="w-full" icon={<RefreshCw className="size-4" />} disabled={busy} onClick={() => setConfirmingReset(true)}>
+                    Empezar de nuevo
+                  </Button>
+                )}
               </form>
             </Card>
           )}

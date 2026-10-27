@@ -72,7 +72,7 @@ function engine(response: ExecutionResponse = analysisFixture as ExecutionRespon
   return { execute: vi.fn(async () => response) } satisfies AnalysisEngineClient
 }
 
-async function reachConfirm(analysisEngine: AnalysisEngineClient | null, ai = gateway()) {
+async function reachConfirm(analysisEngine: AnalysisEngineClient | null, ai = gateway(), unit?: string) {
   const user = userEvent.setup()
   const router = createMemoryRouter(routes, { initialEntries: ['/analisis/cargar'] })
   render(
@@ -88,6 +88,8 @@ async function reachConfirm(analysisEngine: AnalysisEngineClient | null, ai = ga
   await user.selectOptions(screen.getByLabelText('Significado de fecha (fuente A)'), 'temporal')
   await user.selectOptions(screen.getByLabelText('Significado de sector (fuente A)'), 'categorical')
   await user.selectOptions(screen.getByLabelText('Significado de ventas (fuente A)'), 'quantitative')
+  // La unidad de cada medida se decide en la revisión (y viaja a la IA como metadato, a Pandas para mostrarla).
+  if (unit) await user.type(screen.getByLabelText('Unidad de ventas (fuente A)'), unit)
   await completeReview(user, 'Ventas por mes y por sector')
   await screen.findByText(/IA real · gpt-6-luna/)
   await startConversation(user)
@@ -115,11 +117,10 @@ describe('«Ejecutar análisis» (motor Pandas)', () => {
 
   it('envía el archivo original y los planes aprobados, y muestra los valores de Pandas', async () => {
     const motor = engine()
-    const { user, ai } = await reachConfirm(motor)
+    const { user, ai, router } = await reachConfirm(motor, gateway(), 'ARS')
     const iaCalls = ai.authorize.mock.calls.length
     await confirm(user)
 
-    await user.type(screen.getByLabelText('Unidad de ventas (fuente A)'), 'ARS')
     await user.click(screen.getByRole('button', { name: 'Ejecutar análisis' }))
     await waitFor(() => expect(motor.execute).toHaveBeenCalledTimes(1))
 
@@ -129,9 +130,9 @@ describe('«Ejecutar análisis» (motor Pandas)', () => {
       {
         alias: 'A',
         columns: [
-          { name: 'fecha', original: 'fecha', semantic_type: 'temporal', missing_markers: null, unit: null, positive_label: null },
-          { name: 'sector', original: 'sector', semantic_type: 'categorical', missing_markers: null, unit: null, positive_label: null },
-          { name: 'ventas', original: 'ventas', semantic_type: 'quantitative', missing_markers: null, unit: 'ARS', positive_label: null },
+          { name: 'fecha', original: 'fecha', semantic_type: 'temporal', missing_markers: null, unit: null, additivity: null, split_by: [], missing_values: [], positive_label: null },
+          { name: 'sector', original: 'sector', semantic_type: 'categorical', missing_markers: null, unit: null, additivity: null, split_by: [], missing_values: [], positive_label: null },
+          { name: 'ventas', original: 'ventas', semantic_type: 'quantitative', missing_markers: null, unit: 'ARS', additivity: null, split_by: [], missing_values: [], positive_label: null },
         ],
       },
     ])
@@ -156,6 +157,25 @@ describe('«Ejecutar análisis» (motor Pandas)', () => {
     expect(failed).toHaveTextContent('No se pudo calcular: «sector» es una columna categórica')
     expect(within(results).getByText('Parcial')).toBeInTheDocument()
     expect(screen.getByText('La IA no participó del cálculo ni recibió los datos.')).toBeInTheDocument()
+
+    // Sección de resultados (paso 5): estado global y cómo seguir.
+    expect(router.state.location.pathname).toBe('/analisis/resultados')
+    expect(screen.getByRole('heading', { name: 'Resultados del análisis' })).toBeInTheDocument()
+    expect(screen.getByText('Análisis parcial')).toBeInTheDocument()
+    expect(screen.getByText(/3 de 4 operaciones calculadas/)).toBeInTheDocument()
+    const next = screen.getByRole('region', { name: 'Cómo seguir' })
+    expect(within(next).getByRole('button', { name: 'Modificar análisis' })).toBeInTheDocument()
+    expect(within(next).getByRole('button', { name: 'Volver a ejecutar' })).toBeInTheDocument()
+
+    // «Nuevo análisis» pide confirmación antes de descartar el trabajo.
+    await user.click(within(next).getByRole('button', { name: 'Nuevo análisis' }))
+    expect(within(next).getByText(/Se descartarán los archivos cargados/)).toBeInTheDocument()
+    await user.click(within(next).getByRole('button', { name: 'Cancelar' }))
+    expect(router.state.location.pathname).toBe('/analisis/resultados')
+    await user.click(within(next).getByRole('button', { name: 'Nuevo análisis' }))
+    await user.click(within(next).getByRole('button', { name: 'Sí, descartar y empezar' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/analisis/cargar'))
+    expect(screen.queryByText('ventas.csv')).not.toBeInTheDocument()
   })
 
   it('los resultados se conservan al ir al asistente y volver, sin recalcular', async () => {
@@ -164,10 +184,18 @@ describe('«Ejecutar análisis» (motor Pandas)', () => {
     await confirm(user)
     await user.click(screen.getByRole('button', { name: 'Ejecutar análisis' }))
     await screen.findByRole('region', { name: 'Resultados: Ventas por mes y sector' })
-    await act(() => router.navigate('/analisis/asistente'))
+    // «Modificar análisis» vuelve al asistente conservando archivos, revisión, conversación y resultados.
+    await user.click(screen.getByRole('button', { name: 'Modificar análisis' }))
+    await screen.findByRole('region', { name: 'Plan propuesto: Ventas por mes y sector' })
     await act(() => router.navigate('/analisis/confirmar'))
+    await user.click(await screen.findByRole('button', { name: 'Ver resultados' }))
     expect(await screen.findByRole('region', { name: 'Resultados: Ventas por mes y sector' })).toBeInTheDocument()
     expect(motor.execute).toHaveBeenCalledTimes(1)
+    // El archivo sigue en la sesión: se puede volver a ejecutar sin cargarlo de nuevo.
+    await act(() => router.navigate('/analisis/cargar'))
+    const list = await screen.findByRole('list', { name: 'Fuentes del análisis' })
+    expect(within(list).getAllByLabelText('Archivo listo')).toHaveLength(1)
+    expect(within(list).getAllByText('ventas.csv').length).toBeGreaterThan(0)
   })
 
   it('muestra los errores del backend de forma comprensible', async () => {
@@ -208,7 +236,7 @@ describe('pedido de ejecución (correspondencia de columnas)', () => {
       includeSize: false,
       columns: {
         sector: { include: true, name: 'rubro' },
-        ventas: { include: true, name: 'ventas', semanticType: 'quantitative', markers: 'treat_as_missing' },
+        ventas: { include: true, name: 'ventas', semanticType: 'quantitative', markers: 'treat_as_missing', unit: 'ARS', additivity: 'additive', splitBy: ['sector', 'cuit'], missingValues: [' -99', ''] },
         cuit: { include: false, name: 'cuit' },
       },
     }],
@@ -218,12 +246,13 @@ describe('pedido de ejecución (correspondencia de columnas)', () => {
   it('usa el nombre compartido con la IA, la columna real, las decisiones de la revisión y excluye lo no compartido', () => {
     const file = new File(['x'], 'ventas.csv')
     const sources = [{ dataset, profile, file }] as unknown as AnalysisSource[]
-    const prepared = buildExecution(sources, review, plans, { 'A:ventas': 'ARS' })
+    const prepared = buildExecution(sources, review, plans)
     expect(prepared.problem).toBeNull()
     expect(prepared.files.A).toBe(file)
+    // La dependencia usa el nombre compartido («rubro») y descarta columnas no compartidas («cuit»).
     expect(prepared.request.sources[0].columns).toEqual([
-      { name: 'rubro', original: 'sector', semantic_type: 'categorical', missing_markers: null, unit: null, positive_label: null },
-      { name: 'ventas', original: 'ventas', semantic_type: 'quantitative', missing_markers: 'treat_as_missing', unit: 'ARS', positive_label: null },
+      { name: 'rubro', original: 'sector', semantic_type: 'categorical', missing_markers: null, unit: null, additivity: null, split_by: [], missing_values: [], positive_label: null },
+      { name: 'ventas', original: 'ventas', semantic_type: 'quantitative', missing_markers: 'treat_as_missing', unit: 'ARS', additivity: 'additive', split_by: ['rubro'], missing_values: ['-99'], positive_label: null },
     ])
   })
 

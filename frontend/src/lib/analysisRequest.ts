@@ -1,5 +1,6 @@
 import type { AnalysisReviewState } from '@/context/sessionContext'
 import type { SessionAIPlan } from '@/lib/aiPlans'
+import { effectiveMeasure, sharedName } from '@/lib/aiContext'
 import { buildDatasetCatalog, type AnalysisSource } from '@/lib/datasetCatalog'
 import type { ColumnMapping, ExecutionRequest } from '@/services/analysisEngine'
 
@@ -19,13 +20,13 @@ export const unitKey = (alias: string, column: string) => `${alias}:${column}`
  * Arma el pedido para el motor de análisis a partir de la revisión confirmada:
  * para cada fuente usada por los planes aprobados, la correspondencia entre el
  * nombre que vio la IA y la columna real, con la interpretación y la decisión
- * sobre faltantes que tomó el usuario. Mismas reglas que `buildAIContext`.
+ * sobre faltantes que tomó el usuario, y la unidad, aditividad y dependencia de cada
+ * medida decididas en la revisión. Mismas reglas que `buildAIContext`.
  */
 export function buildExecution(
   sources: AnalysisSource[],
   review: AnalysisReviewState,
   plans: SessionAIPlan[],
-  units: Record<string, string> = {},
   /** Clase positiva por columna de etiquetas (clave `unitKey`), elegida por el usuario para la curva ROC. */
   positives: Record<string, string> = {},
 ): PreparedExecution {
@@ -46,13 +47,17 @@ export function buildExecution(
         .filter((c) => decisions?.columns[c.name]?.include)
         .map((c) => {
           const decision = decisions?.columns[c.name]
-          const name = (decision?.name ?? c.name).trim() || c.name
+          const name = sharedName(decisions, c.name)
+          const measure = effectiveMeasure(c, decisions)
           return {
             name,
             original: c.name,
             semantic_type: decision?.semanticType ?? c.semanticType ?? null,
             missing_markers: decision?.markers ?? null,
-            unit: units[unitKey(alias, name)]?.trim() || null,
+            unit: measure?.unit ?? null,
+            additivity: measure?.additivity ?? null,
+            split_by: (measure?.splitBy ?? []).map((original) => sharedName(decisions, original)),
+            missing_values: (decision?.missingValues ?? []).map((v) => v.trim()).filter(Boolean).slice(0, 20),
             positive_label: positives[unitKey(alias, name)] || null,
           }
         })
@@ -66,22 +71,6 @@ export function buildExecution(
       ? `Falta el archivo original de la fuente ${missingFiles.join(', ')}. El navegador lo guarda solo en memoria: volvé a cargarlo en «Cargar datos».`
       : null,
   }
-}
-
-/** Columnas cuantitativas que usan los planes (para indicar su unidad, opcional). */
-export function quantitativeColumns(prepared: PreparedExecution, plans: SessionAIPlan[]): { alias: string; name: string }[] {
-  const result: { alias: string; name: string }[] = []
-  for (const source of prepared.request.sources) {
-    const usedNames = new Set(
-      plans
-        .filter((p) => p.plan.source_alias === source.alias)
-        .flatMap((p) => [...p.plan.columns_needed, ...p.plan.operations.flatMap((op) => [...op.columns, ...op.group_by])]),
-    )
-    for (const column of source.columns) {
-      if (column.semantic_type === 'quantitative' && usedNames.has(column.name)) result.push({ alias: source.alias, name: column.name })
-    }
-  }
-  return result
 }
 
 /**

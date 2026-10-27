@@ -7,7 +7,7 @@ import type { AnalysisSessionState } from '@/context/sessionContext'
  * solo con los requisitos cumplidos.
  */
 
-export type StepKey = 'cargar' | 'revisar' | 'asistente' | 'confirmar'
+export type StepKey = 'cargar' | 'revisar' | 'asistente' | 'confirmar' | 'resultados'
 
 export interface WizardStep {
   key: StepKey
@@ -20,6 +20,7 @@ export const WIZARD_STEPS: WizardStep[] = [
   { key: 'revisar', path: '/analisis/revisar', label: 'Revisar' },
   { key: 'asistente', path: '/analisis/asistente', label: 'Conversar' },
   { key: 'confirmar', path: '/analisis/confirmar', label: 'Confirmar' },
+  { key: 'resultados', path: '/analisis/resultados', label: 'Resultados' },
 ]
 
 export interface StepAccess {
@@ -28,7 +29,8 @@ export interface StepAccess {
   reason?: string
 }
 
-type SessionForSteps = Pick<AnalysisSessionState, 'sources' | 'reviewConfirmed' | 'projectId'>
+type SessionForSteps = Pick<AnalysisSessionState, 'sources' | 'reviewConfirmed' | 'projectId'> &
+  Partial<Pick<AnalysisSessionState, 'analysisRun'>>
 
 export function stepAccess(session: SessionForSteps): Record<StepKey, StepAccess> {
   const hasSources = session.sources.length > 0
@@ -39,5 +41,8 @@ export function stepAccess(session: SessionForSteps): Record<StepKey, StepAccess
     revisar: hasSources ? { available: true } : { available: false, reason: 'Primero cargá al menos un archivo.' },
     asistente: reviewed ? { available: true } : { available: false, reason: blockedUntilReview },
     confirmar: reviewed ? { available: true } : { available: false, reason: blockedUntilReview },
+    resultados: reviewed && session.analysisRun
+      ? { available: true }
+      : { available: false, reason: 'Primero ejecutá el análisis en «Confirmar».' },
   }
 }

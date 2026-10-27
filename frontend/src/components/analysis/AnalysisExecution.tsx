@@ -1,44 +1,38 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Play } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { BarChart3, Play } from 'lucide-react'
 import { Spinner } from '@/components/ui/Feedback'
-import { AnalysisResults } from '@/components/analysis/AnalysisResults'
 import { Alert } from '@/components/ui/Alert'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useAnalysisEngine } from '@/hooks/useService'
 import type { SessionAIPlan } from '@/lib/aiPlans'
-import { buildExecution, quantitativeColumns, rocLabelColumns, unitKey } from '@/lib/analysisRequest'
-import { buildDatasetCatalog } from '@/lib/datasetCatalog'
+import { buildExecution, rocLabelColumns, unitKey } from '@/lib/analysisRequest'
 import { getErrorMessage } from '@/services'
+
+/** Ruta de la sección de resultados (paso 5). */
+export const RESULTS_PATH = '/analisis/resultados'
 
 /**
  * «Ejecutar análisis» (Fase 4A). Solo aparece después de la confirmación final.
  * Envía los archivos originales y los planes aprobados al motor Pandas del
  * backend. No consulta a la IA: es una acción distinta de autorizar envíos a OpenAI.
+ * La unidad, la aditividad y la dependencia de cada medida se decidieron en la revisión.
+ * Al terminar, lleva a la sección «Resultados».
  */
 export function AnalysisExecution({ plans }: { plans: SessionAIPlan[] }) {
   const session = useAnalysisSession()
   const engine = useAnalysisEngine()
-  const [units, setUnits] = useState<Record<string, string>>({})
+  const navigate = useNavigate()
   const [positives, setPositives] = useState<Record<string, string>>({})
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const review = session.review
   const prepared = useMemo(
-    () => (review ? buildExecution(session.sources, review, plans, units, positives) : null),
-    [session.sources, review, plans, units, positives],
+    () => (review ? buildExecution(session.sources, review, plans, positives) : null),
+    [session.sources, review, plans, positives],
   )
-  const fileNames = useMemo(
-    () => Object.fromEntries(buildDatasetCatalog(session.sources).sources.map((s) => [s.alias, s.fileName])),
-    [session.sources],
-  )
-  // Al terminar el cálculo, el dashboard queda a la vista sin navegar a otra pantalla.
-  const dashboardRef = useRef<HTMLDivElement>(null)
-  const lastRun = session.analysisRun
-  useEffect(() => {
-    if (lastRun) dashboardRef.current?.scrollIntoView?.({ block: 'start' })
-  }, [lastRun])
 
   if (!engine) {
     return (
@@ -48,7 +42,6 @@ export function AnalysisExecution({ plans }: { plans: SessionAIPlan[] }) {
     )
   }
   if (!prepared) return null
-  const quantities = quantitativeColumns(prepared, plans)
   const rocLabels = rocLabelColumns(prepared, plans, session.sources)
   const missingPositive = rocLabels.filter(({ alias, name }) => !positives[unitKey(alias, name)])
   const blocker =
@@ -63,9 +56,9 @@ export function AnalysisExecution({ plans }: { plans: SessionAIPlan[] }) {
     setError(null)
     try {
       session.setAnalysisRun(await engine.execute(prepared.request, prepared.files))
+      navigate(RESULTS_PATH)
     } catch (err) {
       setError(getErrorMessage(err))
-    } finally {
       setRunning(false)
     }
   }
@@ -75,29 +68,10 @@ export function AnalysisExecution({ plans }: { plans: SessionAIPlan[] }) {
       <Card className="space-y-3 p-5" role="region" aria-label="Ejecutar análisis">
         <p className="text-sm font-semibold text-slate-900">Ejecutar el análisis con Pandas</p>
         <p className="text-xs text-slate-600">
-          Tus archivos se vuelven a enviar a tu backend local, se calculan en memoria las operaciones de los planes aprobados
-          y se descartan. No se consulta a la IA ni se envían datos a OpenAI.
+          Tus archivos se vuelven a enviar a tu backend, se calculan en memoria las operaciones de los planes aprobados
+          y se descartan. No se consulta a la IA ni se envían datos a OpenAI. Las unidades y qué medidas se pueden sumar
+          son las que confirmaste en «Revisar».
         </p>
-        {quantities.length > 0 && (
-          <fieldset className="flex flex-wrap gap-3">
-            <legend className="mb-1 text-xs font-medium text-slate-700">Unidad de las cantidades (opcional)</legend>
-            {quantities.map(({ alias, name }) => {
-              const key = unitKey(alias, name)
-              return (
-                <label key={key} className="flex items-center gap-1.5 text-xs text-slate-600">
-                  {name} (fuente {alias})
-                  <input
-                    value={units[key] ?? ''}
-                    onChange={(e) => setUnits((u) => ({ ...u, [key]: e.target.value.slice(0, 16) }))}
-                    placeholder="ARS, USD, kg…"
-                    aria-label={`Unidad de ${name} (fuente ${alias})`}
-                    className="w-24 rounded-md border border-slate-300 px-2 py-1 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 focus:outline-none"
-                  />
-                </label>
-              )
-            })}
-          </fieldset>
-        )}
         {rocLabels.length > 0 && (
           <fieldset className="flex flex-wrap gap-3">
             <legend className="mb-1 text-xs font-medium text-slate-700">Clase positiva de la curva ROC</legend>
@@ -138,16 +112,22 @@ export function AnalysisExecution({ plans }: { plans: SessionAIPlan[] }) {
         )}
         {blocker && <Alert tone="warning">{blocker}</Alert>}
         {error && <Alert tone="error">{error}</Alert>}
-        <Button icon={<Play className="size-4" />} onClick={() => void run()} loading={running} disabled={Boolean(blocker)}>
-          {session.analysisRun ? 'Volver a ejecutar análisis' : 'Ejecutar análisis'}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button icon={<Play className="size-4" />} onClick={() => void run()} loading={running} disabled={Boolean(blocker)}>
+            {session.analysisRun ? 'Volver a ejecutar análisis' : 'Ejecutar análisis'}
+          </Button>
+          {session.analysisRun && !running && (
+            <Button variant="outline" icon={<BarChart3 className="size-4" />} onClick={() => navigate(RESULTS_PATH)}>
+              Ver resultados
+            </Button>
+          )}
+        </div>
       </Card>
       {running && (
         <Card className="p-6">
           <Spinner label="Calculando con Pandas…" />
         </Card>
       )}
-      <div ref={dashboardRef}>{lastRun && !running && <AnalysisResults run={lastRun} fileNames={fileNames} />}</div>
     </div>
   )
 }

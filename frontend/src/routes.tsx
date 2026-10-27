@@ -6,6 +6,7 @@ import { AssistantPage } from '@/pages/AssistantPage'
 import { ConfirmPage } from '@/pages/ConfirmPage'
 import { HomePage } from '@/pages/HomePage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
+import { ResultsPage } from '@/pages/ResultsPage'
 import { ReviewPage } from '@/pages/ReviewPage'
 import { UploadPage } from '@/pages/UploadPage'
 import { DatasetPage } from '@/pages/workspace/DatasetPage'
@@ -27,6 +28,8 @@ export const routes: RouteObject[] = [
       { path: 'revisar', element: <ReviewPage /> },
       { path: 'asistente', element: <AssistantPage /> },
       { path: 'confirmar', element: <ConfirmPage /> },
+      // Resultados del motor Pandas: estado completo o parcial, dashboard y cómo seguir.
+      { path: 'resultados', element: <ResultsPage /> },
     ],
   },
   {

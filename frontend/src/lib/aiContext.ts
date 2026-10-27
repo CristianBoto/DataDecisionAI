@@ -1,5 +1,5 @@
-import type { ColumnType, SemanticConfidence, SemanticType } from '@/types/domain'
-import type { DatasetCatalog } from './datasetCatalog'
+import type { Additivity, ColumnType, SemanticConfidence, SemanticType } from '@/types/domain'
+import type { CatalogColumn, DatasetCatalog } from './datasetCatalog'
 
 /**
  * Contexto mínimo para la futura IA (Fase 3B.1).
@@ -32,6 +32,10 @@ export interface AIColumnContext {
   missing_markers: MarkerDecision | null
   /** Valores distintos por rango (aproximado: nunca la cantidad exacta ni los valores). */
   distinct_values?: DistinctRange | null
+  /** Solo en medidas: unidad, si se puede sumar y de qué columnas (nombres para la IA) depende su significado. */
+  unit?: string | null
+  additivity?: Additivity | null
+  split_by?: string[]
 }
 
 export type DistinctRange = '1' | '2' | '3-10' | '11-50' | '51-500' | '>500'
@@ -86,6 +90,42 @@ export interface ColumnReview {
   semanticType?: SemanticType | null
   /** Decisión sobre marcadores como "NA"; null si la columna no los tiene. */
   markers?: MarkerDecision | null
+  /** Medidas: unidad elegida (undefined = aceptar la sugerida; "" = sin unidad). */
+  unit?: string
+  /** Medidas: ¿se puede sumar? (undefined o null = aceptar la sugerencia). */
+  additivity?: Additivity | null
+  /** Medidas: columnas (nombres originales) que definen qué mide cada valor (undefined = aceptar la sugerencia). */
+  splitBy?: string[]
+  /**
+   * Valores que la persona declara faltantes (por ejemplo, "-99"). Son valores del dataset:
+   * viajan solo al backend al ejecutar, nunca a la IA.
+   */
+  missingValues?: string[]
+}
+
+/** Decisiones efectivas sobre una medida: lo que eligió la persona o, si no tocó nada, la sugerencia. */
+export interface EffectiveMeasure {
+  unit: string | null
+  additivity: Additivity | null
+  /** Nombres originales de las columnas de las que depende (solo columnas compartidas). */
+  splitBy: string[]
+}
+
+type MeasureColumn = Pick<CatalogColumn, 'name' | 'semanticType' | 'unitSuggestion' | 'additivitySuggestion' | 'splitBySuggestion'>
+
+export function effectiveMeasure(column: MeasureColumn, review: SourceReview | undefined): EffectiveMeasure | null {
+  const decision = review?.columns[column.name]
+  if ((decision?.semanticType ?? column.semanticType) !== 'quantitative') return null
+  const unit = decision?.unit === undefined ? (column.unitSuggestion ?? null) : decision.unit.trim() || null
+  const splitBy = (decision?.splitBy ?? column.splitBySuggestion ?? []).filter(
+    (name) => name !== column.name && (review?.columns[name]?.include ?? false),
+  )
+  return { unit, additivity: decision?.additivity ?? column.additivitySuggestion ?? null, splitBy }
+}
+
+/** Nombre con el que la IA ve una columna (el original o el elegido en la revisión). */
+export function sharedName(review: SourceReview | undefined, original: string): string {
+  return (review?.columns[original]?.name ?? original).trim() || original
 }
 
 export interface SourceReview {
@@ -145,8 +185,9 @@ export function buildAIContext(
         .map((c) => {
           const decision = sourceReview?.columns[c.name]
           const corrected = Boolean(decision?.format || decision?.semanticType)
+          const measure = effectiveMeasure(c, sourceReview)
           return {
-            name: (decision?.name ?? c.name).trim() || c.name,
+            name: sharedName(sourceReview, c.name),
             format: decision?.format ?? c.format,
             semantic_type: decision?.semanticType ?? c.semanticType ?? null,
             // Si el usuario corrigió, la confianza automática ya no aplica.
@@ -154,6 +195,12 @@ export function buildAIContext(
             user_corrected: corrected,
             missing_markers: decision?.markers ?? null,
             distinct_values: distinctRange(c.distinct),
+            // Metadatos de la medida (no valores): se ven en la revisión de privacidad antes de enviar.
+            ...(measure && {
+              unit: measure.unit,
+              additivity: measure.additivity,
+              split_by: measure.splitBy.map((name) => sharedName(sourceReview, name)),
+            }),
           }
         })
       if (columns.length === 0) return null // una fuente sin columnas autorizadas no se menciona

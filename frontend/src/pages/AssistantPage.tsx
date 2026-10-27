@@ -293,7 +293,7 @@ export function AssistantPage() {
       <PageHeader
         eyebrow={
           <>
-            <Badge tone="blue">Paso 3 de 4</Badge>
+            <Badge tone="blue">Paso 3 de 5</Badge>
             {realMode ? (
               aiReady ? (
                 <Badge tone="green" icon={<ShieldCheck className="size-3" aria-hidden />}>

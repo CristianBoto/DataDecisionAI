@@ -1,10 +1,10 @@
 import { useMemo } from 'react'
 import { AlertTriangle, Calculator, CheckCircle2, Database, Info, XCircle } from 'lucide-react'
-import { ChartCard } from '@/components/charts/ChartCard'
+import { ChartViewCard } from '@/components/analysis/ChartView'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
-import { buildDashboard, measureLabel, operationTitle, type DashboardKpi, type PlanDashboard } from '@/lib/dashboard'
+import { buildDashboard, dimensionName, measureLabel, operationTitle, type DashboardKpi, type PlanDashboard } from '@/lib/dashboard'
 import type { ExecutionResponse, OperationResult, ResultMeasure } from '@/services/analysisEngine'
 
 const number = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 })
@@ -23,7 +23,7 @@ const MAX_TABLE_POINTS = 100
 function OperationTable({ op }: { op: OperationResult }) {
   const title = operationTitle(op)
   const rows = op.operation === 'scatter' ? op.rows.slice(0, MAX_TABLE_POINTS) : op.rows
-  const dimensions = op.dimensions.map((d, i) => (op.period && i === 0 ? `${d} (${op.period === 'month' ? 'mes' : 'año'})` : d))
+  const dimensions = op.dimensions.map((d) => dimensionName(op, d))
   return (
     <div className="rounded-xl border border-slate-200 p-3 text-sm" role="group" aria-label={`Resultado: ${title}`}>
       <p className="font-medium text-slate-800">{title}</p>
@@ -112,9 +112,9 @@ function PlanSection({ plan }: { plan: PlanDashboard }) {
         </div>
       )}
 
-      {plan.charts.length > 0 && (
+      {plan.views.length > 0 && (
         <div className="grid gap-4 lg:grid-cols-2">
-          {plan.charts.map((chart) => <ChartCard key={chart.id} chart={chart} />)}
+          {plan.views.map((view) => <ChartViewCard key={view.id} view={view} />)}
         </div>
       )}
 
@@ -168,7 +168,7 @@ export function AnalysisResults({ run, fileNames = {} }: { run: ExecutionRespons
     <section aria-label="Resultados del análisis" className="space-y-5">
       <div className="flex flex-wrap items-center gap-2">
         <Calculator className="size-5 text-blue-700" aria-hidden />
-        <h2 className="text-lg font-semibold text-slate-900">Dashboard del análisis</h2>
+        <h2 className="text-lg font-semibold text-slate-900">Dashboard</h2>
         <Badge tone="blue">Calculado con Pandas</Badge>
       </div>
       {nothing && (
