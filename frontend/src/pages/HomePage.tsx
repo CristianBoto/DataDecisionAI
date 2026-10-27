@@ -76,7 +76,9 @@ function ProductIllustration() {
 }
 
 export function HomePage() {
-  const { mode } = useService()
+  const { mode, profiling } = useService()
+  // Con backend todo es real: el aviso de la demo pública (datos ficticios, solo en el navegador) no aplica.
+  const publicDemo = mode === 'demo' && profiling !== 'backend'
   return (
     <>
       {/* Hero */}
@@ -120,7 +122,7 @@ export function HomePage() {
                 </li>
               ))}
             </ul>
-            {mode === 'demo' && (
+            {publicDemo && (
               <div className="mt-8 max-w-xl rounded-xl bg-amber-400/10 p-4 text-sm text-amber-100 ring-1 ring-amber-300/30">
                 <p className="flex items-center gap-2 font-semibold text-amber-200">
                   <FlaskConical className="size-4" aria-hidden /> Sobre esta demo pública
