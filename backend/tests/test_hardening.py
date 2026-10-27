@@ -17,8 +17,9 @@ from fastapi.testclient import TestClient
 import app.api.routes.datasets as datasets_route
 import app.services.dataset_profiler as profiler
 from app.core.config import get_settings
-from app.main import MULTIPART_OVERHEAD_BYTES, create_app
+from app.main import MULTIPART_OVERHEAD_BYTES
 from app.services.dataset_profiler import MAX_FILE_BYTES, DatasetProfileError, profile_dataset
+from tests.ai_helpers import make_client
 
 LIMIT = MAX_FILE_BYTES + MULTIPART_OVERHEAD_BYTES
 ALLOWED = "http://localhost:5173"
@@ -27,7 +28,13 @@ PATH = "/api/datasets/profile"
 
 @pytest.fixture
 def client() -> TestClient:
-    return TestClient(create_app())
+    return make_client()[0]
+
+
+def authed_app():
+    """Aplicación con una sesión válida: (app, encabezado ASGI de autorización)."""
+    client, app = make_client()
+    return app, (b"authorization", client.headers["Authorization"].encode())
 
 
 def post(client: TestClient, content: bytes, name: str = "datos.csv", origin: str | None = ALLOWED):
@@ -89,7 +96,7 @@ def test_local_tools_without_origin_still_work(client):
 @pytest.mark.parametrize("origin", ["https://sitio-externo.example", "null", "http://localhost:9999"])
 def test_unauthorized_origin_is_rejected_before_processing(client, monkeypatch, origin):
     called = []
-    monkeypatch.setattr(datasets_route, "profile_dataset", lambda *a: called.append(a))
+    monkeypatch.setattr(datasets_route, "profile_dataset", lambda *a, **k: called.append(a))
     response = post(client, b"a,b\n1,2\n", origin=origin)
     assert response.status_code == 403
     assert response.json()["detail"] == "Origen no autorizado para cargar archivos."
@@ -106,7 +113,7 @@ def test_origin_control_only_applies_to_uploads(client):
 
 
 def test_unauthorized_origin_is_rejected_without_reading_the_body():
-    app = create_app()
+    app, _ = authed_app()
     body, ctype = multipart(b"a,b\n1,2\n")
     status, _, consumed = asyncio.run(
         call_asgi(app, [body], [(b"origin", b"null"), (b"content-type", ctype)])
@@ -118,9 +125,9 @@ def test_unauthorized_origin_is_rejected_without_reading_the_body():
 # --- B4 · Tamaño ---------------------------------------------------------------
 
 def test_declared_oversize_is_rejected_without_reading_the_body():
-    app = create_app()
+    app, auth = authed_app()
     status, body, consumed = asyncio.run(
-        call_asgi(app, [b"x" * 1024], [(b"content-length", str(LIMIT + 1).encode()), (b"content-type", b"multipart/form-data; boundary=x")])
+        call_asgi(app, [b"x" * 1024], [auth, (b"content-length", str(LIMIT + 1).encode()), (b"content-type", b"multipart/form-data; boundary=x")])
     )
     assert status == 413
     assert b"supera el tama" in body
@@ -128,8 +135,8 @@ def test_declared_oversize_is_rejected_without_reading_the_body():
 
 
 def test_invalid_content_length_is_rejected():
-    app = create_app()
-    status, _, consumed = asyncio.run(call_asgi(app, [b"x"], [(b"content-length", b"abc")]))
+    app, auth = authed_app()
+    status, _, consumed = asyncio.run(call_asgi(app, [b"x"], [auth, (b"content-length", b"abc")]))
     assert status == 400
     assert consumed == 0
 
@@ -148,11 +155,12 @@ def test_real_bytes_are_limited_when_content_length_is_missing_or_false(monkeypa
     body, ctype = multipart(b"a\n" + b"1\n" * (16 * 1024 * 1024))  # ≈ 32 MB
     chunk = 1024 * 1024
     chunks = [body[i : i + chunk] for i in range(0, len(body), chunk)]
-    headers = [(b"content-type", ctype), (b"origin", ALLOWED.encode())]
+    app, auth = authed_app()
+    headers = [auth, (b"content-type", ctype), (b"origin", ALLOWED.encode())]
     if declared is not None:
         headers.append((b"content-length", declared))
 
-    status, response_body, consumed = asyncio.run(call_asgi(create_app(), chunks, headers))
+    status, response_body, consumed = asyncio.run(call_asgi(app, chunks, headers))
     assert status == 413
     assert "La solicitud supera" in response_body.decode()
     assert consumed <= LIMIT + chunk  # se dejó de leer apenas se superó el límite
@@ -243,7 +251,7 @@ def test_malformed_files_return_controlled_errors(client, name, content):
 def test_profiling_runs_outside_the_event_loop(client, monkeypatch):
     seen = []
 
-    def fake_profile(content, filename):
+    def fake_profile(content, filename, **limits):
         try:
             asyncio.get_running_loop()
             seen.append("en el bucle de eventos")
@@ -256,11 +264,11 @@ def test_profiling_runs_outside_the_event_loop(client, monkeypatch):
     assert seen == ["en un hilo"]
 
 
-def test_concurrent_profiles_are_limited_and_counter_is_released(client, monkeypatch):
-    monkeypatch.setattr(datasets_route, "_active_profiles", datasets_route.MAX_CONCURRENT_PROFILES)
-    busy = post(client, b"a\n1\n")
+def test_concurrent_profiles_are_limited_and_counter_is_released(client):
+    gate = client.app.state.profile_gate
+    with gate.slot("otro-visitante-1"), gate.slot("otro-visitante-2"):  # cupo global ocupado
+        busy = post(client, b"a\n1\n")
     assert busy.status_code == 429
-    monkeypatch.setattr(datasets_route, "_active_profiles", 0)
     assert post(client, b"a\n1\n").status_code == 200
     assert post(client, b"", name="vacio.csv").status_code == 422
-    assert datasets_route._active_profiles == 0
+    assert gate.active == 0

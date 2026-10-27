@@ -7,6 +7,9 @@ Middleware ASGI puro (no BaseHTTPMiddleware) porque necesita envolver `receive`:
   sitio *lea* la respuesta; este control impide que el backend *procese* la
   carga. Las herramientas locales sin `Origin` (curl, pruebas) siguen
   funcionando. No es autenticación.
+- Sesión: si se indica `authenticate`, una solicitud sin token de sesión válido
+  se rechaza con 401 ANTES de leer el cuerpo (FastAPI lee los formularios antes
+  de resolver las dependencias, así que el control en el endpoint llegaría tarde).
 - B4 · Tamaño: si `Content-Length` supera el límite, 413 inmediato. Además se
   cuentan los bytes realmente recibidos: si el encabezado falta o miente, la
   lectura se corta al superar el límite (Starlette cierra y borra el archivo
@@ -15,7 +18,7 @@ Middleware ASGI puro (no BaseHTTPMiddleware) porque necesita envolver `receive`:
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
@@ -37,6 +40,7 @@ class UploadGuardMiddleware:
         max_body_bytes: int,
         allowed_origins: Iterable[str],
         origin_message: str = "Origen no autorizado para cargar archivos.",
+        authenticate: Callable[[str], bool] | None = None,
     ) -> None:
         self.app = app
         self.paths = frozenset(paths)
@@ -45,6 +49,7 @@ class UploadGuardMiddleware:
         self.max_body_bytes = max_body_bytes
         self.allowed_origins = frozenset(allowed_origins)
         self.origin_message = origin_message
+        self.authenticate = authenticate
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if not self._applies(scope):
@@ -56,6 +61,16 @@ class UploadGuardMiddleware:
         if origin is not None and origin not in self.allowed_origins:
             await JSONResponse({"detail": self.origin_message}, status_code=403)(scope, receive, send)
             return
+
+        if self.authenticate is not None:
+            scheme, _, token = headers.get("authorization", "").partition(" ")
+            if scheme.lower() != "bearer" or not self.authenticate(token.strip()):
+                await JSONResponse(
+                    {"detail": "La sesión no es válida o venció. Ingresá de nuevo."},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )(scope, receive, send)
+                return
 
         declared = headers.get("content-length")
         if declared is not None:

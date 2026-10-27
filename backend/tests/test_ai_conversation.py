@@ -127,12 +127,12 @@ def test_budget_and_request_limits_still_apply_with_a_permission():
     client, app = make_client(ai_enabled=True, provider=provider, max_requests=2)
     cid = start_conversation(client)["conversation_id"]
     assert send(client, cid, {**context(), "message": "uno"}).status_code == 200
-    assert send(client, cid, {**context(), "message": "dos"}).status_code == 429  # límite de la sesión del servidor
+    assert send(client, cid, {**context(), "message": "dos"}).status_code == 429  # límite diario del visitante
 
     client, app = make_client(ai_enabled=True, provider=FakeProvider(), budget_usd=0.0016)  # alcanza para un envío (máx. ≈ USD 0,0014) y no para dos
     cid = start_conversation(client)["conversation_id"]
     response = send(client, cid, {**context(), "message": "otra"})
-    assert response.status_code == 402 and "Presupuesto local insuficiente" in response.json()["detail"]
+    assert response.status_code == 402 and "Presupuesto insuficiente en tu cuota" in response.json()["detail"]
 
 
 def test_context_size_limit_applies_with_a_permission():
@@ -148,7 +148,10 @@ def test_disabling_ai_revokes_the_permission():
     client, app = make_client(ai_enabled=True, provider=provider)
     cid = start_conversation(client)["conversation_id"]
     disabled, _ = make_client(ai_enabled=False, provider=provider)
+    # Mismo visitante y mismas conversaciones, con la IA deshabilitada.
     disabled.app.state.ai_conversations = app.state.ai_conversations
+    disabled.app.state.auth = app.state.auth
+    disabled.headers["Authorization"] = client.headers["Authorization"]
     assert send(disabled, cid, {**context(), "message": "Hola"}).status_code == 403
     assert send(client, cid, {**context(), "message": "Hola"}).status_code == 404
 
@@ -186,23 +189,24 @@ def test_unauthorized_origins_cannot_use_or_revoke_conversations():
 def test_simultaneous_messages_in_the_same_conversation_are_not_allowed():
     store = AIConversationStore()
     boundary = boundary_hash(AIContext.model_validate(context()))
-    cid = store.create(boundary, 60)
-    with store.use(cid, boundary, 10):
+    cid = store.create(boundary, 60, "u1")
+    with store.use(cid, boundary, 10, "u1"):
         with pytest.raises(AIGatewayError) as caught:
-            with store.use(cid, boundary, 10):
+            with store.use(cid, boundary, 10, "u1"):
                 pass
         assert caught.value.status_code == 409
-    with store.use(cid, boundary, 10):  # al terminar, se libera
+    with store.use(cid, boundary, 10, "u1"):  # al terminar, se libera
         pass
 
 
-def test_concurrent_requests_cannot_overspend_the_budget():
-    """Varias conversaciones a la vez: la reserva previa impide superar el presupuesto."""
+def test_concurrent_requests_cannot_overspend_the_budget(tmp_path):
+    """Seis visitantes a la vez: la reserva previa impide superar el presupuesto global."""
     import time
 
     from app.core.config import Settings
     from app.services.ai_budget import AIBudget
     from app.services.ai_gateway import AIPlanStore, estimate_request, send_in_conversation
+    from app.services.database import Database
 
     class SlowProvider(FakeProvider):
         def send(self, ctx, settings):
@@ -212,27 +216,29 @@ def test_concurrent_requests_cannot_overspend_the_budget():
     settings = Settings(_env_file=None, ai_enabled=True, openai_api_key="sk-prueba-falsa")
     body = AIContext.model_validate({**context(), "message": "x"})
     _, max_cost = estimate_request(body, settings)
-    import tempfile
-    from pathlib import Path
-
-    budget = AIBudget(Path(tempfile.mkdtemp()) / "ai_usage.json", max_cost * 4.5, 25)  # alcanza para 4 a costo máximo
+    budget = AIBudget(  # el global alcanza para 4 a costo máximo; cada cuota, de sobra
+        Database(tmp_path / "uso.db"), budget_usd=max_cost * 4.5, user_budget_usd=1.0, user_daily_requests=25,
+        global_daily_requests=100,
+    )
     store, plans, provider = AIConversationStore(), AIPlanStore(), SlowProvider()
     boundary = boundary_hash(body)
     results = []
 
-    def worker():
-        cid = store.create(boundary, 600)
+    def worker(owner):
+        cid = store.create(boundary, 600, owner)
         try:
-            send_in_conversation(store, provider, budget, plans, settings=settings, conversation_id=cid, context=body)
+            send_in_conversation(
+                store, provider, budget, plans, settings=settings, conversation_id=cid, context=body, owner=owner
+            )
             results.append(200)
         except AIGatewayError as exc:
             results.append(exc.status_code)
 
-    threads = [threading.Thread(target=worker) for _ in range(6)]
+    threads = [threading.Thread(target=worker, args=(f"visitante-{i}",)) for i in range(6)]
     for t in threads:
         t.start()
     for t in threads:
         t.join(timeout=10)
     assert sorted(results) == [200, 200, 200, 200, 402, 402]
     assert len(provider.received) == 4
-    assert budget.spent_usd <= budget.budget_usd
+    assert budget.global_spent_usd() <= budget.budget_usd

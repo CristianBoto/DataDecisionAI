@@ -536,9 +536,10 @@ def run_plan(plan_id: str, plan: AIPlan, sources: dict[str, PreparedSource]) -> 
                       operations=operations, charts=charts, warnings=list(plan.limitations))
 
 
-def prepare_source(alias: str, content: bytes, filename: str, columns: list[ColumnMapping]) -> PreparedSource:
+def prepare_source(alias: str, content: bytes, filename: str, columns: list[ColumnMapping], *,
+                   max_bytes: int | None = None, max_cells: int | None = None) -> PreparedSource:
     """Lee el archivo (mismos controles que el perfilado) y verifica la correspondencia de columnas."""
-    df, *_ = read_dataset(content, filename)
+    df, *_ = read_dataset(content, filename, max_bytes=max_bytes, max_cells=max_cells)
     mapping = {c.name: c for c in columns}
     absent = sorted({c.original for c in columns} - set(df.columns))
     if absent:
@@ -547,13 +548,15 @@ def prepare_source(alias: str, content: bytes, filename: str, columns: list[Colu
 
 
 def execute_analysis(request: ExecutionRequest, plans: list[tuple[str, AIPlan]],
-                     files: dict[str, tuple[bytes, str]]) -> dict:
+                     files: dict[str, tuple[bytes, str]], *, max_bytes: int | None = None,
+                     max_cells: int | None = None) -> dict:
     """Punto de entrada del motor: planes aprobados + archivos + correspondencias → resultados."""
     mappings = {s.alias: s.columns for s in request.sources}
     sources: dict[str, PreparedSource] = {}
     for alias, (content, filename) in files.items():
         if alias in mappings:
-            sources[alias] = prepare_source(alias, content, filename, mappings[alias])
+            sources[alias] = prepare_source(alias, content, filename, mappings[alias],
+                                            max_bytes=max_bytes, max_cells=max_cells)
     results = [run_plan(plan_id, plan, sources) for plan_id, plan in plans]
     return ExecutionResponse(
         executed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),

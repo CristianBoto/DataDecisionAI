@@ -6,10 +6,13 @@ DataDecision AI se usa de dos formas con **el mismo código**:
 |-----------|----------------|------------|--------|
 | **A. Demo pública** | Solo el frontend en modo DEMO (Cloudflare Pages, gratis) | Cualquier persona que quiera conocer la herramienta | ✅ Lista para publicar |
 | **B. Instalación privada** | Frontend + backend FastAPI en una computadora o servidor interno | Una empresa u organización, con sus propios datos | 🟡 Documentada; el backend todavía es un esqueleto |
+| **C. Beta pública con acceso por invitación** | Frontend en Cloudflare Pages + backend FastAPI con HTTPS y disco persistente | Invitados (por ejemplo, docentes), con funcionalidad real | 🟡 Preparada en el código; **todavía no desplegada** |
 
 ---
 
 ## A. Demo pública en Cloudflare Pages
+
+> **Reemplazada por la sección C.** La versión pública pasa a ser la aplicación real con acceso por invitación. Desde las correcciones de seguridad, la compilación en Cloudflare Pages **falla** con `VITE_DEMO_MODE=true` (o sin definir): antes del próximo `git push` a `main`, configurá las variables de la sección C o el despliegue automático fallará (el sitio ya publicado sigue funcionando hasta que una compilación nueva tenga éxito). Esta sección queda como registro histórico.
 
 **Publicada:** https://datadecisionai.pages.dev
 
@@ -159,7 +162,7 @@ Estos controles **no están implementados** y son necesarios antes de usar datos
 
 | Control | Estado |
 |---------|--------|
-| Autenticación de usuarios y permisos | ❌ Pendiente |
+| Autenticación de usuarios y permisos | 🟡 Acceso por invitación con sesión (sección C); sin roles |
 | HTTPS en la red interna | ❌ Pendiente (configuración del servidor) |
 | Cifrado de archivos y base de datos en reposo | ❌ Pendiente |
 | Políticas de retención y borrado de datasets | ❌ Pendiente |
@@ -167,6 +170,79 @@ Estos controles **no están implementados** y son necesarios antes de usar datos
 | Validación de contenido de archivos (fórmulas maliciosas, tamaño, codificación) | 🟡 Solo validación preliminar en el frontend |
 | Control de qué datos se envían a OpenAI y consentimiento explícito | ❌ Pendiente |
 | Copias de seguridad de SQLite | ❌ Pendiente |
-| Límites de uso y tiempos de espera de la IA | ❌ Pendiente |
+| Límites de uso y tiempos de espera de la IA | ✅ Presupuesto global, cuotas por visitante y tiempo máximo (ver [SEGURIDAD.md](SEGURIDAD.md)) |
 
 Ya existe: secretos fuera del repositorio (`.env` ignorado), clave de OpenAI prevista solo en el backend, CORS restringido por configuración y sin almacenamiento de archivos en el navegador.
+
+---
+
+## C. Beta pública con acceso por invitación (FastAPI + Cloudflare Pages)
+
+La misma aplicación que en `localhost` (Pandas, OpenAI y dashboards), protegida por invitación. Controles y pruebas: [AUDITORIA_SEGURIDAD.md](AUDITORIA_SEGURIDAD.md), sección 6. **Todavía no se desplegó.**
+
+### Backend
+
+Requisitos de la plataforma: HTTPS incluido, **una sola instancia** y un **disco persistente** (en Render, un *Persistent Disk* montado, por ejemplo, en `/var/data`; no todos los planes lo incluyen y sin él el disco se borra en cada despliegue).
+
+Variables (los secretos, en el gestor de secretos de la plataforma, nunca en archivos versionados):
+
+```
+ENVIRONMENT=production
+FORWARDED_IP_HOPS=1
+DATABASE_URL=sqlite:////var/data/datadecision.db
+PERSISTENT_STORAGE_CONFIRMED=true
+CORS_ORIGINS=https://datadecisionai.pages.dev
+TURNSTILE_SECRET_KEY=<secreto>
+TURNSTILE_EXPECTED_HOSTNAME=datadecisionai.pages.dev
+OPENAI_API_KEY=<secreto>
+AI_ENABLED=true
+AI_BUDGET_USD=2
+AI_USER_BUDGET_USD=0.10
+AI_USER_DAILY_REQUESTS=15
+AI_GLOBAL_DAILY_REQUESTS=150
+MAX_UPLOAD_MB=10
+MAX_DATASET_CELLS=1000000
+```
+
+Comando de inicio (desde `backend/`):
+
+```
+uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --no-proxy-headers
+```
+
+- `--workers 1`: los límites por IP y los almacenes en memoria son de un solo proceso.
+- **Proxy de confianza (`FORWARDED_IP_HOPS=1`):** el proxy HTTPS de la plataforma agrega a la derecha de `X-Forwarded-For` la IP que vio. El backend toma **esa** entrada, no la primera, que la escribe el visitante y podría falsificar para esquivar el límite por IP. Por eso no se usa `--forwarded-allow-ips="*"` y se desactiva el manejo de uvicorn (`--no-proxy-headers`). Si delante hubiera otro proxy propio (por ejemplo, Cloudflare con proxy activado), el valor pasa a 2.
+- **HTTPS obligatorio:** en producción se rechaza (403) todo pedido cuyo `X-Forwarded-Proto` no sea `https`, salvo `/api/health` (control de salud interno).
+- **Disco:** la carpeta de `DATABASE_URL` debe existir antes de arrancar (el disco montado). En producción la aplicación no la crea: si falta, no arranca.
+- Si falta algo de lo anterior (Turnstile con su dominio, CORS https, disco confirmado, proxy), el backend **no arranca** y explica qué falta.
+
+Invitaciones, desde la consola del servidor:
+
+```
+python -m app.cli invite --label "Docente" --days 14
+python -m app.cli list
+python -m app.cli revoke <id>
+```
+
+Además, configurar un **límite de gasto del proyecto en OpenAI Platform** como última barrera.
+
+### Frontend (Cloudflare Pages)
+
+Variables de compilación:
+
+```
+VITE_DEMO_MODE=false
+VITE_API_BASE_URL=https://<backend>
+VITE_TURNSTILE_SITE_KEY=<clave del sitio, pública>
+```
+
+La build genera `dist/_headers` con la CSP (`connect-src` solo hacia `VITE_API_BASE_URL`), HSTS, `nosniff` y `X-Frame-Options: DENY`. En Turnstile, el widget debe autorizar el dominio `datadecisionai.pages.dev`.
+
+En Cloudflare Pages (`CF_PAGES=1`) la compilación **se corta** si `VITE_DEMO_MODE` no es `false`, si `VITE_API_BASE_URL` no es `https://` (o apunta a localhost) o si falta `VITE_TURNSTILE_SITE_KEY`. Así el modo DEMO no puede quedar activo por accidente en la versión pública.
+
+### Verificación después de desplegar
+
+- `https://<backend>/docs` y `/openapi.json` responden 404.
+- `https://<backend>/api/ai/status` sin sesión responde 401.
+- La respuesta de la página incluye `Content-Security-Policy`.
+- Ingresar con un código de prueba, perfilar un CSV sintético y cerrar sesión.

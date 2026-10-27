@@ -1,5 +1,6 @@
 import { FlaskConical } from 'lucide-react'
 import { useService } from '@/hooks/useService'
+import { SessionControls } from '@/components/auth/AccessGate'
 
 /** Franja fija que recuerda el alcance de la demo pública. */
 export function DemoBanner() {
@@ -11,6 +12,7 @@ export function DemoBanner() {
       <div role="note" className="bg-sky-100 px-4 py-1.5 text-center text-xs font-medium text-sky-950">
         <strong>Ejecución con backend:</strong> datos, IA y cálculos reales (OpenAI y Pandas) · sin respuestas ni
         resultados simulados
+        <SessionControls />
       </div>
     )
   }

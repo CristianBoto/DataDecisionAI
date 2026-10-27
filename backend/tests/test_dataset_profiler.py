@@ -2,11 +2,8 @@ from io import BytesIO
 
 import pandas as pd
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from app.api.routes.datasets import router
 from app.services.dataset_profiler import DatasetProfileError, profile_dataset
+from tests.ai_helpers import make_client
 
 
 def test_csv_separator_semicolon_and_leading_zeros():
@@ -49,18 +46,14 @@ def test_rejects_bad_files(name, content):
 
 
 def test_endpoint_upload_csv():
-    api = FastAPI()
-    api.include_router(router, prefix="/api")
-    client = TestClient(api)
+    client, _ = make_client()
     response = client.post("/api/datasets/profile", files={"file": ("ventas.csv", b"mes,ventas\nenero,100\n", "text/csv")})
     assert response.status_code == 200
     assert response.json()["row_count"] == 1
 
 
 def test_endpoint_rejects_pdf():
-    api = FastAPI()
-    api.include_router(router, prefix="/api")
-    client = TestClient(api)
+    client, _ = make_client()
     response = client.post("/api/datasets/profile", files={"file": ("archivo.pdf", b"PDF", "application/pdf")})
     assert response.status_code == 422
 

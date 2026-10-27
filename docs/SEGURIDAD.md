@@ -315,15 +315,15 @@ Archivos CSV/XLSX, nombres de archivo, filas, vistas previas, ejemplos, valores 
 | Límite de tokens de salida por solicitud | `AI_MAX_OUTPUT_TOKENS` | 2.500 |
 | Límite de tamaño del contexto (estimado antes de enviar; 413 si se supera) | `AI_MAX_INPUT_TOKENS` | 8.000 |
 | Tiempo máximo de espera, **sin reintentos automáticos** (`max_retries=0`) | `AI_TIMEOUT_SECONDS` | 40 s |
-| Límite de solicitudes por sesión del servidor (429) | `AI_MAX_REQUESTS_PER_SESSION` | 25 |
-| Presupuesto local acumulado; bloqueo preventivo si no alcanza (402) | `AI_BUDGET_USD` | USD 1,00 |
-| Registro del consumo real (tokens y costo, sin contenido) | `AI_USAGE_FILE` (en `backend/data/`, excluido de Git) | `./data/ai_usage.json` |
+| Consultas por día de cada visitante y del servicio (429) | `AI_USER_DAILY_REQUESTS` · `AI_GLOBAL_DAILY_REQUESTS` | 15 · 150 |
+| Presupuesto global acumulado y cuota por visitante; bloqueo preventivo si no alcanza (402) | `AI_BUDGET_USD` · `AI_USER_BUDGET_USD` | USD 1,00 · USD 0,10 |
+| Registro del consumo real (tokens y costo, sin contenido), por visitante | Base SQLite `DATABASE_URL` (en `backend/data/`, excluido de Git). El JSON anterior (`AI_LEGACY_USAGE_FILE`) se importa una vez | `sqlite:///./data/datadecision.db` |
 | `store=False`: se pide al proveedor no conservar la respuesta para reutilizarla | `app/services/openai_provider.py` | — |
 
 - **Estimación previa:** se estiman los tokens de entrada (instrucciones + contexto + esquema, a razón de 3 caracteres por token, de forma conservadora) y el costo máximo con la salida máxima permitida. Se muestran antes de autorizar.
 - **Reserva:** antes de enviar se reserva ese máximo. Si `gastado + reservado + estimado` supera el presupuesto, no se envía (402).
 - **Consumo real:** después de la respuesta se registran los tokens que informa OpenAI y su costo. Si la solicitud pudo haberse cobrado sin respuesta (tiempo agotado o error del servidor), se registra el **máximo estimado**, marcado como estimación. Un error de conexión previo al envío no registra costo.
-- **Persistencia:** el presupuesto se acumula entre reinicios. Si el registro está dañado, se bloquean los envíos en lugar de asumir cero, y el archivo no se sobrescribe.
+- **Persistencia:** el presupuesto se acumula entre reinicios en SQLite, con transacciones exclusivas. Si la base no se puede leer o escribir, se deniega el envío (503) en lugar de asumir cero. Una reserva que quedó abierta se cobra por su máximo. Desde la beta pública hay además cuotas por visitante (ver [AUDITORIA_SEGURIDAD.md](AUDITORIA_SEGURIDAD.md), sección 6).
 - **El presupuesto de OpenAI Platform no sustituye estos controles internos** (ni viceversa): conviene configurar también un límite en la cuenta. Las estimaciones pueden diferir del consumo real.
 
 **Elección del modelo.** `gpt-6-luna`, verificado el 25/10/2026 en la documentación oficial de OpenAI (página del modelo y de precios):

@@ -43,9 +43,9 @@ def plan(*operations, alias="A", columns=("fecha", "sector", "ventas"), title="V
 
 def store_plan(app, data, approve=True):
     store = app.state.ai_plans
-    plan_id = store.save(AIPlan.model_validate(data))
+    plan_id = store.save(AIPlan.model_validate(data), app.state.test_user_id)
     if approve:
-        store.approve(plan_id)
+        store.approve(plan_id, app.state.test_user_id)
     return plan_id
 
 

@@ -26,8 +26,8 @@ MAX_ROWS = 250_000
 MAX_CELLS = 5_000_000
 
 
-def _shape_error() -> "DatasetProfileError":
-    cells = f"{MAX_CELLS:,}".replace(",", ".")
+def _shape_error(max_cells: int) -> "DatasetProfileError":
+    cells = f"{max_cells:,}".replace(",", ".")
     rows = f"{MAX_ROWS:,}".replace(",", ".")
     return DatasetProfileError(
         f"El dataset supera los límites del MVP: {rows} filas, {MAX_COLUMNS} columnas o {cells} celdas."
@@ -38,7 +38,7 @@ class DatasetProfileError(ValueError):
     """Error de validación que puede comunicarse al usuario."""
 
 
-def _read_csv(content: bytes) -> tuple[pd.DataFrame, str, str | None]:
+def _read_csv(content: bytes, max_cells: int) -> tuple[pd.DataFrame, str, str | None]:
     encoding = None
     for candidate in ("utf-8-sig", "cp1252"):
         try:
@@ -60,7 +60,7 @@ def _read_csv(content: bytes) -> tuple[pd.DataFrame, str, str | None]:
     except csv.Error:
         delimiter = ","
 
-    _check_csv_shape(decoded, delimiter)
+    _check_csv_shape(decoded, delimiter, max_cells)
 
     try:
         df = pd.read_csv(
@@ -77,7 +77,7 @@ def _read_csv(content: bytes) -> tuple[pd.DataFrame, str, str | None]:
     return df, encoding, None
 
 
-def _check_csv_shape(decoded: str, delimiter: str) -> None:
+def _check_csv_shape(decoded: str, delimiter: str, max_cells: int) -> None:
     """Valida filas, columnas y celdas ANTES de crear el DataFrame.
 
     Recorre el texto con `csv.reader` (incremental, sin guardar filas) y corta
@@ -91,15 +91,15 @@ def _check_csv_shape(decoded: str, delimiter: str) -> None:
             return  # vacío: lo informa la lectura con Pandas
         columns = max(len(header), 1)
         if columns > MAX_COLUMNS:
-            raise _shape_error()
+            raise _shape_error(max_cells)
         line_bound = decoded.count("\n")
-        if line_bound <= MAX_ROWS and line_bound * columns <= MAX_CELLS:
+        if line_bound <= MAX_ROWS and line_bound * columns <= max_cells:
             return
         rows = 0
         for row in reader:
             rows += 1
-            if rows > MAX_ROWS or rows * max(columns, len(row)) > MAX_CELLS:
-                raise _shape_error()
+            if rows > MAX_ROWS or rows * max(columns, len(row)) > max_cells:
+                raise _shape_error(max_cells)
     except csv.Error as exc:
         raise DatasetProfileError("El archivo CSV no tiene una estructura tabular válida.") from exc
 
@@ -130,7 +130,7 @@ def _check_xlsx_archive(content: bytes) -> None:
         raise DatasetProfileError("El archivo XLSX está dañado.") from exc
 
 
-def _check_xlsx_shape(content: bytes) -> None:
+def _check_xlsx_shape(content: bytes, max_cells: int) -> None:
     """Cuenta filas y columnas de la primera hoja en modo de solo lectura (por flujo)."""
     try:
         workbook = load_workbook(BytesIO(content), read_only=True, data_only=True, keep_links=False)
@@ -144,8 +144,8 @@ def _check_xlsx_shape(content: bytes) -> None:
             rows += 1
             width = max(width, len(row))
             # La primera fila es el encabezado.
-            if width > MAX_COLUMNS or rows - 1 > MAX_ROWS or rows * width > MAX_CELLS:
-                raise _shape_error()
+            if width > MAX_COLUMNS or rows - 1 > MAX_ROWS or rows * width > max_cells:
+                raise _shape_error(max_cells)
     except DatasetProfileError:
         raise
     except Exception as exc:
@@ -154,9 +154,9 @@ def _check_xlsx_shape(content: bytes) -> None:
         workbook.close()
 
 
-def _read_excel(content: bytes) -> tuple[pd.DataFrame, str, str | None]:
+def _read_excel(content: bytes, max_cells: int) -> tuple[pd.DataFrame, str, str | None]:
     _check_xlsx_archive(content)
-    _check_xlsx_shape(content)
+    _check_xlsx_shape(content, max_cells)
 
     try:
         with pd.ExcelFile(BytesIO(content), engine="openpyxl") as workbook:
@@ -172,39 +172,46 @@ def _read_excel(content: bytes) -> tuple[pd.DataFrame, str, str | None]:
     return df, "xlsx", sheet_name
 
 
-def read_dataset(content: bytes, filename: str) -> tuple[pd.DataFrame, str, str, str | None]:
+def read_dataset(
+    content: bytes, filename: str, *, max_bytes: int | None = None, max_cells: int | None = None
+) -> tuple[pd.DataFrame, str, str, str | None]:
     """Lee un CSV/XLSX como texto, con todos los controles de tamaño y forma.
 
     Devuelve (DataFrame, extensión, codificación, hoja). Todas las celdas son
     texto ('' = vacía): así no se convierten identificadores como '00123' ni se
     interpretan marcadores como 'NA'. La usan el perfilador y el motor de
     análisis (`analysis_engine.py`), para que ambos lean exactamente igual.
+
+    `max_bytes` y `max_cells` permiten límites MÁS BAJOS (por ejemplo, en la beta
+    pública); nunca superan los del MVP.
     """
+    byte_limit = MAX_FILE_BYTES if max_bytes is None else min(max_bytes, MAX_FILE_BYTES)
+    cell_limit = MAX_CELLS if max_cells is None else min(max_cells, MAX_CELLS)
     name = Path(filename or "").name
     extension = Path(name).suffix.lower()
     if extension not in (".csv", ".xlsx"):
         raise DatasetProfileError("Solo se permiten archivos CSV y XLSX.")
     if not content:
         raise DatasetProfileError("El archivo está vacío.")
-    if len(content) > MAX_FILE_BYTES:
-        raise DatasetProfileError("El archivo supera el límite de 25 MB del MVP.")
+    if len(content) > byte_limit:
+        raise DatasetProfileError(f"El archivo supera el límite de {byte_limit // (1024 * 1024)} MB.")
 
     if extension == ".csv":
-        df, encoding, sheet_name = _read_csv(content)
+        df, encoding, sheet_name = _read_csv(content, cell_limit)
     else:
-        df, encoding, sheet_name = _read_excel(content)
+        df, encoding, sheet_name = _read_excel(content, cell_limit)
 
     if df.empty or not len(df.columns):
         raise DatasetProfileError("No se encontraron filas y columnas de datos.")
     # Segunda verificación sobre el DataFrame ya leído (defensa en profundidad).
-    if df.shape[1] > MAX_COLUMNS or df.shape[0] > MAX_ROWS or df.shape[0] * df.shape[1] > MAX_CELLS:
-        raise _shape_error()
+    if df.shape[1] > MAX_COLUMNS or df.shape[0] > MAX_ROWS or df.shape[0] * df.shape[1] > cell_limit:
+        raise _shape_error(cell_limit)
 
     df.columns = [str(column) for column in df.columns]
     return df.fillna(""), extension, encoding, sheet_name
 
 
-def profile_dataset(content: bytes, filename: str) -> dict:
+def profile_dataset(content: bytes, filename: str, *, max_bytes: int | None = None, max_cells: int | None = None) -> dict:
     """Lee un dataset tabular y devuelve un diagnóstico JSON serializable.
 
     No elimina duplicados, rellena nulos ni altera el archivo original.
@@ -215,7 +222,7 @@ def profile_dataset(content: bytes, filename: str) -> dict:
     descuentan, porque pueden ser valores válidos.
     """
     name = Path(filename or "").name
-    df, extension, encoding, sheet_name = read_dataset(content, filename)
+    df, extension, encoding, sheet_name = read_dataset(content, filename, max_bytes=max_bytes, max_cells=max_cells)
     column_profiles = []
     warnings = []
     for column in df.columns:

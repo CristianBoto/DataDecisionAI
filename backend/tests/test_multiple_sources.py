@@ -8,16 +8,13 @@ afecte a los demás.
 from io import BytesIO
 
 import pandas as pd
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.api.routes.datasets import router
+from tests.ai_helpers import make_client
 
 
 def client() -> TestClient:
-    api = FastAPI()
-    api.include_router(router, prefix="/api")
-    return TestClient(api)
+    return make_client()[0]
 
 
 def post(api: TestClient, name: str, content: bytes, media: str = "text/csv"):

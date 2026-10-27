@@ -25,6 +25,15 @@ Este documento define las operaciones que el backend **FastAPI** debe implementa
 | 10 | Consultar resultados | `GET /api/projects/{projectId}/results` | Pendiente |
 | 11 | Exportar análisis (PDF, Excel, Word, Canva) | `POST /api/projects/{projectId}/exports` | Pendiente |
 
+**Acceso (beta pública).** Todas las rutas de `/api/datasets`, `/api/ai` y `/api/analysis` exigen `Authorization: Bearer <token>`; sin una sesión vigente responden `401`. Las únicas públicas son `GET /api/health` y `GET /api/auth/config`. Detalle en [AUDITORIA_SEGURIDAD.md](AUDITORIA_SEGURIDAD.md), sección 6.
+
+| Operación | Método y ruta | Respuesta |
+|-----------|---------------|-----------|
+| ¿Se exige Turnstile? | `GET /api/auth/config` | `{ "turnstile_required": true }` |
+| Canjear invitación | `POST /api/auth/redeem` con `{ "code": "ddai-…", "turnstile_token": "…" }` | `200 { "token", "label", "expires_at" }`; `401` código inválido, vencido o revocado; `403` Turnstile; `429` demasiados intentos |
+| Sesión actual | `GET /api/auth/session` | `200 { "label", "expires_at" }` o `401` |
+| Cerrar sesión | `POST /api/auth/logout` | `204` (el token deja de valer) |
+
 ---
 
 ## 0. Salud

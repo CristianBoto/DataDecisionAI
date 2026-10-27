@@ -861,3 +861,48 @@ Cambios sin confirmar. **Sin llamadas reales a OpenAI ni consumo.** La IA y el m
   - dispersión con 12 puntos, ROC con su diagonal e histograma de Sturges (5 intervalos: 3, 1, 3, 1, 4);
   - sin desplazamiento horizontal en móvil (375 px).
 - **Verificación manual del AUC:** 34 de 36 pares positivo-negativo bien ordenados da 0,944.
+
+## 28. Correcciones de seguridad para la beta pública (✅ verificada, 26/10/2026)
+
+Cambios sin confirmar. **Sin llamadas reales a OpenAI ni a Cloudflare, sin consumo y sin despliegue.** Las pruebas no leen `backend/.env` (`tests/conftest.py`) y bloquean toda conexión externa.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **260 de 260**: 209 anteriores (2 reemplazadas por pruebas sobre SQLite y 3 nuevas de presupuesto) y 50 en `tests/test_security.py` |
+| Frontend (`npm test`) | **187 de 187** en 21 archivos (173 anteriores + 10 en `src/test/access.test.tsx` + 4 en `src/lib/buildChecks.test.ts`) |
+| Lint, typecheck y build | Sin errores; la build genera `dist/_headers` |
+| Dependencias | `npm audit --omit=dev`: 0. Sin dependencias Python nuevas (`sqlite3` es de la biblioteca estándar; `httpx` ya estaba) |
+
+| Requisito | Prueba |
+|-----------|--------|
+| Sin sesión, rechazado | 9 rutas de IA y sesión: 401 con `WWW-Authenticate: Bearer`. Perfilado y ejecución: 401 **sin leer el cuerpo** (llamada ASGI directa: 0 bytes consumidos) |
+| Token inválido o vencido | Token inventado, esquema `Basic`, `Bearer` vacío o de 300 caracteres: 401. Sesión de 12 h vencida: 401. Invitación revocada o vencida: sus sesiones dejan de valer. Cerrar sesión revoca el token |
+| Canje | Código inexistente: 401 con mensaje genérico. Cuerpo inválido o con campos extra: 422. Un código abre como máximo 3 sesiones (se cierra la más antigua). La base no contiene el código ni el token en claro |
+| Turnstile | Sin token o con uno falso: 403. El verificador rechaza otro nombre de host, otra acción, `success: false`, un token demasiado largo y un error de red |
+| Acceso cruzado | B, con el identificador y la huella de la solicitud de A: 404 y nada enviado; B no puede cancelarla. La conversación autorizada por A: 404 para B, que tampoco puede revocarla. El plan de A: B no puede aprobarlo ni ejecutarlo (404); A sí |
+| Cuotas | 2 consultas diarias por visitante: la tercera de A da 429 y B sigue pudiendo. Cuota en USD: 402 «tu cuota». Presupuesto global: 402 «global» para un tercer visitante. Tope diario del servicio: 429. 5 solicitudes pendientes por visitante |
+| Concurrencia | Dos envíos simultáneos del mismo visitante: 200 y 409. Seis visitantes en paralelo con presupuesto para cuatro: 4 × 200 y 2 × 402, sin superar el presupuesto. Perfilado: 1 por visitante |
+| Persistencia | Tras «reiniciar» (otra aplicación sobre el mismo archivo): la sesión sigue valiendo, el gasto y las consultas del día se conservan y el código se puede volver a canjear. Una reserva abandonada se cobra por su máximo. El JSON anterior se importa una sola vez; uno dañado impide arrancar |
+| Base no disponible | Reservar: 503, nada enviado; el estado informa 0 disponible |
+| Archivos | Con `MAX_UPLOAD_MB=1`: 1,2 MB da 413. Con `MAX_DATASET_CELLS=1000`: 1.200 celdas dan 422 |
+| Límite por IP | 10 pedidos por minuto: los dos siguientes dan 429. Canje: 3 intentos y después 429 |
+| Producción | No arranca sin Turnstile (clave o dominio), con un origen `http://`, sin `FORWARDED_IP_HOPS`, sin disco persistente confirmado, con una ruta relativa o con la carpeta de la base inexistente (y no la crea); en Render, sin `ENVIRONMENT=production`. Pedidos sin HTTPS: 403 (salvo `/api/health`). `/docs`, `/redoc` y `/openapi.json`: 404. HSTS presente. Un origen ajeno no recibe permiso CORS |
+| Proxy de confianza | Un visitante que cambia la primera IP de `X-Forwarded-For` en cada pedido igual recibe 429 a partir del pedido 11 (cuenta la IP que agregó el proxy); otra IP real no queda bloqueada. Turnstile sin acción: rechazado |
+| DEMO accidental | `publicBuildProblems`: en Cloudflare Pages, `VITE_DEMO_MODE` ausente, `true` o inválido, backend `http://`, localhost o URL inválida y falta de clave de Turnstile cortan la compilación. Compilación real simulada (`CF_PAGES=1 VITE_DEMO_MODE=true`): falla con el mensaje; con la configuración real: compila y `_headers` apunta al backend |
+| Encabezados y registros | CSP, nosniff, DENY, no-referrer y `no-store` en toda respuesta (incluido un 404). Identificadores y consultas ocultos en los registros de acceso |
+| Frontend | Authorization solo con sesión; nada en `localStorage`; un 401 borra la sesión; una sesión vencida no se usa; si el almacenamiento falla, sigue en memoria. Pantalla de ingreso: aviso de privacidad, código inválido con error, Turnstile exigido sin clave del sitio bloquea el ingreso; la demo pública no tiene puerta; cerrar sesión descarta la aplicación. CSP: `connect-src` solo hacia el backend, sin `unsafe-eval` |
+
+**Verificación en el navegador.** Backend lanzado sin `.env` (IA deshabilitada, sin clave) con una base temporal fuera del repositorio; frontend con perfilado por backend:
+- sin sesión, la aplicación muestra solo la pantalla de acceso con el aviso de privacidad, y `/api/ai/status` responde 401;
+- un código inventado muestra «El código de invitación no es válido, venció o fue revocado.»;
+- con un código de prueba creado por `python -m app.cli invite`, se ingresa y la franja muestra la etiqueta y «Cerrar sesión»;
+- un CSV sintético se perfila con sesión (`POST /api/datasets/profile` → 200); en el navegador solo queda `datadecision.access` en `sessionStorage` y nada en `localStorage`;
+- «Cerrar sesión» vuelve a la pantalla de acceso y borra el token;
+- la API devuelve los encabezados de seguridad (`curl -i /api/health`).
+
+**Recorrido con uvicorn real (revisión final).** Backend en `localhost` con la IA deshabilitada, la clave vacía y una base temporal; dos invitaciones creadas con `python -m app.cli invite` (el listado no muestra códigos):
+- sin sesión, `/api/ai/status` y el perfilado responden 401; un código inventado, 401;
+- el visitante A canjea su código, consulta su cuota y perfila un CSV (200);
+- B no puede autorizar la solicitud de A; con la IA deshabilitada, A recibe «No se envió nada»;
+- tras **reiniciar el servidor**, la sesión de A sigue vigente; al cerrar sesión, 401;
+- los registros del servidor no contienen ni el token ni los códigos.

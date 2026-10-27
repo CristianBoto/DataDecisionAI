@@ -24,6 +24,11 @@ export const appConfig = {
   backendProfiling: parseBoolean(import.meta.env.VITE_BACKEND_PROFILING, false),
   apiBaseUrl: (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000').replace(/\/+$/, ''),
   maxUploadMb: parsePositiveNumber(import.meta.env.VITE_MAX_UPLOAD_MB, 25),
+  /** Clave PÚBLICA del sitio de Cloudflare Turnstile (la secreta vive solo en el backend). */
+  turnstileSiteKey: import.meta.env.VITE_TURNSTILE_SITE_KEY?.trim() || null,
 } as const
+
+/** Con backend (no en la demo pública) se exige una sesión de invitación. */
+export const requiresAccess = !appConfig.demoMode || appConfig.backendProfiling
 
 export { parseBoolean, parsePositiveNumber }

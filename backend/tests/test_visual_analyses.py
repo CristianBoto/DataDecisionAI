@@ -29,8 +29,8 @@ def col(name, semantic, **extra):
 def run(client, app, plans, files, sources):
     ids = []
     for data in plans:
-        plan_id = app.state.ai_plans.save(AIPlan.model_validate(data))
-        app.state.ai_plans.approve(plan_id)
+        plan_id = app.state.ai_plans.save(AIPlan.model_validate(data), app.state.test_user_id)
+        app.state.ai_plans.approve(plan_id, app.state.test_user_id)
         ids.append(plan_id)
     body = {"plan_ids": ids, "sources": sources}
     multipart = {f"file_{alias}": (name, content, "text/csv") for alias, (name, content) in files.items()}

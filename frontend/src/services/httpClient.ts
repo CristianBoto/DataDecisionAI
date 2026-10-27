@@ -1,9 +1,13 @@
+import { accessSession } from './accessSession'
 import { ApiError } from './errors'
 
 /**
  * Cliente HTTP mínimo sobre `fetch` para hablar con FastAPI.
  * Centraliza la URL base, los encabezados, los tiempos de espera y el
  * formato de errores (`{ "detail": "..." }`, propio de FastAPI).
+ *
+ * Si hay una sesión de invitación, agrega `Authorization: Bearer <token>`. Una
+ * respuesta 401 cierra la sesión local para que se vuelva a pedir el código.
  */
 
 export interface RequestOptions {
@@ -45,6 +49,8 @@ export class HttpClient {
     const isFormData = body instanceof FormData
     const headers: Record<string, string> = { Accept: 'application/json' }
     if (body !== undefined && !isFormData) headers['Content-Type'] = 'application/json'
+    const token = accessSession.token()
+    if (token) headers.Authorization = `Bearer ${token}`
 
     try {
       const response = await fetch(`${this.baseUrl}${path}`, {
@@ -54,7 +60,12 @@ export class HttpClient {
         signal: controller.signal,
       })
       if (!response.ok) {
-        throw new ApiError(await readErrorMessage(response), { status: response.status })
+        const message = await readErrorMessage(response)
+        if (response.status === 401 && token) {
+          accessSession.clear()
+          throw new ApiError(message, { status: 401, code: 'unauthenticated' })
+        }
+        throw new ApiError(message, { status: response.status })
       }
       return response
     } catch (error) {

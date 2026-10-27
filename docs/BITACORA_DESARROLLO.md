@@ -628,6 +628,34 @@ Se comprobó en pruebas automáticas y en la aplicación.
 - **Tiempo límite de las pruebas:** antes del commit, una ejecución con la máquina cargada (la suite del backend corriendo al mismo tiempo) hizo superar el límite de 5 s de Vitest a pruebas largas de punta a punta, como el recorrido local completo, de unos 4 s. Era un tiempo agotado, no un fallo de aserción. Se reprodujo con carga simultánea, y se fijó `testTimeout: 15_000` en la configuración de Vitest; después, 4 de 4 ejecuciones bajo carga pasaron.
 - **Dependencias:** NumPy quedó declarada en `requirements.txt`, porque el motor la importa directamente. `pip check` no encontró dependencias rotas.
 
+## 6u. Correcciones de seguridad para la beta pública (sin confirmar)
+
+**Objetivo.** Aplicar las siete correcciones imprescindibles de la auditoría ([AUDITORIA_SEGURIDAD.md](AUDITORIA_SEGURIDAD.md)) para que la aplicación real pueda publicarse sin que cualquiera gaste los créditos, use datos de otros o bloquee el servicio. Sin desplegar, sin consumir créditos de OpenAI y sin secretos en archivos versionados.
+
+**Decisiones.**
+- **Acceso por invitación** en lugar de usuarios con contraseña: no hay registro público, pagos ni roles. El código se canjea por un token de sesión; la base guarda solo huellas SHA-256.
+- **Token en `Authorization`, no en una cookie:** `pages.dev` y el backend son sitios distintos, y así otro sitio no puede usar la sesión a través del navegador (CSRF). Se guarda en `sessionStorage`.
+- **SQLite de la biblioteca estándar**, sin dependencias nuevas, solo para invitaciones, sesiones y consumo. Los planes y conversaciones siguen en memoria, ahora con dueño y vencimiento: guardarlos en disco no aportaba seguridad y sí retención de datos.
+- **Fallar al arrancar** ante una configuración de producción insegura, en lugar de funcionar desprotegido. Como no se puede asumir que el disco de la plataforma sea persistente, hay que confirmarlo explícitamente.
+- **Turnstile** obligatorio en producción y validado en el backend; en desarrollo se omite solo si no hay clave.
+- **Cuotas por visitante** además del presupuesto global, y una sola consulta en curso por visitante.
+- Detalle técnico en [ARCHITECTURE.md](ARCHITECTURE.md), sección "Seguridad para la beta pública".
+
+**Problemas.**
+- **Pruebas que leían la configuración real:** varias pruebas creaban la aplicación con `backend/.env` (clave real y `AI_ENABLED=true`). Se agregó `tests/conftest.py`, que antes de importar la aplicación fija una configuración segura (IA deshabilitada, clave vacía, base temporal) y desactiva la lectura del `.env`; `create_app` ahora acepta una configuración explícita.
+- **El formulario se leía antes que la sesión:** FastAPI procesa el cuerpo `multipart` antes de resolver las dependencias, así que un archivo de 25 MB se habría leído antes de responder 401. La sesión se verifica también en el middleware de cargas, antes de leer el cuerpo.
+- **Registro de consumo anterior:** el presupuesto pasó del JSON local a SQLite. Para no perder el gasto real ya registrado, el JSON se importa una sola vez; si está dañado, el backend no arranca.
+- **Prueba de concurrencia:** la prueba de seis envíos simultáneos usaba un solo visitante, que ahora recibe 409 por tener una consulta en curso. Se adaptó a seis visitantes distintos, que es lo que verifica el presupuesto global.
+
+**Revisión final antes del commit.** Se encontraron y corrigieron cuatro configuraciones inseguras de producción:
+- **Proxies:** el comando previsto (`--forwarded-allow-ips="*"`) hacía que uvicorn confiara en el `X-Forwarded-For` escrito por el visitante, que podía cambiar de IP en cada pedido y esquivar el límite. Ahora se toma la entrada agregada por el proxy propio (`FORWARDED_IP_HOPS`).
+- **HTTPS:** el backend dependía solo de la plataforma; ahora rechaza en producción los pedidos que no llegaron por HTTPS.
+- **Turnstile:** el dominio esperado pasó a ser obligatorio y la acción debe coincidir exactamente.
+- **Disco:** en producción la aplicación ya no crea la carpeta de la base; si falta, el disco no está montado y no arranca.
+- **DEMO accidental:** el frontend usaba DEMO si faltaba `VITE_DEMO_MODE`, y la guía de Cloudflare Pages indicaba `true`. Ahora la compilación en Pages falla si la versión pública quedaría en DEMO.
+
+**Verificación.** Backend 260 de 260 y frontend 187 de 187; lint, typecheck y build sin errores. Recorrido con uvicorn real en localhost, con el procedimiento documentado (`python -m app.cli invite`), IA deshabilitada y base temporal: canje, sesión, perfilado, aislamiento, persistencia de la sesión tras reiniciar el servidor y cierre de sesión. En el navegador, con el backend sin `.env` (IA deshabilitada) y una base temporal: código inválido rechazado, ingreso con un código de prueba creado por la consola, perfilado con sesión y cierre de sesión. Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 28.
+
 ## 7. Demo pública en Cloudflare Pages (commit `492b9f9`)
 
 - Configuración documentada en [DEPLOYMENT.md](DEPLOYMENT.md): carpeta `frontend`, `npm run build`, salida `dist`, `VITE_DEMO_MODE=true`.

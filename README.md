@@ -125,6 +125,18 @@ cd backend
 uvicorn app.main:app --reload --port 8000
 ```
 
+**Acceso por invitación.** Con backend, la aplicación pide un código de invitación (no hay modo de omitirlo). Para generar uno en tu equipo, desde `backend/` con el entorno activado:
+
+```powershell
+python -m app.cli invite --label "Desarrollo" --days 30   # muestra el código UNA sola vez
+python -m app.cli list                                    # invitaciones, sin códigos
+python -m app.cli revoke <id>                             # revoca y cierra sus sesiones
+```
+
+- El código se guarda solo como huella en `backend/data/datadecision.db` (excluida de Git). No lo copies en archivos versionados.
+- En desarrollo no se exige Cloudflare Turnstile si `TURNSTILE_SECRET_KEY` está vacía.
+- Cada invitación tiene su propia cuota de IA (`AI_USER_BUDGET_USD`, `AI_USER_DAILY_REQUESTS`).
+
 - Salud: http://localhost:8000/api/health
 - Documentación interactiva: http://localhost:8000/docs
 - Pruebas: `python -m pytest`
@@ -135,8 +147,10 @@ Se controla con `VITE_DEMO_MODE` en `frontend/.env.local`:
 
 | Valor | Comportamiento |
 |-------|----------------|
-| `true` (por defecto) | Proveedor DEMO: funciona sin backend, sin base de datos y sin API key. Respuestas simuladas y resultados ficticios, siempre marcados como DEMO. |
-| `false` | Cliente HTTP contra `VITE_API_BASE_URL` (FastAPI). Hoy solo responde `/api/health`. |
+| `true` (por defecto en `npm run dev`) | Proveedor DEMO: funciona sin backend, sin base de datos y sin API key. Respuestas simuladas y resultados ficticios, siempre marcados como DEMO. |
+| `false` | Aplicación real contra `VITE_API_BASE_URL` (FastAPI): Pandas, OpenAI y dashboards, con acceso por invitación. |
+
+Para compilar (`npm run build`) la variable debe estar definida explícitamente. En Cloudflare Pages la compilación **falla** si no es `false`, si el backend no usa `https://` o si falta `VITE_TURNSTILE_SITE_KEY`: la versión pública no puede quedar en DEMO por olvidar una variable (`src/lib/buildChecks.ts`).
 
 Reiniciá `npm run dev` después de cambiar el `.env.local`.
 
@@ -161,7 +175,7 @@ El backend ya permite por CORS `http://localhost:5173` y `http://127.0.0.1:5173`
 
 ## Publicar la demo
 
-Cloudflare Pages (gratis): repositorio `CristianBoto/DataDecisionAI`, rama `main`, directorio raíz `frontend`, build `npm run build`, salida `dist`, variable `VITE_DEMO_MODE=true`. Paso a paso en [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Cloudflare Pages (gratis): repositorio `CristianBoto/DataDecisionAI`, rama `main`, directorio raíz `frontend`, build `npm run build`, salida `dist`. La versión pública es la aplicación real con acceso por invitación (`VITE_DEMO_MODE=false`, backend con HTTPS y Turnstile); la demo ficticia ya no se publica. Paso a paso en [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), sección C.
 
 ## Funcionalidades actuales
 

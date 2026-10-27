@@ -14,7 +14,9 @@ import pytest
 from app.core.config import Settings
 from app.schemas.ai_context import AIContext
 from app.schemas.ai_plan import AIAssistantReply
-from app.services.ai_budget import AIBudget
+from app.services.ai_budget import STALE_RESERVATION_SECONDS, AIBudget
+from app.services.ai_errors import AIGatewayError
+from app.services.database import Database
 from app.services.openai_provider import INSTRUCTIONS, OpenAIProvider, ProviderCallError, _default_client
 from tests.ai_helpers import (  # noqa: F401 - no_network se activa en todo el módulo
     ORIGIN,
@@ -100,7 +102,7 @@ def test_mandatory_case_two_independent_plans_without_joining():
     assert any("NA" in q["question"] for q in reply["questions"])
     assert len(data["plan_ids"]) == 2
     # Los planes quedan guardados como propuestos: no se ejecuta nada.
-    assert all(app.state.ai_plans.get(pid)["status"] == "proposed" for pid in data["plan_ids"])
+    assert all(app.state.ai_plans.get(pid, app.state.test_user_id)["status"] == "proposed" for pid in data["plan_ids"])
 
     # Lo enviado: solo alias, metadatos revisados y el objetivo (sin nombres de archivo ni valores).
     sent = json.dumps(provider.received[0], ensure_ascii=False)
@@ -153,7 +155,7 @@ def test_invalid_replies_are_discarded_and_no_plan_is_saved(overrides, fragment)
     assert fragment in response.json()["detail"]
     assert app.state.ai_plans._plans == {}
     # El consumo real se registró igual.
-    assert app.state.ai_budget.spent_usd > 0
+    assert app.state.ai_budget.global_spent_usd() > 0
 
 
 def test_operations_outside_the_catalog_are_rejected_by_the_schema():
@@ -180,7 +182,7 @@ def test_incomplete_or_refused_replies_are_reported(problem):
     prepared = prepare(client, context()).json()
     response = authorize(client, prepared)
     assert response.status_code == 502 and problem in response.json()["detail"]
-    assert app.state.ai_budget.spent_usd > 0
+    assert app.state.ai_budget.global_spent_usd() > 0
 
 
 # --- Consumo y presupuesto ----------------------------------------------------
@@ -193,10 +195,13 @@ def test_real_usage_is_recorded_without_content():
     # gpt-6-luna: USD 0,10 / 0,50 por millón → 1200 × 0,10 + 400 × 0,50 = 320 millonésimas.
     assert usage["cost_usd"] == pytest.approx(0.00032)
     assert usage["input_tokens"] == 1200 and usage["output_tokens"] == 400
-    ledger = app.state.ai_budget.usage_file.read_text(encoding="utf-8")
-    record = json.loads(ledger)[0]
-    assert set(record) == {"at", "model", "input_tokens", "output_tokens", "cost_usd", "estimated"}
-    assert "confidencial" not in ledger and "ANYO" not in ledger
+    rows = [dict(r) for r in app.state.db.query("SELECT * FROM ai_usage")]
+    assert len(rows) == 1
+    assert set(rows[0]) == {"id", "user_id", "at", "day", "model", "input_tokens", "output_tokens", "cost_usd", "estimated"}
+    # La base completa (invitaciones, sesiones y consumo) no contiene nada del objetivo ni de las columnas.
+    db_path = app.state.db.path
+    raw = b"".join(p.read_bytes() for p in (db_path, db_path.with_name(db_path.name + "-wal")) if p.exists())
+    assert b"confidencial" not in raw and b"ANYO" not in raw
     status = client.get("/api/ai/status").json()
     assert status["spent_usd"] == pytest.approx(0.00032) and status["requests_used"] == 1
 
@@ -208,7 +213,7 @@ def test_insufficient_budget_blocks_before_sending():
     assert prepared["estimated_max_cost_usd"] > 0.0001
     response = authorize(client, prepared)
     assert response.status_code == 402
-    assert "Presupuesto local insuficiente" in response.json()["detail"]
+    assert "Presupuesto insuficiente en tu cuota" in response.json()["detail"]
     assert provider.received == []
 
 
@@ -220,22 +225,41 @@ def test_request_limit_per_session():
     assert response.status_code == 429 and len(provider.received) == 1
 
 
+def budget_on(path, **limits):
+    limits = {"budget_usd": 1.0, "user_budget_usd": 1.0, "user_daily_requests": 5, "global_daily_requests": 100, **limits}
+    return AIBudget(Database(path), **limits)
+
+
 def test_budget_persists_across_restarts(tmp_path):
-    usage_file = tmp_path / "ai_usage.json"
-    first = AIBudget(usage_file, 1.0, 5)
-    first.settle(first.reserve(0.01), model="gpt-6-luna", input_tokens=10, output_tokens=10, cost=0.4, estimated=False)
-    second = AIBudget(usage_file, 1.0, 5)
-    assert second.spent_usd == pytest.approx(0.4)
-    with pytest.raises(Exception, match="Presupuesto"):
-        second.reserve(0.7)
+    first = budget_on(tmp_path / "uso.db")
+    first.settle(first.reserve("u1", 0.01), model="gpt-6-luna", input_tokens=10, output_tokens=10, cost=0.4, estimated=False)
+    first.db.close()
+    second = budget_on(tmp_path / "uso.db")  # «reinicio»: otra conexión al mismo archivo
+    assert second.global_spent_usd() == pytest.approx(0.4)
+    assert second.status("u1").requests_today == 1
+    with pytest.raises(AIGatewayError, match="Presupuesto"):
+        second.reserve("u2", 0.7)
 
 
-def test_unreadable_ledger_blocks_spending(tmp_path):
-    usage_file = tmp_path / "ai_usage.json"
-    usage_file.write_text("{roto", encoding="utf-8")
-    with pytest.raises(Exception, match="Presupuesto"):
-        AIBudget(usage_file, 1.0, 5).reserve(0.001)
-    assert usage_file.read_text(encoding="utf-8") == "{roto"  # no se sobrescribe
+def test_unverifiable_budget_denies_sending(tmp_path):
+    budget = budget_on(tmp_path / "uso.db")
+    budget.db.close()  # la base deja de estar disponible
+    with pytest.raises(AIGatewayError) as caught:
+        budget.reserve("u1", 0.001)
+    assert caught.value.status_code == 503 and "No se envió nada" in caught.value.detail
+    assert budget.status("u1").remaining_usd == 0
+
+
+def test_abandoned_reservation_is_charged_at_its_maximum(tmp_path):
+    now = [1_000_000.0]
+    budget = budget_on(tmp_path / "uso.db", clock=lambda: now[0])
+    budget.reserve("u1", 0.3)  # el proceso «se corta» sin liquidar
+    with pytest.raises(AIGatewayError) as caught:
+        budget.reserve("u1", 0.01)
+    assert caught.value.status_code == 409  # una consulta en curso por visitante
+    now[0] += STALE_RESERVATION_SECONDS + 1
+    budget.reserve("u1", 0.01)
+    assert budget.global_spent_usd() == pytest.approx(0.3)  # se cobró el máximo estimado
 
 
 def test_unknown_model_without_price_is_not_sent():
@@ -376,8 +400,8 @@ def test_timeout_records_the_estimated_maximum_and_is_not_retried():
     response = authorize(client, prepared)
     assert response.status_code == 504
     assert len(responses.calls) == 1  # sin reintentos
-    record = json.loads(app.state.ai_budget.usage_file.read_text(encoding="utf-8"))[0]
-    assert record["estimated"] is True
+    record = dict(app.state.db.query("SELECT * FROM ai_usage")[0])
+    assert record["estimated"] == 1
     assert record["cost_usd"] == pytest.approx(prepared["estimated_max_cost_usd"], rel=1e-3)
     # La autorización ya se usó: repetir exige validar de nuevo.
     assert authorize(client, prepared).status_code == 404
@@ -388,8 +412,9 @@ def test_connection_error_records_no_cost():
     client, app = make_client(ai_enabled=True, provider=provider)
     response = authorize(client, prepare(client, context()).json())
     assert response.status_code == 502
-    assert app.state.ai_budget.spent_usd == 0
-    assert not app.state.ai_budget.usage_file.exists()
+    assert app.state.ai_budget.global_spent_usd() == 0
+    # Se registra el intento (cuenta para el límite diario), sin costo.
+    assert [r["cost_usd"] for r in app.state.db.query("SELECT cost_usd FROM ai_usage")] == [0]
 
 
 # --- Instrucciones y metadatos aproximados ------------------------------------------

@@ -601,3 +601,51 @@ Los indicadores salen de los estadísticos del motor (`stats`): r de Pearson, ρ
 - Las clases que ofrece el selector salen de los valores de ejemplo del perfil. Si no hay dos, el usuario escribe la clase, y el backend la valida igual.
 - El histograma usa intervalos de igual ancho (Sturges): no se elige el ancho ni la cantidad.
 - La dispersión no distingue grupos por color ni ajusta rectas de regresión.
+
+## Seguridad para la beta pública
+
+Objetivo: que `https://datadecisionai.pages.dev` tenga la misma funcionalidad real que `localhost` (Pandas, OpenAI y dashboards) sin quedar abierta a cualquiera. Estado de cada control, amenaza y prueba: [AUDITORIA_SEGURIDAD.md](AUDITORIA_SEGURIDAD.md), sección 6.
+
+### Flujo de acceso
+
+1. Quien administra crea una invitación desde el servidor: `python -m app.cli invite --label "Docente" --days 14`. El código se muestra una sola vez; la base guarda su huella SHA-256.
+2. En el navegador, `AccessGate` (`frontend/src/components/auth/AccessGate.tsx`) pide el código y, si el backend lo exige, muestra el widget de Cloudflare Turnstile.
+3. `POST /api/auth/redeem` (`app/api/routes/auth.py`) limita los intentos por IP, valida Turnstile **en el backend** y canjea el código por un token de sesión de 256 bits (12 h).
+4. El token se guarda en `sessionStorage` (`accessSession.ts`) y `HttpClient` lo envía como `Authorization: Bearer …`. Un 401 lo borra y vuelve a mostrar el ingreso. Cerrar sesión lo revoca en el backend.
+5. `require_user` (`app/api/deps.py`) protege `/api/datasets`, `/api/ai` y `/api/analysis`. Para las cargas, `UploadGuardMiddleware` verifica la sesión **antes de leer el cuerpo**. No existe ningún parámetro para desactivar la autenticación.
+
+### Dueño de cada recurso
+
+El visitante es la invitación (`User.id`). `AIRequestStore`, `AIConversationStore` y `AIPlanStore` guardan el dueño de cada solicitud, permiso de conversación y plan; para cualquier otro visitante el recurso no existe (404). El motor ejecuta solo planes aprobados **del propio visitante**.
+
+### Persistencia mínima (SQLite)
+
+`app/services/database.py`, biblioteca estándar `sqlite3` en modo WAL, una conexión protegida por un lock:
+
+| Tabla | Contenido | Nunca contiene |
+|-------|-----------|----------------|
+| `invitations` | id, huella del código, etiqueta, vencimiento, revocación | el código |
+| `sessions` | huella del token, visitante, vencimiento, revocación | el token |
+| `ai_usage` | visitante, fecha, modelo, tokens, costo, si es estimado | objetivo, mensajes, columnas, datos |
+| `ai_reservations` | reservas abiertas (consultas en curso) | contenido |
+| `meta` | marca de importación del registro JSON anterior | — |
+
+Los datasets **no** se guardan; las solicitudes, conversaciones y planes viven en memoria con vencimiento. En producción la base debe estar en un **disco persistente**: si no se confirma (`PERSISTENT_STORAGE_CONFIRMED=true`, ruta absoluta), el backend no arranca, porque un disco efímero borraría el presupuesto consumido en cada redespliegue.
+
+### Presupuesto y cuotas
+
+`AIBudget.reserve(visitante, máximo)` abre una transacción exclusiva y verifica, en este orden: una sola consulta en curso del visitante (409), sus consultas del día (429), las del servicio (429), su cuota en USD (402) y el presupuesto global (402). Después del envío, `settle` reemplaza la reserva por el consumo real. Si la base falla, se deniega (503). Una reserva que quedó abierta más de 10 minutos se cobra por su máximo.
+
+### Orden de los middlewares
+
+De afuera hacia adentro: **CORS** (no es autenticación: solo decide qué sitio puede leer las respuestas) → **encabezados de seguridad** (CSP, nosniff, DENY, no-referrer, `no-store`; HSTS en producción) → **límite por IP** → **controles de cargas** (Origin, sesión y tamaño, antes de leer el cuerpo). Así, los errores de los controles internos también llevan los encabezados CORS y de seguridad.
+
+### Producción
+
+`validate_for_startup` (`app/core/config.py`) impide arrancar sin Turnstile (clave y dominio), con orígenes que no son https, sin declarar el proxy de confianza (`FORWARDED_IP_HOPS`) o sin disco persistente confirmado y montado; en producción no se publican `/docs` ni `/openapi.json` y se rechaza todo pedido que no llegó por HTTPS (`HTTPSOnlyMiddleware`). La IP del visitante sale de la entrada de `X-Forwarded-For` que agregó el proxy propio, nunca de la que escribe el visitante. En el frontend, la compilación para Cloudflare Pages falla si quedaría en modo DEMO (`src/lib/buildChecks.ts`). Un registro de acceso filtrado (`RedactIdentifiersFilter`) oculta identificadores y consultas. En el frontend, la build genera `dist/_headers` con la CSP de Cloudflare Pages (`src/lib/securityHeaders.ts`).
+
+### Limitaciones
+
+- **Una sola instancia:** los límites por IP y los almacenes en memoria no se comparten entre procesos.
+- Sin tiempo máximo por cálculo de Pandas.
+- La invitación identifica a un visitante, no a una persona: un código compartido comparte cuotas y recursos.

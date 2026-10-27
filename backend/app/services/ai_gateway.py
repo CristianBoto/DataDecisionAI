@@ -9,6 +9,9 @@ Flujo: preparar → mostrar → autorizar UNA vez → reservar presupuesto → e
 - El proveedor se inyecta (en las pruebas, uno falso sin red). La clave de
   OpenAI vive solo en el backend y nunca se devuelve ni se registra.
 - No se registra el contenido de las solicitudes (ni objetivo ni columnas).
+- Cada solicitud, conversación y plan tiene DUEÑO (el visitante que lo creó).
+  Para cualquier otro visitante no existe: se responde 404, igual que si el
+  identificador fuera inventado (no se revela que pertenece a otro).
 """
 
 from __future__ import annotations
@@ -34,8 +37,13 @@ from app.services.openai_provider import INSTRUCTIONS, ProviderCallError, Provid
 __all__ = ["AIGatewayError"]
 
 REQUEST_TTL_SECONDS = 300
-MAX_PENDING_REQUESTS = 20
-MAX_STORED_PLANS = 100
+# Por visitante (un visitante no puede llenar el cupo de los demás) y en total (memoria acotada).
+MAX_PENDING_REQUESTS = 5
+MAX_PENDING_REQUESTS_TOTAL = 1000
+MAX_PLANS_PER_OWNER = 50
+MAX_STORED_PLANS = 2000
+PLAN_TTL_SECONDS = 6 * 3600
+MAX_CONVERSATIONS_PER_OWNER = 5
 # Tamaño aproximado del esquema de respuesta, que también cuenta como entrada.
 SCHEMA_CHARS = 3200
 
@@ -71,10 +79,11 @@ class _Pending:
     context: AIContext
     sha256: str
     expires_at: float
+    owner: str
 
 
 class AIRequestStore:
-    """Solicitudes preparadas en memoria del proceso (sin base de datos)."""
+    """Solicitudes preparadas en memoria del proceso (no se persisten: contienen metadatos del dataset)."""
 
     def __init__(self, ttl_seconds: int = REQUEST_TTL_SECONDS, clock=time.monotonic) -> None:
         self.ttl_seconds = ttl_seconds
@@ -86,22 +95,28 @@ class AIRequestStore:
         for request_id in [k for k, v in self._pending.items() if v.expires_at <= now]:
             del self._pending[request_id]
 
-    def prepare(self, context: AIContext) -> tuple[str, str]:
+    def prepare(self, context: AIContext, owner: str) -> tuple[str, str]:
         self._purge()
-        if len(self._pending) >= MAX_PENDING_REQUESTS:
-            raise AIGatewayError(429, "Hay demasiadas solicitudes pendientes de revisión.")
+        if sum(1 for p in self._pending.values() if p.owner == owner) >= MAX_PENDING_REQUESTS:
+            raise AIGatewayError(429, "Tenés demasiadas solicitudes pendientes de revisión. Cancelá o esperá a que venzan.")
+        if len(self._pending) >= MAX_PENDING_REQUESTS_TOTAL:
+            raise AIGatewayError(429, "El servicio tiene demasiadas solicitudes pendientes. Intentá en unos minutos.")
         request_id = secrets.token_urlsafe(16)
         sha = payload_hash(context)
-        self._pending[request_id] = _Pending(context, sha, self._clock() + self.ttl_seconds)
+        self._pending[request_id] = _Pending(context, sha, self._clock() + self.ttl_seconds, owner)
         return request_id, sha
 
-    def cancel(self, request_id: str) -> bool:
-        return self._pending.pop(request_id, None) is not None
-
-    def consume(self, request_id: str, approved_sha256: str) -> AIContext:
-        """Valida y CONSUME la autorización (uso único)."""
+    def cancel(self, request_id: str, owner: str) -> bool:
         pending = self._pending.get(request_id)
-        if pending is None:
+        if pending is None or pending.owner != owner:
+            return False
+        del self._pending[request_id]
+        return True
+
+    def consume(self, request_id: str, approved_sha256: str, owner: str) -> AIContext:
+        """Valida y CONSUME la autorización (uso único, solo para su dueño)."""
+        pending = self._pending.get(request_id)
+        if pending is None or not secrets.compare_digest(pending.owner, owner):
             raise AIGatewayError(404, "La solicitud no existe, ya se usó o fue cancelada.")
         if pending.expires_at <= self._clock():
             del self._pending[request_id]
@@ -113,23 +128,37 @@ class AIRequestStore:
 
 
 class AIPlanStore:
-    """Planes validados, en memoria del proceso. Se aprueban aquí; no se ejecutan todavía."""
+    """Planes validados, en memoria del proceso, con dueño y vencimiento. Se aprueban aquí."""
 
-    def __init__(self) -> None:
+    def __init__(self, clock=time.monotonic) -> None:
+        self._clock = clock
         self._plans: OrderedDict[str, dict] = OrderedDict()
+        self._lock = threading.Lock()
 
-    def save(self, plan: AIPlan) -> str:
-        plan_id = secrets.token_urlsafe(12)
-        self._plans[plan_id] = {"plan": plan, "status": "proposed", "approved_at": None}
-        while len(self._plans) > MAX_STORED_PLANS:
-            self._plans.popitem(last=False)
-        return plan_id
+    def save(self, plan: AIPlan, owner: str) -> str:
+        with self._lock:
+            now = self._clock()
+            for pid in [k for k, v in self._plans.items() if v["expires_at"] <= now]:
+                del self._plans[pid]
+            mine = [k for k, v in self._plans.items() if v["owner"] == owner]
+            for pid in mine[: max(0, len(mine) - MAX_PLANS_PER_OWNER + 1)]:
+                del self._plans[pid]
+            plan_id = secrets.token_urlsafe(16)
+            self._plans[plan_id] = {
+                "plan": plan, "status": "proposed", "approved_at": None, "owner": owner, "expires_at": now + PLAN_TTL_SECONDS,
+            }
+            while len(self._plans) > MAX_STORED_PLANS:
+                self._plans.popitem(last=False)
+            return plan_id
 
-    def get(self, plan_id: str) -> dict | None:
-        return self._plans.get(plan_id)
-
-    def approve(self, plan_id: str) -> dict:
+    def get(self, plan_id: str, owner: str) -> dict | None:
         entry = self._plans.get(plan_id)
+        if entry is None or entry["owner"] != owner or entry["expires_at"] <= self._clock():
+            return None
+        return entry
+
+    def approve(self, plan_id: str, owner: str) -> dict:
+        entry = self.get(plan_id, owner)
         if entry is None:
             raise AIGatewayError(404, "El plan no existe o ya no está disponible.")
         if entry["status"] != "approved":
@@ -158,6 +187,7 @@ def boundary_hash(context: AIContext) -> str:
 class _Grant:
     boundary: str
     expires_at: float
+    owner: str
     messages: int = 0
     busy: bool = False
 
@@ -175,24 +205,32 @@ class AIConversationStore:
         self._grants: dict[str, _Grant] = {}
         self._lock = threading.Lock()
 
-    def create(self, boundary: str, ttl_seconds: int) -> str:
+    def create(self, boundary: str, ttl_seconds: int, owner: str) -> str:
         with self._lock:
             now = self._clock()
             for gid in [k for k, g in self._grants.items() if g.expires_at <= now]:
                 del self._grants[gid]
+            # Pocas conversaciones autorizadas por visitante: la más antigua se revoca.
+            mine = [k for k, g in self._grants.items() if g.owner == owner and not g.busy]
+            for gid in mine[: max(0, len(mine) - MAX_CONVERSATIONS_PER_OWNER + 1)]:
+                del self._grants[gid]
             conversation_id = secrets.token_urlsafe(16)
-            self._grants[conversation_id] = _Grant(boundary, now + ttl_seconds)
+            self._grants[conversation_id] = _Grant(boundary, now + ttl_seconds, owner)
             return conversation_id
 
-    def revoke(self, conversation_id: str) -> bool:
-        with self._lock:
-            return self._grants.pop(conversation_id, None) is not None
-
-    @contextmanager
-    def use(self, conversation_id: str, boundary: str, max_messages: int):
+    def revoke(self, conversation_id: str, owner: str) -> bool:
         with self._lock:
             grant = self._grants.get(conversation_id)
-            if grant is None:
+            if grant is None or grant.owner != owner:
+                return False
+            del self._grants[conversation_id]
+            return True
+
+    @contextmanager
+    def use(self, conversation_id: str, boundary: str, max_messages: int, owner: str):
+        with self._lock:
+            grant = self._grants.get(conversation_id)
+            if grant is None or not secrets.compare_digest(grant.owner, owner):
                 raise AIGatewayError(404, "La conversación no tiene una autorización vigente (se revocó o no existe). No se envió nada.")
             if grant.expires_at <= self._clock():
                 del self._grants[conversation_id]
@@ -235,14 +273,14 @@ def _check_sendable(provider: AIProvider, settings: Settings) -> tuple[float, fl
     return prices
 
 
-def _send(context: AIContext, provider: AIProvider, budget: AIBudget, plans: AIPlanStore, settings: Settings) -> dict:
+def _send(context: AIContext, provider: AIProvider, budget: AIBudget, plans: AIPlanStore, settings: Settings, owner: str) -> dict:
     """Envío con todos los límites (tamaño, presupuesto, solicitudes) y validación de la respuesta."""
     prices = _check_sendable(provider, settings)
     input_estimate, max_cost = estimate_request(context, settings)
     if input_estimate > settings.ai_max_input_tokens:
         raise AIGatewayError(413, "El contexto supera el tamaño máximo permitido para la IA. No se envió nada.")
 
-    reservation = budget.reserve(max_cost or 0.0)
+    reservation = budget.reserve(owner, max_cost or 0.0)
     try:
         result = provider.send(context, settings)
     except BaseException as exc:
@@ -278,13 +316,13 @@ def _send(context: AIContext, provider: AIProvider, budget: AIBudget, plans: AIP
         reply["warnings"].append("Unir o relacionar fuentes no está disponible en esta etapa: cada plan usa una sola fuente.")
     return {
         "reply": reply,
-        "plan_ids": [plans.save(plan) for plan in result.reply.plans],
+        "plan_ids": [plans.save(plan, owner) for plan in result.reply.plans],
         "usage": {
             "model": settings.openai_model,
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
             "cost_usd": round(cost, 6),
-            "remaining_usd": round(budget.remaining_usd, 6),
+            "remaining_usd": budget.status(owner).remaining_usd,
         },
     }
 
@@ -298,6 +336,7 @@ def authorize_and_send(
     settings: Settings,
     request_id: str,
     approved_sha256: str,
+    owner: str,
     scope: str = "message",
     conversations: AIConversationStore | None = None,
 ) -> dict:
@@ -305,14 +344,14 @@ def authorize_and_send(
     autoriza los próximos mensajes de esta conversación (permiso acotado)."""
     if not settings.ai_enabled:
         # Se descarta la solicitud: una autorización no queda guardada para más tarde.
-        store.cancel(request_id)
+        store.cancel(request_id, owner)
         raise AIGatewayError(403, "La IA externa está deshabilitada (AI_ENABLED=false). No se envió nada.")
-    context = store.consume(request_id, approved_sha256)  # uso único desde aquí
-    response = _send(context, provider, budget, plans, settings)
+    context = store.consume(request_id, approved_sha256, owner)  # uso único desde aquí
+    response = _send(context, provider, budget, plans, settings, owner)
     if scope == "conversation" and conversations is not None:
         ttl = settings.ai_conversation_ttl_minutes * 60
         response["conversation"] = {
-            "conversation_id": conversations.create(boundary_hash(context), ttl),
+            "conversation_id": conversations.create(boundary_hash(context), ttl, owner),
             "expires_in_seconds": ttl,
             "max_messages": settings.ai_conversation_max_messages,
         }
@@ -328,12 +367,13 @@ def send_in_conversation(
     settings: Settings,
     conversation_id: str,
     context: AIContext,
+    owner: str,
 ) -> dict:
     """Mensaje dentro de una conversación autorizada: sin nueva revisión visual, con los mismos límites."""
     if not settings.ai_enabled:
-        conversations.revoke(conversation_id)
+        conversations.revoke(conversation_id, owner)
         raise AIGatewayError(403, "La IA externa está deshabilitada (AI_ENABLED=false). No se envió nada.")
     if context.message is None:
         raise AIGatewayError(422, "Falta el mensaje que el usuario quiere enviar.")
-    with conversations.use(conversation_id, boundary_hash(context), settings.ai_conversation_max_messages):
-        return _send(context, provider, budget, plans, settings)
+    with conversations.use(conversation_id, boundary_hash(context), settings.ai_conversation_max_messages, owner):
+        return _send(context, provider, budget, plans, settings, owner)

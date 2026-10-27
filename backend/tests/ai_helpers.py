@@ -11,10 +11,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.config import Settings, get_settings
+from app.core.config import Settings
 from app.main import create_app
 from app.schemas.ai_plan import AIAssistantReply
-from app.services.ai_budget import AIBudget
 from app.services.openai_provider import ProviderResult
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
@@ -94,18 +93,54 @@ class FakeProvider:
         return ProviderResult(reply, self.input_tokens, self.output_tokens)
 
 
-def make_client(*, ai_enabled=False, api_key=_DEFAULT_KEY, provider=None, budget_usd=1.0, max_requests=25, **settings):
-    """Cliente con configuración aislada (sin backend/.env) y registro de consumo temporal."""
+def make_client(
+    *,
+    ai_enabled=False,
+    api_key=_DEFAULT_KEY,
+    provider=None,
+    budget_usd=1.0,
+    user_budget_usd=None,
+    max_requests=25,
+    authenticated=True,
+    **settings,
+):
+    """Cliente con configuración aislada (sin backend/.env), base temporal y una sesión de invitación.
+
+    `max_requests` es el límite diario del visitante; `budget_usd`, el presupuesto
+    global (y, si no se indica otro, también el del visitante).
+    """
     if api_key is _DEFAULT_KEY:
         api_key = "sk-prueba-falsa" if ai_enabled else None
-    app = create_app()
-    config = Settings(_env_file=None, ai_enabled=ai_enabled, openai_api_key=api_key, **settings)
-    app.dependency_overrides[get_settings] = lambda: config
-    usage_file = Path(tempfile.mkdtemp()) / "ai_usage.json"
-    app.state.ai_budget = AIBudget(usage_file, budget_usd, max_requests)
+    settings.setdefault("rate_limit_per_minute", 1000)
+    settings.setdefault("ai_global_daily_requests", 1000)
+    settings.setdefault("ai_legacy_usage_file", (Path(tempfile.mkdtemp()) / "sin-registro.json").as_posix())
+    config = Settings(
+        _env_file=None,
+        environment="test",
+        ai_enabled=ai_enabled,
+        openai_api_key=api_key,
+        database_url=f"sqlite:///{(Path(tempfile.mkdtemp()) / 'pruebas.db').as_posix()}",
+        ai_budget_usd=budget_usd,
+        ai_user_budget_usd=budget_usd if user_budget_usd is None else user_budget_usd,
+        ai_user_daily_requests=max_requests,
+        **settings,
+    )
+    app = create_app(config)
     if provider is not None:
         app.state.ai_provider = provider
-    return TestClient(app), app
+    client = TestClient(app)
+    if authenticated:
+        client.headers.update(login(app))
+        # Dueño de los recursos que las pruebas crean directamente en los registros.
+        app.state.test_user_id = app.state.auth.authenticate(client.headers["Authorization"].split()[1]).id
+    return client, app
+
+
+def login(app, label="visitante de prueba") -> dict:
+    """Crea una invitación, la canjea y devuelve el encabezado de la sesión (solo pruebas)."""
+    _, code = app.state.auth.create_invitation(label, days=1)
+    token, _ = app.state.auth.redeem(code)
+    return {"Authorization": f"Bearer {token}"}
 
 
 def source(alias="A", *columns):
