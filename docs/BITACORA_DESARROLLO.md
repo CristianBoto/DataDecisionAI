@@ -656,6 +656,42 @@ Se comprobó en pruebas automáticas y en la aplicación.
 
 **Verificación.** Backend 260 de 260 y frontend 187 de 187; lint, typecheck y build sin errores. Recorrido con uvicorn real en localhost, con el procedimiento documentado (`python -m app.cli invite`), IA deshabilitada y base temporal: canje, sesión, perfilado, aislamiento, persistencia de la sesión tras reiniciar el servidor y cierre de sesión. En el navegador, con el backend sin `.env` (IA deshabilitada) y una base temporal: código inválido rechazado, ingreso con un código de prueba creado por la consola, perfilado con sesión y cierre de sesión. Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 28.
 
+## 6v. Motor analítico generalista
+
+**Objetivo.** Una prueba real con un archivo de indicadores provinciales mostró resultados parciales, gráficos que no se construían y un final poco claro. El objetivo fue corregir las **causas generales**, no ese archivo: DataDecision AI debe analizar CSV y Excel de cualquier temática con las mismas reglas.
+
+**Diagnóstico** (con seis datasets sintéticos, el perfilador y el motor reales):
+1. **Formato largo** (una columna con el indicador y otra con el valor): sumas, series y agrupaciones combinaban exportaciones en USD, porcentajes y población en un único número, sin aviso.
+2. **Fechas anuales** (`2019-01-01`) mostradas como meses (`2019-01`).
+3. **Importes con símbolo** (`$ 1.200`, `12,5 %`) clasificados como categóricos. Una serie temporal sobre ellos se convertía **en silencio** en un conteo de registros.
+4. **Trimestres y meses con nombre** (`2022-Q1`, `ene-2024`) no reconocidos como temporales.
+5. **Validación de planes incompleta:** solo verificaba que las columnas existieran. Planes con tipos incorrectos (una serie sin columna temporal, sumas de categorías) llegaban al motor y terminaban como resultados **parciales**. La propia respuesta simulada del «caso obligatorio» tenía una serie temporal sin columna temporal.
+6. **`distinct_count` con agrupación** ignoraba la agrupación y devolvía un total con la descripción «por año».
+7. **Dashboard:** con dos o más dimensiones se mostraba solo la tabla, y se suponía que la dimensión temporal era la primera.
+8. **Final del recorrido:** los resultados aparecían al pie de «Confirmar», sin estado global ni acciones para seguir.
+
+**Decisiones.**
+- **Metadatos de las medidas** (unidad, aditividad, dependencia) sugeridos por el perfilador, corregibles en la revisión y compartidos con la IA como metadatos. Los valores nunca viajan a la IA; tampoco los marcadores de ausencia elegidos por la persona.
+- **Un solo módulo de reglas** (`operation_rules.py`) para la validación de los planes y para el motor. Las operaciones incompatibles se **descartan antes de la aprobación** y el motivo queda en las limitaciones del plan, en lugar de rechazar toda la respuesta (que cuesta otra consulta) o de fallar después.
+- **Dependencia antes que suma:** el motor agrega siempre por las columnas que definen la medida.
+- **Vistas explorables** en lugar de componentes especiales: los mismos gráficos de Recharts, con eje, series y filtros.
+- **Paso 5, Resultados**, con estado y acciones. Datos sintéticos de prueba generados en el navegador, que siguen el camino real.
+- Detalle técnico en [ARCHITECTURE.md](ARCHITECTURE.md), sección «Motor analítico generalista».
+
+**Problemas durante la implementación.**
+- **Costo estimado:** las instrucciones más largas subieron el costo máximo estimado por consulta (de USD 0,0014 a 0,0016). Tres pruebas de presupuesto tenían montos fijos; ahora se calculan a partir de la estimación (`max_cost_per_request`).
+- **Prueba de truncado:** una prueba truncaba una frecuencia de 600 categorías, que la nueva regla prohíbe (agrupar por una columna casi única). Se reemplazó por 30 × 20 combinaciones.
+- **Filtros encadenados:** la prueba del dashboard mostró que, al cambiar de indicador, la unidad seguía en «%» y el gráfico quedaba vacío. Ahora cada filtro ofrece solo los valores que existen con los anteriores.
+- **Verificación en el navegador:** un efecto de React que devolvía un valor rompió la página de resultados. Se corrigió en el momento.
+
+**Verificación.** Backend 272 de 272 y frontend 197 de 197; lint, typecheck y build sin errores. Recorrido en el navegador con el backend real, la IA **simulada** (`scripts/simulated_ai_server.py`, sin créditos) y el dataset sintético de indicadores. Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 29.
+
+**Preparación para la entrega (27/10/2026).** Revisión previa al despliegue, sin funciones nuevas. Dos correcciones:
+- **Importes tomados como códigos:** «todos los enteros son distintos» bastaba para sugerir «Código o ID». En el dataset sintético de ventas, `monto_ars` quedaba como identificador y el plan no tenía ninguna medida. Ahora esa regla exige además valores casi consecutivos (1001, 1002…); los importes dispersos quedan como cantidad.
+- **Aviso de la demo pública con backend:** la portada mostraba «datos ficticios, los archivos se leen solo en tu navegador» también en la aplicación real. Ahora aparece solo en la demo sin backend, como la franja superior.
+
+Backend 273 de 273 y frontend 197 de 197; lint, typecheck y build sin errores. Recorrido completo en el navegador (Cargar → Revisar → Conversar → Confirmar → Ejecutar → Resultados) con la IA simulada y el dataset sintético de ventas: el total calculado (69.060) coincide con la suma de la tabla por mes y rubro.
+
 ## 7. Demo pública en Cloudflare Pages (commit `492b9f9`)
 
 - Configuración documentada en [DEPLOYMENT.md](DEPLOYMENT.md): carpeta `frontend`, `npm run build`, salida `dist`, `VITE_DEMO_MODE=true`.

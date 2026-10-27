@@ -137,6 +137,19 @@ python -m app.cli revoke <id>                             # revoca y cierra sus 
 - En desarrollo no se exige Cloudflare Turnstile si `TURNSTILE_SECRET_KEY` está vacía.
 - Cada invitación tiene su propia cuota de IA (`AI_USER_BUDGET_USD`, `AI_USER_DAILY_REQUESTS`).
 
+**Prueba integral sin consumir créditos.** Un backend local con la IA **simulada** (no lee `.env` ni usa tu clave; base temporal):
+
+```powershell
+python scripts/simulated_ai_server.py   # muestra un código de invitación de prueba
+```
+
+Con el frontend en modo real (`VITE_DEMO_MODE=false`, `VITE_API_BASE_URL=http://127.0.0.1:8000`):
+1. Ingresá con ese código.
+2. En «Cargar datos», elegí un **dataset sintético de prueba**.
+3. Recorré Revisar → Conversar → Confirmar → Ejecutar.
+
+Todo es real (Pandas, validación, dashboard) salvo la respuesta de la IA.
+
 - Salud: http://localhost:8000/api/health
 - Documentación interactiva: http://localhost:8000/docs
 - Pruebas: `python -m pytest`

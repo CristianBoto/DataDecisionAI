@@ -649,3 +649,78 @@ De afuera hacia adentro: **CORS** (no es autenticación: solo decide qué sitio 
 - **Una sola instancia:** los límites por IP y los almacenes en memoria no se comparten entre procesos.
 - Sin tiempo máximo por cálculo de Pandas.
 - La invitación identifica a un visitante, no a una persona: un código compartido comparte cuotas y recursos.
+
+## Motor analítico generalista (Fase 4C)
+
+DataDecision AI no está programado para un dataset. Todo cálculo sale de **reglas generales** aplicadas a la interpretación que la persona revisó: tipo de cada columna, unidad, si la medida se puede sumar y de qué columnas depende su significado. No hay nombres de columnas ni temáticas en el código.
+
+### Del archivo al resultado
+
+| Etapa | Qué se decide | Dónde |
+|-------|---------------|-------|
+| Perfilado | Tipo semántico (cuantitativa, categórica, temporal, código, texto), unidad, aditividad, dependencias y marcadores de ausencia **sugeridos**, con su motivo | `dataset_profiler.py`, `column_semantics.py`, `measure_hints.py`, `value_parsing.py` |
+| Revisión | La persona acepta o corrige cada sugerencia (por defecto se aceptan) | `ColumnInterpretationReview.tsx`, `lib/aiContext.ts` |
+| IA | Recibe solo metadatos (nunca valores) y propone operaciones del catálogo para su objetivo | `openai_provider.py` (instrucciones) |
+| Validación | Las operaciones sin sentido estadístico se **descartan antes de la aprobación**, con el motivo escrito en el plan | `operation_rules.py`, `ai_plan.prune_reply` |
+| Motor | Las mismas reglas, como última barrera, y el cálculo con Pandas | `analysis_engine.py` |
+| Dashboard | Ejes, series y filtros sobre los resultados, sin mezclar magnitudes | `lib/dashboard.ts`, `ChartView.tsx`, `ResultsPage.tsx` |
+
+### Lectura de valores (`value_parsing.py`)
+
+- **Números:** `15.000`, `1.234,56`, `1,234.56`, `3,5`, y con símbolos: `$ 1.200`, `12,5 %`, `USD 30`, `(1.500)` (negativo contable). El símbolo no cambia el valor: se informa como unidad sugerida. Solo se aceptan códigos de moneda conocidos, para que un código de producto como `ABC123` no se lea como importe.
+- **Períodos:** años (`2024`), semestres (`2024-S1`), trimestres (`2024-Q1`, `T1-2024`, `1T2024`), meses (`2024-01`, `01/2024`, `ene-2024`, `enero 2024`, `Jan 2024`) y fechas completas.
+- **Granularidad natural:** se deduce de los valores. `2019-01-01`, `2020-01-01`… son datos **anuales** (antes se mostraban como «2019-01»). Los datos diarios se resumen por mes. Si hay más de 60 períodos, se agrupan con una granularidad mayor y se avisa.
+
+### Medidas: unidad, aditividad y dependencia (`measure_hints.py`)
+
+- **Aditividad.** Importes, cantidades y conteos se pueden sumar. Tasas, porcentajes, promedios, índices, precios y stocks no. Se sugiere a partir de la unidad (`%`), de vocabulario estadístico general en el nombre o de valores entre 0 y 1. Siempre es corregible.
+- **Dependencia («formato largo»).** En archivos donde una columna dice *qué* mide cada fila (un indicador o una unidad), los valores de distintas categorías no se pueden combinar. Se sugiere por **estructura**: la categoría es parte de la clave de la fila; se excluyen sus atributos, como la unidad de cada indicador. Esa estructura tiene que coincidir con otra evidencia: unidades distintas, escalas que difieren más de 50 veces o un nombre del tipo «indicador» o «variable». Una columna con unidades distintas siempre se sugiere.
+- **Marcadores numéricos de ausencia.** Valores como `-99` o `9999` fuera del rango del resto se **sugieren**; solo se aplican si la persona los elige.
+
+### Reglas de cálculo
+
+1. Una medida que depende de otra columna se agrupa **siempre** también por esa columna: el resultado tiene una fila por indicador o unidad, nunca un total que los mezcle (`split_dimensions`).
+2. Una medida no aditiva **nunca se suma**:
+   - `sum` explícito: error comprensible;
+   - agrupaciones y series que reúnen varias filas: promedio, con aviso;
+   - `compare_groups` (participación %): se descarta.
+3. Dentro de una medida dependiente, las categorías cuya unidad no se suma (`%`, tasa, índice) se promedian aunque las demás se sumen, y se avisa.
+4. La suma de un grupo sin ningún valor es «sin dato», no cero. Los faltantes son la celda vacía, los marcadores que la persona decidió tratar como faltantes y los valores que declaró (por ejemplo, `-99`).
+5. Si cada grupo tiene un solo dato, el resultado es el **valor tal cual** (`aggregate = "value"`), no una suma.
+6. `distinct_count` con `group_by` cuenta valores distintos por grupo. Antes ignoraba la agrupación y devolvía un total con la etiqueta «por año».
+7. No se agrupa por cantidades continuas, por texto libre ni por columnas casi únicas. Histogramas y dispersiones no se aplican a medidas dependientes.
+8. Una unidad global no se aplica a una medida cuyas unidades varían por categoría.
+
+### Dashboard con varias dimensiones
+
+Cada resultado con más de una dimensión es una **vista explorable**:
+
+- **Eje:** la dimensión temporal o la primera libre.
+- **Series:** otra dimensión, por defecto la de menos categorías. Como máximo 6; si hay más, primero las de mayor valor, y la persona puede elegir otras.
+- **Filtros:** fijan un valor de cada dimensión restante. Están encadenados: al elegir otro indicador, la unidad pasa a la de ese indicador.
+- Las dimensiones que definen la medida solo se filtran, nunca van al eje ni a las series.
+- Un total por indicador se muestra como indicadores separados.
+- No se calcula nada nuevo: cada punto es una celda del motor.
+
+### Experiencia de resultados
+
+«Ejecutar análisis» lleva al **paso 5, Resultados**. Ahí se ven:
+
+- el estado: completo, parcial o sin resultados;
+- cuántas operaciones se calcularon;
+- los indicadores, los gráficos explorables, las tablas exactas y las advertencias.
+
+Para seguir hay tres acciones:
+
+- **«Modificar análisis»** vuelve al asistente conservando archivos, revisión y conversación.
+- **«Volver a ejecutar»** vuelve a «Confirmar».
+- **«Nuevo análisis»** pide confirmación antes de descartar el trabajo.
+
+Con backend, la pantalla de carga ofrece además **datos sintéticos de prueba**: ventas, indicadores en formato largo y clasificación. Se generan como un CSV común y siguen el camino real, sin respuestas DEMO.
+
+### Limitaciones
+
+- Las sugerencias son heurísticas: un archivo en formato largo cuyos indicadores tienen la misma escala y sin columna de unidad puede no detectarse. Por eso la IA tiene instrucciones de preguntar y la persona puede marcar la dependencia.
+- La aditividad es una propiedad de la columna. En formato largo se refina por unidad (`%`, tasa, índice). Si los indicadores no aditivos no tienen una unidad reconocible, su promedio depende de que la persona marque la columna como no aditiva.
+- No hay filtros de valores en la ejecución: la IA no ve los valores. Las preguntas sobre un indicador concreto se resuelven desglosando por esa columna y filtrando en el dashboard.
+- Los períodos con formatos poco comunes (temporadas «2023/24», semanas ISO) no se reconocen como temporales.

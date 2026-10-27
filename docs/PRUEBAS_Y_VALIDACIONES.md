@@ -906,3 +906,64 @@ Cambios sin confirmar. **Sin llamadas reales a OpenAI ni a Cloudflare, sin consu
 - B no puede autorizar la solicitud de A; con la IA deshabilitada, A recibe «No se envió nada»;
 - tras **reiniciar el servidor**, la sesión de A sigue vigente; al cerrar sesión, 401;
 - los registros del servidor no contienen ni el token ni los códigos.
+
+## 29. Motor analítico generalista (✅ verificada, 26/10/2026)
+
+Cambios sin confirmar. **Sin llamadas reales a OpenAI ni consumo.** La IA se simula solo en las pruebas y en el servidor de prueba local.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **272 de 272**: 260 anteriores (6 adaptadas) y 12 en `tests/test_general_engine.py` |
+| Frontend (`npm test`) | **197 de 197** en 22 archivos: 187 anteriores (4 adaptadas) y 10 en `src/test/generalEngine.test.tsx` |
+| Lint, typecheck y build | Sin errores |
+
+**Seis datasets sintéticos** (`tests/test_general_engine.py`). Cada uno recorre perfilado real, revisión que acepta las sugerencias y motor Pandas, y se compara con valores calculados a mano:
+
+| Dataset | Qué se verifica |
+|---------|-----------------|
+| 1. Ventas: fechas diarias, rubros y montos `$ 1.200,50` | Monto cuantitativo con unidad `$`. Total 7.352,25; 2.450,75 por mes (los días se resumen por mes); 6.001,5 y 1.350,75 por rubro |
+| 2. Indicadores económicos en formato largo, con unidades distintas | Se sugiere que `dato` depende de `serie` y `unidad`. Ningún total mezcla magnitudes. Serie **anual** (no «2022-01»). Las ventas externas se suman por año (300 y 320) y el porcentaje se promedia (7,5, no 15), con aviso. No hay unidad global |
+| 2b. Tasa en % | Sugerida como no aditiva. `sum`: error comprensible; promedio 46,75; la evolución promedia regiones (46,5 y 47,0) |
+| 3. Educación: matrícula por nivel y trimestre `2023-Q1` | Período trimestral («2023-T1»). Un dato por nivel y trimestre: valor tal cual. La tasa de promoción (0 a 1) es no aditiva y se promedia |
+| 4. Faltantes y tipos ambiguos | Legajo con ceros = código. `-99` sugerido como marcador. Sin decidir, el promedio lo incluye; declarado, se excluye (promedio exacto). `NA` sin decidir, con aviso; tratado como faltante, sin aviso. Columna mixta = texto con confianza baja |
+| 5. Clasificación | Probabilidad no aditiva. ROC con AUC = 8/9 (calculado a mano) |
+| 6. Fechas con nombre de mes y tres dimensiones | `ene-2024` es temporal. Cubo mes × región × canal con 18 filas y valores exactos; serie por canal; frecuencias por región y canal |
+
+| Pedidos incompatibles | Resultado |
+|-----------------------|-----------|
+| Histograma de una medida que depende de un indicador | Error: «mezclaría magnitudes incompatibles» |
+| Serie temporal sin columna temporal | Error: «requiere una columna temporal validada» |
+| Agrupar por una cantidad continua | Error que sugiere un histograma |
+| Plan de la IA con una serie válida, un histograma de una medida dependiente y una suma de una tasa | Quedan solo las operaciones válidas. Los dos descartes, con su motivo, en las limitaciones del plan |
+| `split_by` hacia una columna no compartida | Rechazado por el esquema |
+
+**Frontend** (`src/test/generalEngine.test.tsx`):
+- **Vista por defecto de un cubo de 3 dimensiones:** eje temporal, la dimensión con menos categorías como series y el resto filtrado, con los valores exactos del motor.
+- **Cambios de vista:** cambiar el eje o el filtro da vistas válidas.
+- **Dimensión temporal en otra posición:** se reconoce aunque no sea la primera.
+- **Formato largo:**
+  - el indicador y la unidad se filtran y nunca van a las series;
+  - un total por indicador se muestra como indicadores separados;
+  - al cambiar de indicador, la unidad se ajusta sola (filtros encadenados).
+- **Muchas categorías:** se muestran las 6 de mayor valor, con aviso.
+- **Estado global:** completo, parcial o vacío.
+- **Revisión de las medidas:**
+  - sugerencias aceptadas por defecto, con corrección de la dependencia;
+  - `-99` solo se aplica si la persona lo elige;
+  - la IA recibe unidad, aditividad y dependencia, sin ningún valor.
+- **Datos sintéticos:** CSV determinísticos e identificados como datos de prueba.
+
+**Pruebas adaptadas:**
+- **Catálogo y validación:** la verificación exacta de la lista blanca suma los tres metadatos. Los planes visuales imposibles ahora se descartan (no rechazan la respuesta).
+- **Caso obligatorio:** la respuesta simulada incluye la columna temporal que le faltaba.
+- **Presupuesto y truncado:** los montos se calculan a partir de la estimación, y el truncado usa 600 combinaciones de dos columnas.
+- **Unidad y resultados:** la unidad se indica en «Revisar» y los resultados están en el paso 5.
+
+**Verificación en el navegador.** Backend real con IA **simulada** (`scripts/simulated_ai_server.py`), frontend con backend, dataset sintético de indicadores (54 filas):
+- **Revisión:** sugiere que `valor` depende de `indicador` y `unidad`, con su motivo.
+- **IA simulada:** propone una serie por región, un total y un histograma. El histograma se descarta antes de la aprobación, con el motivo visible en el plan.
+- **Resultados (paso 5):**
+  - «Análisis completo», 2 de 2 operaciones;
+  - indicadores por magnitud: desempleo 7,4 % (promedio), exportaciones 5.940 millones USD y población 14.557.500, que coinciden con el cálculo manual;
+  - líneas por región con el filtro indicador/unidad: al elegir «exportaciones», la unidad pasa sola a «millones USD».
+- **Móvil:** sin desplazamiento horizontal a 375 px.

@@ -204,6 +204,17 @@ MAX_UPLOAD_MB=10
 MAX_DATASET_CELLS=1000000
 ```
 
+Servicio web en Render:
+
+| Campo | Valor |
+|-------|-------|
+| Runtime | Python 3 (`PYTHON_VERSION=3.12.9`, la versión con la que se probó) |
+| Root Directory | `backend` |
+| Build Command | `pip install -r requirements.txt` |
+| Health Check Path | `/api/health` |
+| Instancias | 1 (sin autoescalado) |
+| Disco | Persistent Disk montado en `/var/data` (requiere un plan pago; el plan gratuito no lo incluye y el backend no arrancaría) |
+
 Comando de inicio (desde `backend/`):
 
 ```
