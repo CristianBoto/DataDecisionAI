@@ -66,11 +66,17 @@ class MeasureHints:
 
 
 def _unit_from_values(values: pd.Series) -> str | None:
-    """Unidad común a casi todas las celdas ("$ 1.200" → "$"), o None."""
-    units = values.map(lambda v: parse_decorated(v)[1])
-    present = units.dropna()
-    if len(present) >= 0.9 * len(values) and present.nunique() == 1:
-        return str(present.iloc[0])
+    """Unidad común a casi todas las celdas ("$ 1.200" → "$"), o None.
+
+    Se interpreta cada valor DISTINTO una sola vez (ponderado por su frecuencia): mismo
+    resultado que recorrer todas las celdas, sin repetir el trabajo en cada fila.
+    """
+    counts = values.value_counts()
+    units = {value: parse_decorated(value)[1] for value in counts.index}
+    present = sum(int(n) for value, n in counts.items() if units[value] is not None)
+    distinct = {unit for unit in units.values() if unit is not None}
+    if present >= 0.9 * len(values) and len(distinct) == 1:
+        return str(distinct.pop())
     return None
 
 
@@ -99,8 +105,8 @@ def _unit_column_ratio(values: pd.Series) -> float:
 
 
 def _numbers(values: pd.Series) -> pd.Series:
-    lookup = {v: parse_decorated(v)[0] for v in values.dropna().unique()}
-    return values.map(lambda v: lookup.get(v) if isinstance(v, str) else None).astype("float64")
+    lookup = {v: parse_decorated(v)[0] for v in values.dropna().unique() if isinstance(v, str)}
+    return values.map(lookup).astype("float64")
 
 
 def _sentinels(texts: pd.Series, numbers: pd.Series) -> list[str]:

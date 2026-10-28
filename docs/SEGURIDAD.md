@@ -452,3 +452,13 @@ La interpretación de resultados es un **segundo tipo de envío** a OpenAI, con 
 
 - Las afirmaciones sin cifras no se pueden verificar: se muestran marcadas como no verificadas.
 - Los resultados guardados para interpretar viven en memoria del proceso: se pierden al reiniciar y no se comparten entre instancias (el despliegue usa una sola).
+
+
+## 13. Auditoría defensiva (Fase 4D)
+
+Detalle, mediciones y controles manuales en [AUDITORIA_SEGURIDAD.md](AUDITORIA_SEGURIDAD.md), sección 7. Nuevos controles:
+- **Recursos:** cupo compartido de tareas pesadas, con **1 a la vez en producción** (2 en desarrollo) y 1 por visitante. Si el cupo está ocupado, 429 inmediato con `Retry-After`. Hay tope de 90 s por ejecución (cooperativo: no detiene una operación ya iniciada) y de celdas combinadas, y límites de 30 perfilados y 10 ejecuciones cada 10 minutos por invitación.
+- **Memoria del informe:** se guarda solo el contexto agregado, 2 ejecuciones por visitante.
+- **Registros:** un error inesperado devuelve un 500 genérico y se registra sin el mensaje de la excepción.
+- **Uso único atómico:** la autorización de un envío a la IA se consume con un lock.
+- **Datos, no instrucciones:** las instrucciones de la IA lo aclaran. Las etiquetas se limpian y se acotan. defusedxml protege el XML de los XLSX.

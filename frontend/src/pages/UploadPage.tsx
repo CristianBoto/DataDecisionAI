@@ -237,9 +237,9 @@ export function UploadPage() {
           )}
 
           {service.mode === 'demo' && usesBackendProfiling && (
-            <Alert tone="info" title="Perfilado real con el backend local">
-              Cada archivo se envía por separado a FastAPI ({appConfig.apiBaseUrl}) para leerlo con Pandas y no se
-              guarda. El asistente usa OpenAI y los cálculos se hacen con Pandas en ese mismo backend.
+            <Alert tone="info" title="Perfilado real con el backend">
+              Cada archivo se envía por separado al backend de DataDecision AI ({appConfig.apiBaseUrl}) para leerlo con
+              Pandas y no se guarda. El asistente usa OpenAI y los cálculos se hacen con Pandas en ese mismo backend.
             </Alert>
           )}
 

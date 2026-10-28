@@ -1,12 +1,12 @@
 # Despliegue e instalación — DataDecision AI
 
-DataDecision AI se usa de dos formas con **el mismo código**:
+DataDecision AI se usa de tres formas con **el mismo código**:
 
 | Modalidad | Qué se publica | Para quién | Estado |
 |-----------|----------------|------------|--------|
-| **A. Demo pública** | Solo el frontend en modo DEMO (Cloudflare Pages, gratis) | Cualquier persona que quiera conocer la herramienta | ✅ Lista para publicar |
-| **B. Instalación privada** | Frontend + backend FastAPI en una computadora o servidor interno | Una empresa u organización, con sus propios datos | 🟡 Documentada; el backend todavía es un esqueleto |
-| **C. Beta pública con acceso por invitación** | Frontend en Cloudflare Pages + backend FastAPI con HTTPS y disco persistente | Invitados (por ejemplo, docentes), con funcionalidad real | 🟡 Preparada en el código; **todavía no desplegada** |
+| **A. Demo pública** | Solo el frontend en modo DEMO (Cloudflare Pages, gratis) | Cualquier persona que quiera conocer la herramienta | ⏹ Reemplazada por C (la compilación pública ya no admite DEMO) |
+| **B. Instalación privada** | Frontend + backend FastAPI en una computadora o servidor interno | Una empresa u organización, con sus propios datos | 🟡 Documentada (mismo backend completo que C); sin controles empresariales (ver la sección B) |
+| **C. Beta pública con acceso por invitación** | Frontend en Cloudflare Pages + backend FastAPI en Render (Starter, 512 MB, 0,5 CPU) con disco persistente | Invitados (por ejemplo, docentes), con funcionalidad real | ✅ Desplegada. Controles a revisar en los paneles: [AUDITORIA_SEGURIDAD.md](AUDITORIA_SEGURIDAD.md), sección 7.6 |
 
 ---
 
@@ -91,7 +91,7 @@ Abrí la URL que muestra la consola (por defecto <http://localhost:4173>) y reco
 
 ## B. Instalación privada (computadora o servidor interno)
 
-> **Importante:** hoy el backend solo responde `/api/health`. Esta sección describe cómo se instalará cuando estén implementadas las etapas de [NEXT_STEPS.md](NEXT_STEPS.md). **La aplicación todavía no garantiza confidencialidad empresarial**: ver "Controles de seguridad pendientes".
+> **Importante:** el backend es el mismo de la beta pública (perfilado, IA, motor Pandas e informe). **La aplicación todavía no garantiza confidencialidad empresarial**: ver "Controles de seguridad pendientes".
 
 ### Arquitectura de una instalación
 
@@ -178,7 +178,7 @@ Ya existe: secretos fuera del repositorio (`.env` ignorado), clave de OpenAI pre
 
 ## C. Beta pública con acceso por invitación (FastAPI + Cloudflare Pages)
 
-La misma aplicación que en `localhost` (Pandas, OpenAI y dashboards), protegida por invitación. Controles y pruebas: [AUDITORIA_SEGURIDAD.md](AUDITORIA_SEGURIDAD.md), sección 6. **Todavía no se desplegó.**
+La misma aplicación que en `localhost` (Pandas, OpenAI y dashboards), protegida por invitación. Controles y pruebas: [AUDITORIA_SEGURIDAD.md](AUDITORIA_SEGURIDAD.md), secciones 6 y 7. **Desplegada** en Render y Cloudflare Pages.
 
 ### Backend
 
@@ -209,10 +209,12 @@ Servicio web en Render:
 | Campo | Valor |
 |-------|-------|
 | Runtime | Python 3 (`PYTHON_VERSION=3.12.9`, la versión con la que se probó) |
+| Branch | `beta-render` (el frontend se publica desde `main` en Cloudflare Pages) |
 | Root Directory | `backend` |
 | Build Command | `pip install -r requirements.txt` |
 | Health Check Path | `/api/health` |
 | Instancias | 1 (sin autoescalado) |
+| Tareas pesadas simultáneas | 1 en producción (`MAX_HEAVY_TASKS` sin definir). Ver «Concurrencia y memoria» |
 | Disco | Persistent Disk montado en `/var/data` (requiere un plan pago; el plan gratuito no lo incluye y el backend no arrancaría) |
 
 Comando de inicio (desde `backend/`):
@@ -222,6 +224,10 @@ uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --no-proxy-headers
 ```
 
 - `--workers 1`: los límites por IP y los almacenes en memoria son de un solo proceso.
+- **Dependencias:** `backend/requirements.txt` es el único archivo que instala Render e incluye `defusedxml==0.7.1` (lectura segura del XML de los XLSX).
+- **Ramas:** Render despliega `beta-render` y Cloudflare Pages, `main`. Un cambio que toca la API debe llegar primero a `beta-render` (backend) y después a `main` (frontend); si el frontend nuevo se publica antes, puede llamar a un endpoint que el backend todavía no tiene.
+- **Concurrencia y memoria:** en producción corre **una sola tarea pesada a la vez** (perfilado o ejecución). Medición local: cada una suma ~60 MB y las dos juntas ~120 MB, sobre ~165–190 MB del proceso, más las copias de la carga, la respuesta JSON y la fragmentación de memoria de Linux. Dos a la vez dejaban un margen de apenas 60–110 MB sobre 512 MB. Si el cupo está ocupado, el pedido se rechaza al instante con 429 y `Retry-After: 30`, sin cola ni espera indefinida. `MAX_HEAVY_TASKS=2` solo es razonable con más memoria.
+- **Tope de tiempo cooperativo:** una ejecución deja de **empezar** operaciones a los 90 s, y las pendientes se informan como «no calculadas». No detiene una operación individual ya iniciada: una operación lenta puede terminar después de ese límite.
 - **Proxy de confianza (`FORWARDED_IP_HOPS=1`):** el proxy HTTPS de la plataforma agrega a la derecha de `X-Forwarded-For` la IP que vio. El backend toma **esa** entrada, no la primera, que la escribe el visitante y podría falsificar para esquivar el límite por IP. Por eso no se usa `--forwarded-allow-ips="*"` y se desactiva el manejo de uvicorn (`--no-proxy-headers`). Si delante hubiera otro proxy propio (por ejemplo, Cloudflare con proxy activado), el valor pasa a 2.
 - **HTTPS obligatorio:** en producción se rechaza (403) todo pedido cuyo `X-Forwarded-Proto` no sea `https`, salvo `/api/health` (control de salud interno).
 - **Disco:** la carpeta de `DATABASE_URL` debe existir antes de arrancar (el disco montado). En producción la aplicación no la crea: si falta, no arranca.

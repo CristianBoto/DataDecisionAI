@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     # Límites de archivo (más bajos en la beta pública; nunca superan 25 MB ni 5 M de celdas).
     max_upload_mb: int = Field(default=25, ge=1, le=25)
     max_dataset_cells: int = Field(default=5_000_000, ge=1000, le=5_000_000)
+    # Tareas pesadas simultáneas (perfilado y ejecución comparten el cupo). Sin definir: 1 en producción
+    # (Render Starter, 512 MB: dos a la vez dejan poco margen) y 2 en desarrollo y pruebas.
+    max_heavy_tasks: int | None = Field(default=None, ge=1, le=2)
 
     # Acceso por invitación: duración de la sesión y sesiones simultáneas por invitación.
     session_ttl_hours: int = Field(default=12, ge=1, le=72)
@@ -104,6 +107,12 @@ class Settings(BaseSettings):
         if not self.database_url.startswith(prefix):
             raise ConfigurationError("DATABASE_URL debe tener la forma sqlite:///ruta/al/archivo.db.")
         return Path(self.database_url[len(prefix):])
+
+    @property
+    def heavy_tasks_limit(self) -> int:
+        if self.max_heavy_tasks is not None:
+            return self.max_heavy_tasks
+        return 1 if self.is_production else 2
 
     @property
     def max_upload_bytes(self) -> int:

@@ -15,6 +15,9 @@ pandas>=2.2,<3
 # Histograma (numpy.histogram); el motor la importa directamente.
 numpy>=2.0,<3
 openpyxl>=3.1,<4
+# Lectura segura del XML de los XLSX: openpyxl lo usa automáticamente si está instalado
+# (defensa adicional a la protección de expat contra entidades anidadas).
+defusedxml==0.7.1
 # Curva ROC y AUC (sklearn.metrics); incluye NumPy y SciPy.
 scikit-learn==1.9.1
 

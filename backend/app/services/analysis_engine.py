@@ -36,6 +36,7 @@ archivos originales ni se guarda nada.
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable
@@ -479,7 +480,7 @@ def op_scatter(src: PreparedSource, op: AIOperation, warnings: list[str]) -> Ope
     - Correlación con `Series.corr` sobre TODOS los pares: Pearson mide asociación lineal y
       Spearman, monótona (por rangos). Ninguna implica causalidad.
     - Puntos: hasta 2.000, con `DataFrame.sample(random_state=42)` si hay más (reproducible).
-    Los puntos solo viajan del backend local al navegador; nunca a la IA.
+    Los puntos solo viajan del backend al navegador; nunca a la IA.
     """
     x_col, y_col = _arity(op, 2)
     pairs = pd.DataFrame({"x": src.numbers(x_col, warnings), "y": src.numbers(y_col, warnings)}).dropna()
@@ -609,8 +610,21 @@ def _plan_columns(plan: AIPlan) -> set[str]:
     return used
 
 
-def run_plan(plan_id: str, plan: AIPlan, sources: dict[str, PreparedSource]) -> PlanResult:
-    """Ejecuta un plan aprobado sobre SU fuente. Nunca une ni relaciona fuentes."""
+def _timed_out(op: AIOperation, limit: float) -> OperationResult:
+    return OperationResult(
+        operation=op.operation, description=op.description, columns=op.columns, group_by=op.group_by, status="error",
+        error=f"No se calculó: se alcanzó el tiempo máximo de procesamiento ({limit:g} s). Reducí la cantidad de "
+        "operaciones o el tamaño del archivo.",
+    )
+
+
+def run_plan(plan_id: str, plan: AIPlan, sources: dict[str, PreparedSource], *,
+             deadline: float | None = None, time_limit: float | None = None, clock=time.monotonic) -> PlanResult:
+    """Ejecuta un plan aprobado sobre SU fuente. Nunca une ni relaciona fuentes.
+
+    Con `deadline`, las operaciones que empezarían después de ese instante no se calculan (tiempo máximo
+    cooperativo: una operación en curso no se interrumpe, pero no empieza ninguna más).
+    """
     charts = [c.model_dump() for c in plan.charts]
     src = sources.get(plan.source_alias)
     if src is None:
@@ -622,7 +636,10 @@ def run_plan(plan_id: str, plan: AIPlan, sources: dict[str, PreparedSource]) -> 
         return PlanResult(plan_id=plan_id, source_alias=plan.source_alias, title=plan.title, status="error",
                           operations=[], charts=charts,
                           warnings=[f"El plan usa columnas que ya no están autorizadas: {', '.join(missing)}."])
-    operations = [run_operation(src, op) for op in plan.operations]
+    operations = [
+        _timed_out(op, time_limit or 0) if deadline is not None and clock() > deadline else run_operation(src, op)
+        for op in plan.operations
+    ]
     failed = sum(op.status == "error" for op in operations)
     status = "ok" if failed == 0 else ("error" if failed == len(operations) else "partial")
     return PlanResult(plan_id=plan_id, source_alias=plan.source_alias, title=plan.title, status=status,
@@ -642,21 +659,35 @@ def prepare_source(alias: str, content: bytes, filename: str, columns: list[Colu
 
 def execute_analysis(request: ExecutionRequest, plans: list[tuple[str, AIPlan]],
                      files: dict[str, tuple[bytes, str]], *, max_bytes: int | None = None,
-                     max_cells: int | None = None) -> dict:
-    """Punto de entrada del motor: planes aprobados + archivos + correspondencias → resultados."""
+                     max_cells: int | None = None, max_total_cells: int | None = None,
+                     time_limit_seconds: float | None = None, clock=time.monotonic) -> dict:
+    """Punto de entrada del motor: planes aprobados + archivos + correspondencias → resultados.
+
+    `max_total_cells` acota la suma de celdas de todos los archivos de una ejecución (memoria) y
+    `time_limit_seconds`, el tiempo de procesamiento (las operaciones pendientes se informan como no calculadas).
+    """
+    start = clock()
     mappings = {s.alias: s.columns for s in request.sources}
     sources: dict[str, PreparedSource] = {}
+    total_cells = 0
     for alias, (content, filename) in files.items():
         if alias in mappings:
             sources[alias] = prepare_source(alias, content, filename, mappings[alias],
                                             max_bytes=max_bytes, max_cells=max_cells)
-    results = [run_plan(plan_id, plan, sources) for plan_id, plan in plans]
+            total_cells += int(sources[alias].df.size)
+            if max_total_cells is not None and total_cells > max_total_cells:
+                limit = f"{max_total_cells:,}".replace(",", ".")
+                raise PlanError(f"Los archivos de este análisis suman más de {limit} celdas, el máximo por ejecución. "
+                                "Ejecutá los planes de cada fuente por separado o usá archivos más chicos.")
+    deadline = start + time_limit_seconds if time_limit_seconds else None
+    results = [run_plan(plan_id, plan, sources, deadline=deadline, time_limit=time_limit_seconds, clock=clock)
+               for plan_id, plan in plans]
     return ExecutionResponse(
         executed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         sources=[SourceRead(alias=a, rows=int(s.df.shape[0]), columns=int(s.df.shape[1])) for a, s in sources.items()],
         results=results,
         notes=[
-            "Calculado con Pandas en el backend local, sobre una copia en memoria de cada archivo.",
+            "Calculado con Pandas en el backend de DataDecision AI, sobre una copia en memoria de cada archivo, que se descarta al terminar.",
             "La IA no participó del cálculo ni recibió los datos.",
             "Cada plan usa una sola fuente: las fuentes no se unieron ni relacionaron.",
         ],

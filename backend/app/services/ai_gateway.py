@@ -89,6 +89,8 @@ class AIRequestStore:
         self.ttl_seconds = ttl_seconds
         self._clock = clock
         self._pending: dict[str, _Pending] = {}
+        # Los endpoints corren en hilos: consumir y borrar debe ser atómico (uso único sin errores 500).
+        self._lock = threading.Lock()
 
     def _purge(self) -> None:
         now = self._clock()
@@ -96,6 +98,10 @@ class AIRequestStore:
             del self._pending[request_id]
 
     def prepare(self, context: AIContext, owner: str) -> tuple[str, str]:
+        with self._lock:
+            return self._prepare(context, owner)
+
+    def _prepare(self, context: AIContext, owner: str) -> tuple[str, str]:
         self._purge()
         if sum(1 for p in self._pending.values() if p.owner == owner) >= MAX_PENDING_REQUESTS:
             raise AIGatewayError(429, "Tenés demasiadas solicitudes pendientes de revisión. Cancelá o esperá a que venzan.")
@@ -107,6 +113,10 @@ class AIRequestStore:
         return request_id, sha
 
     def cancel(self, request_id: str, owner: str) -> bool:
+        with self._lock:
+            return self._cancel(request_id, owner)
+
+    def _cancel(self, request_id: str, owner: str) -> bool:
         pending = self._pending.get(request_id)
         if pending is None or pending.owner != owner:
             return False
@@ -115,6 +125,10 @@ class AIRequestStore:
 
     def consume(self, request_id: str, approved_sha256: str, owner: str) -> AIContext:
         """Valida y CONSUME la autorización (uso único, solo para su dueño)."""
+        with self._lock:
+            return self._consume(request_id, approved_sha256, owner)
+
+    def _consume(self, request_id: str, approved_sha256: str, owner: str) -> AIContext:
         pending = self._pending.get(request_id)
         if pending is None or not secrets.compare_digest(pending.owner, owner):
             raise AIGatewayError(404, "La solicitud no existe, ya se usó o fue cancelada.")

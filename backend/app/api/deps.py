@@ -13,6 +13,8 @@ from app.services.auth import AuthService, User
 
 MAX_TOKEN_LENGTH = 200
 UNAUTHENTICATED = {"WWW-Authenticate": "Bearer"}
+# Cupo ocupado: se rechaza al instante (no hay cola ni espera indefinida) y se sugiere reintentar.
+RETRY_SOON = {"Retry-After": "30"}
 
 
 def get_auth(request: Request) -> AuthService:
@@ -52,9 +54,9 @@ class ConcurrencyGate:
     def slot(self, user_id: str) -> Iterator[None]:
         with self._lock:
             if self._active[user_id] >= self.per_user:
-                raise HTTPException(429, "Ya tenés una tarea igual en curso. Esperá a que termine.")
+                raise HTTPException(429, "Ya tenés una tarea igual en curso. Esperá a que termine.", headers=RETRY_SOON)
             if self.active >= self.total:
-                raise HTTPException(429, self.busy_message)
+                raise HTTPException(429, self.busy_message, headers=RETRY_SOON)
             self._active[user_id] += 1
         try:
             yield

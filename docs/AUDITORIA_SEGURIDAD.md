@@ -354,3 +354,123 @@ Paso a paso en [DEPLOYMENT.md](DEPLOYMENT.md), sección C.
 | Invitaciones | `python -m app.cli invite --label "…" --days 14`, desde la consola del servidor |
 
 **Frontend (Cloudflare Pages):** `VITE_DEMO_MODE=false`, `VITE_API_BASE_URL=https://<backend>` y `VITE_TURNSTILE_SITE_KEY=<clave del sitio>` (es pública). La build genera `dist/_headers` con la CSP apuntando a ese backend y se corta si la configuración dejaría la versión pública en DEMO.
+
+
+## 7. Auditoría defensiva (Fase 4D, 28/10/2026)
+
+Revisión sobre el código desplegado (Render Starter: 512 MB, 0,5 CPU; SQLite en `/var/data`). Cada hallazgo se **midió o probó** en un entorno local con archivos sintéticos y proveedores falsos. No se hicieron pruebas contra producción, no se consumieron créditos y no se usaron invitaciones reales.
+
+### 7.1 Mediciones de base
+
+| Medición (este equipo; Render con 0,5 CPU es más lento) | Resultado |
+|------|-----------|
+| Memoria del proceso con pandas, NumPy, scikit-learn y OpenAI importados | 164 MB (*working set*) |
+| Perfilar un CSV sintético de 1 M de celdas (100.000 × 10, el máximo en producción) | +70–90 MB; **23,4 s antes, 5,2 s después** de la corrección C2 |
+| Ejecutar 6 planes × 8 operaciones sobre ese CSV | 73 s, sin tope de tiempo (antes de C3) |
+| Resultado de esa ejecución guardado para el informe | ~15 MB en objetos Python por ejecución (antes de C4) |
+| XLSX con entidades XML anidadas (*billion laughs*) | Rechazado en 0,14 s por expat 2.6.4, aun sin defusedxml |
+
+### 7.2 Vulnerabilidades comprobadas
+
+| # | Hallazgo | Evidencia | Impacto | Gravedad | Corrección |
+|---|----------|-----------|---------|----------|------------|
+| V1 | **Memoria insuficiente ante tareas simultáneas.** El perfilado (2 a la vez) y la ejecución (1) tenían cupos separados: hasta 3 tareas pesadas en paralelo, y una sola invitación podía ocupar 2 | 164 MB de base + 2 × 90 MB + ~250 MB (3 archivos de 1 M de celdas) ≈ 600 MB, por encima de 512 MB | Render reinicia el proceso por falta de memoria: el servicio se corta para todos y se pierden planes y conversaciones en memoria | **Alta** | C1 |
+| V2 | **Resultados guardados sin cota de memoria útil:** 5 por visitante y 300 en total, de hasta ~15 MB cada uno | Medición 7.1 | Pocas invitaciones con ejecuciones grandes agotan la memoria | **Alta** | C4 |
+| V3 | **Sin tope de tiempo en las ejecuciones.** El cupo de ejecución es único: una ejecución de 6 × 10 operaciones sobre 1 M de celdas lo ocupa varios minutos en 0,5 CPU | 73 s en este equipo | Bloqueo de los demás visitantes (429) y CPU saturada | **Alta** | C3 |
+| V4 | **Perfilado lento:** el 62 % del tiempo era `measure_hints` interpretando cada celda (526.000 llamadas) | cProfile | CPU ocupada ~45 s por archivo grande en Render | Media | C2 |
+| V5 | **Sin límite de frecuencia por invitación** para el perfilado y la ejecución (solo por IP, 120/min). Una invitación desde varias IP puede encadenar tareas pesadas | Código: `RateLimitMiddleware` usa solo la IP | Monopolio de CPU | Media | C5 |
+| V6 | **Tracebacks con datos en los registros.** Ante un error inesperado, Starlette vuelve a lanzar la excepción y uvicorn registra el mensaje completo (por ejemplo, `could not convert string to float: '30111222'`) | Comportamiento documentado de `ServerErrorMiddleware`; prueba `test_unexpected_errors_do_not_leak_values` | Valores del dataset en los registros de Render | Media | C6 |
+| V7 | **Autorización de uso único sin lock.** Con varios hilos, `consume` no envía dos veces (el `del` falla), pero los demás pedidos terminan en un `KeyError` (error 500). `_purge` también recorre el diccionario sin lock | Prueba con ventana agrandada: 1 consumo y 4 `KeyError` | Errores 500; riesgo de `RuntimeError` al vencer solicitudes en paralelo | Baja | C7 |
+| V8 | **Textos desactualizados:** «Perfilado real con el backend local», «tu backend» y la nota «backend local» en los resultados y el PDF. La documentación decía «todavía no se desplegó» y «el backend es un esqueleto» | `grep` | Confusión sobre dónde se procesan los datos | Baja | C9 |
+
+### 7.3 Riesgos plausibles pendientes de comprobación
+
+| Riesgo | Por qué es plausible | Cómo comprobarlo (sin cargar producción) | Alternativas y costo |
+|--------|---------------------|------------------------------------------|----------------------|
+| **Control de salud lento durante una tarea pesada.** Pandas libera el GIL solo en parte; con 0,5 CPU, `/api/health` puede tardar | Tareas de 5 a 90 s en un solo núcleo compartido | Panel de Render → *Events* y *Metrics*: reinicios o fallas del control de salud mientras alguien carga archivos | (a) Subir a un plan con 1 CPU (más costo mensual). (b) Procesar en un proceso hijo con límite de tiempo real y memoria (cambio de arquitectura: un *worker* por tarea, ~200 MB más). (c) Mantener los topes actuales (elegido) |
+| **Una operación individual muy lenta.** El tope de 90 s es cooperativo: una operación en curso no se interrumpe | Grupos de hasta 500 combinaciones sobre 1 M de celdas tardan ~1 s; ninguna operación del catálogo superó 3 s en las pruebas | Métricas de Render | Igual que el anterior: (b) da un corte duro |
+| **IP del visitante detrás de Render.** `FORWARDED_IP_HOPS=1` supone que Render agrega exactamente una entrada a `X-Forwarded-For` | Depende de la plataforma y de si Cloudflare hace de proxy delante | Pedir `/api/health` desde dos redes y revisar en los registros que el límite por IP distinga ambas. Con Cloudflare como proxy, el valor pasa a 2 | — |
+| **Carga del frontend sin respuesta del backend.** Si Render se reinicia, los planes y resultados en memoria se pierden | Diseño en memoria (una instancia) | Tras un redespliegue, el visitante ve «el plan ya no está disponible» | Persistir planes en SQLite (más superficie de datos guardados) |
+| **Dependencias con vulnerabilidades futuras** | Fijadas por rango | `pip-audit` y Dependabot (ver 7.6) | — |
+
+### 7.3b Verificación final de memoria: una tarea pesada en producción
+
+Medición local con datos sintéticos (1 M de celdas por archivo; la ejecución usa 2 fuentes, 2 M de celdas, el máximo combinado). Se midió el *working set* cada 20 ms con un muestreador:
+
+| Escenario | Pico | Aumento sobre el proceso |
+|-----------|------|--------------------------|
+| Solo perfilado | 252 MB | +60 MB |
+| Solo ejecución (2 fuentes, 10 operaciones) | 251 MB | +60 MB |
+| **Ejecución y perfilado a la vez** (cupo de 2) | **309 MB** | **+120 MB** |
+
+En Render hay que sumar memoria que esta medición no refleja:
+- las copias del cuerpo de la carga (hasta 10 MB por archivo, dos veces);
+- la respuesta JSON de la ejecución;
+- la fragmentación de memoria de Linux, que no devuelve al sistema la memoria liberada.
+
+Con dos tareas a la vez, la estimación ronda los 400–450 MB, un margen de 60–110 MB sobre 512 MB. **No es un margen razonable** para un servicio que se reinicia ante una falta de memoria. Por eso, en producción corre **una sola tarea pesada a la vez**. Las demás reciben 429 con `Retry-After: 30` al instante (sin cola), y la autenticación no cambia: sin sesión, 401 antes de mirar el cupo. Prueba: `test_production_runs_a_single_heavy_task_and_rejects_without_waiting`.
+
+**Costo de la decisión:** durante una ejecución (hasta ~90 s), otro visitante que quiera perfilar recibe 429 y debe reintentar.
+
+**Alternativas:**
+- un plan con más memoria y `MAX_HEAVY_TASKS=2`;
+- procesos hijos con límite de memoria (cambio de arquitectura).
+
+**El tope de 90 s es cooperativo:** solo impide empezar operaciones nuevas, no detiene una operación individual ya iniciada.
+
+### 7.4 Controles que ya funcionan (verificados)
+
+- **Autenticación:** códigos de 144 bits y tokens de 256 bits; en la base solo hay huellas SHA-256. Las sesiones vencen (12 h), hay como máximo 3 por invitación y revocar una invitación cierra sus sesiones (persistente: `test_invitations_sessions_and_spending_survive_a_restart`). El canje tiene Turnstile (falla cerrada) y 10 intentos cada 15 minutos por IP.
+- **Aislamiento:** planes, conversaciones, solicitudes, ejecuciones e interpretaciones tienen dueño; para otro visitante, 404. Los almacenes de planes y de interpretaciones están separados.
+- **Presupuesto:** reserva del costo máximo en una transacción `BEGIN IMMEDIATE`, cuota por visitante, tope diario por visitante y global, y una sola consulta en curso por visitante. Probado con 8 hilos simultáneos: nunca se supera el presupuesto. Las reservas abandonadas se cobran por su máximo, también después de un reinicio. Si la base falla, se deniega el envío.
+- **Persistencia:** en producción la aplicación no arranca sin `PERSISTENT_STORAGE_CONFIRMED=true`, sin una ruta absoluta o si la carpeta del disco no existe (no la crea). Invitaciones, sesiones y consumo sobreviven a un reinicio con la misma ruta (probado).
+- **Cargas:** se rechazan antes de leer el cuerpo si exceden el tamaño, vienen sin sesión o desde un origen no autorizado. Límites de bytes, filas, columnas y celdas en CSV y XLSX. El XLSX se descomprime con tope real (60 MB) y como máximo 1.000 entradas. Los temporales de Starlette se cierran al terminar (probado).
+- **XML:** expat 2.6.4 rechaza la expansión de entidades. ElementTree no resuelve entidades externas.
+- **Datos hacia la IA:** nunca viajan archivos, filas, nombres de archivo, puntos de dispersión o ROC ni la clase positiva. Cada envío requiere autorización de uso único sobre el contenido exacto. La respuesta se verifica (claims recalculados).
+- **Errores esperados:** mensajes en español sin rutas internas. La API no publica `/docs` en producción. Se usa HTTPS obligatorio, HSTS y CSP.
+
+### 7.5 Correcciones implementadas
+
+| # | Corrección | Dónde | Riesgo de regresión |
+|---|-----------|-------|---------------------|
+| C1 | **Cupo compartido de tareas pesadas:** perfilado y ejecución comparten el cupo, 1 por visitante. En **producción, 1 tarea pesada a la vez** (`Settings.heavy_tasks_limit`; `MAX_HEAVY_TASKS` permite 2 con más memoria). Si el cupo está ocupado, se rechaza al instante con 429 y `Retry-After: 30` | `config.py`, `main.py` (`heavy_gate`), `api/deps.py`, `routes/datasets.py`, `routes/analysis.py` | Bajo: el frontend ya trabaja de a una tarea. Con varios visitantes simultáneos puede haber más 429 |
+| C2 | **Perfilado 4,5 veces más rápido:** `measure_hints` interpreta cada valor distinto una sola vez (mismo resultado) | `services/measure_hints.py` | Bajo: 35 pruebas de perfilado sin cambios |
+| C3 | **Tope de 90 s** por ejecución y **tope de celdas combinadas** por ejecución (2 × `MAX_DATASET_CELLS`). El tope es **cooperativo**: no empiezan operaciones nuevas y las pendientes se informan como «no calculadas», pero **no detiene una operación individual ya iniciada** | `services/analysis_engine.py`, `routes/analysis.py` | Bajo: resultado parcial con motivo |
+| C4 | **El informe guarda solo el contexto agregado y acotado** (no el resultado completo), 2 por visitante y 100 en total | `services/report.py` | Bajo: la interpretación usaba solo ese contexto |
+| C5 | **Límites por invitación:** 30 perfilados y 10 ejecuciones cada 10 minutos (429 con `Retry-After`) | `routes/datasets.py`, `routes/analysis.py` | Bajo |
+| C6 | **`SafeErrorMiddleware`:** 500 genérico. El registro lleva tipo de error, ruta sin identificadores y pila (archivo, línea, función), sin mensaje ni código | `core/security_headers.py`, `main.py` | Bajo |
+| C7 | **Lock en `AIRequestStore`:** preparar, cancelar y consumir son atómicos | `services/ai_gateway.py` | Bajo |
+| C8 | **Inyección de instrucciones:** las instrucciones aclaran que nombres, categorías y textos son datos, no órdenes. Las etiquetas enviadas a la IA se limpian de caracteres de control y se acotan a 80 caracteres. **defusedxml** queda como defensa adicional para el XML de los XLSX | `openai_provider.py`, `report.py`, `requirements.txt` | Bajo |
+| C9 | Textos de la interfaz, nota del motor y documentación actualizados al despliegue real | `UploadPage.tsx`, `AnalysisExecution.tsx`, `AssistantPage.tsx`, `analysis_engine.py`, `DEPLOYMENT.md`, `README.md` | Nulo |
+
+**Inyección de instrucciones: por qué el impacto es acotado.** La IA no tiene herramientas ni acceso a red y su salida es JSON con esquema estricto. Los planes se validan contra el catálogo y las columnas autorizadas. Las cifras de la interpretación se recalculan, y React y jsPDF muestran el texto sin interpretarlo como HTML. Un nombre de columna malicioso puede, a lo sumo, sesgar texto sin cifras, que se muestra como «no verificado».
+
+### 7.6 Controles a verificar manualmente
+
+**Render**
+1. *Disks*: disco de 1 GB montado exactamente en `/var/data`, y `DATABASE_URL=sqlite:////var/data/datadecision.db`.
+2. Persistencia: después de un *Manual Deploy*, ejecutar `python -m app.cli list` en *Shell* (desde `backend`): las invitaciones siguen.
+3. Una sola instancia, sin autoescalado. *Health Check Path* `/api/health`.
+4. Variables secretas solo en *Environment* (`OPENAI_API_KEY`, `TURNSTILE_SECRET_KEY`). `ENVIRONMENT=production`, `MAX_UPLOAD_MB=10`, `MAX_DATASET_CELLS=1000000`.
+5. *Settings → Branch*: `beta-render` (Cloudflare Pages usa `main`). *Auto-Deploy* solo desde esa rama. Notificaciones de fallas de despliegue y de reinicios por memoria (*Events*).
+8. `MAX_HEAVY_TASKS` **sin definir** (1 tarea pesada a la vez). No subirlo a 2 en el plan Starter.
+6. *Metrics*: memoria y CPU durante una prueba propia con un archivo sintético grande. Sin pruebas de carga.
+7. Copia de seguridad periódica de `/var/data/datadecision.db` (por ejemplo, descargarla por *Shell*): los discos no tienen respaldo automático en todos los planes.
+
+**Cloudflare**
+1. Pages → *Settings → Environment variables*: `VITE_DEMO_MODE=false`, `VITE_API_BASE_URL` con https y `VITE_TURNSTILE_SITE_KEY`. Ningún secreto en variables `VITE_*`.
+2. Turnstile: widget limitado al dominio `datadecisionai.pages.dev`, en modo *Managed*.
+3. *Preview deployments*: restringirlos (Cloudflare Access) o desactivarlos si no se usan. El backend solo acepta el origen de producción.
+4. Si Cloudflare se pone como proxy delante de Render, `FORWARDED_IP_HOPS` pasa a 2.
+
+**GitHub**
+1. *Branch protection* en `main` (frontend, Cloudflare Pages) y en `beta-render` (backend, Render): sin *force push* y sin borrado; exigir PR si hay más colaboradores. Un *push* a cualquiera de las dos publica en producción.
+2. *Secret scanning* y *push protection* activos.
+3. *Dependabot alerts* y actualizaciones de seguridad para `backend/requirements.txt` y `frontend/package-lock.json`.
+4. Autenticación en dos pasos en la cuenta. Revisar qué aplicaciones (Render, Cloudflare) tienen acceso al repositorio.
+
+**OpenAI**
+1. Clave **de proyecto** exclusiva para DataDecision AI, con permisos mínimos (solo Responses), y rotarla si se expuso.
+2. *Limits*: presupuesto mensual del proyecto y alertas de uso (última barrera, complementaria a `AI_BUDGET_USD`).
+3. Revisar en *Usage* que el consumo coincida con el registro local (`ai_usage`).
+4. Confirmar que el modelo configurado (`OPENAI_MODEL`) tiene precio en la tabla interna o definir `OPENAI_PRICE_*`.

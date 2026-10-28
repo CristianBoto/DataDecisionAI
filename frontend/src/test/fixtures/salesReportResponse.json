@@ -426,7 +426,7 @@
   }
  ],
  "notes": [
-  "Calculado con Pandas en el backend local, sobre una copia en memoria de cada archivo.",
+  "Calculado con Pandas en el backend de DataDecision AI, sobre una copia en memoria de cada archivo, que se descarta al terminar.",
   "La IA no participó del cálculo ni recibió los datos.",
   "Cada plan usa una sola fuente: las fuentes no se unieron ni relacionaron."
  ],

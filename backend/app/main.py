@@ -12,10 +12,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.deps import ConcurrencyGate
 from app.api.router import api_router
 from app.api.routes.analysis import MAX_CONCURRENT_EXECUTIONS
-from app.api.routes.datasets import MAX_CONCURRENT_PROFILES, MAX_PROFILES_PER_USER
+from app.api.routes.datasets import MAX_PROFILES_PER_USER
 from app.core.config import ConfigurationError, Settings, get_settings, validate_for_startup
 from app.core.rate_limit import RateLimiter, RateLimitMiddleware
-from app.core.security_headers import HTTPSOnlyMiddleware, SecurityHeadersMiddleware, install_log_redaction
+from app.core.security_headers import (
+    HTTPSOnlyMiddleware,
+    SafeErrorMiddleware,
+    SecurityHeadersMiddleware,
+    install_log_redaction,
+)
 from app.core.upload_guard import UploadGuardMiddleware
 from app.services.ai_budget import AIBudget
 from app.services.ai_gateway import AIConversationStore, AIPlanStore, AIRequestStore
@@ -87,11 +92,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Fase 4C: resultados de Pandas para el informe y solicitudes de interpretación (separadas de las de planes).
     app.state.executions = ExecutionStore()
     app.state.interpretation_requests = AIRequestStore()
-    app.state.profile_gate = ConcurrencyGate(
-        total=MAX_CONCURRENT_PROFILES,
+    # Tareas pesadas (perfilado y ejecución) comparten UN cupo, una por visitante. En producción, una a la
+    # vez (Render Starter, 512 MB: dos a la vez suman ~120 MB medidos más copias de la carga y la respuesta,
+    # sobre ~165 MB del proceso, sin margen razonable). El exceso se rechaza al instante con 429 (sin espera).
+    app.state.heavy_gate = ConcurrencyGate(
+        total=settings.heavy_tasks_limit,
         per_user=MAX_PROFILES_PER_USER,
         busy_message="El servidor está procesando otros archivos. Intentá de nuevo en unos segundos.",
     )
+    app.state.profile_gate = app.state.heavy_gate
     app.state.execution_gate = ConcurrencyGate(
         total=MAX_CONCURRENT_EXECUTIONS,
         per_user=1,
@@ -101,6 +110,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def has_session(token: str) -> bool:
         return bool(token) and len(token) <= 200 and app.state.auth.authenticate(token) is not None
 
+    # Error inesperado: respuesta genérica y registro sin el mensaje de la excepción (puede contener datos).
+    app.add_middleware(SafeErrorMiddleware)
     # Los middlewares agregados primero quedan más "adentro". Los controles de
     # origen, sesión y tamaño rechazan ANTES de leer el cuerpo; CORS queda afuera
     # para que el frontend autorizado pueda leer los errores.

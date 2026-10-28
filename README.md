@@ -53,8 +53,8 @@ Sirve para cualquier dato tabular: educación, ventas, finanzas, recursos humano
 |------|-------------|
 | Frontend | React 19, Vite 7, TypeScript, Tailwind CSS 4, React Router 7, Recharts 3, Lucide React |
 | Pruebas frontend | Vitest, Testing Library, jsdom |
-| Backend (esqueleto) | Python 3.12, FastAPI, Uvicorn, pydantic-settings, Pytest |
-| Backend (próximo) | Pandas, NumPy, SQLite/PostgreSQL, OpenAI API, generación de PDF/Excel/Word/PPTX |
+| Backend | Python 3.12, FastAPI, Uvicorn, pydantic-settings, Pandas, NumPy, scikit-learn, openpyxl + defusedxml, SQLite, SDK de OpenAI, Pytest |
+| Informe PDF | jsPDF (en el navegador, cargado bajo demanda) |
 
 ## Arquitectura general
 
@@ -188,7 +188,9 @@ El backend ya permite por CORS `http://localhost:5173` y `http://127.0.0.1:5173`
 
 ## Publicar la demo
 
-Cloudflare Pages (gratis): repositorio `CristianBoto/DataDecisionAI`, rama `main`, directorio raíz `frontend`, build `npm run build`, salida `dist`. La versión pública es la aplicación real con acceso por invitación (`VITE_DEMO_MODE=false`, backend con HTTPS y Turnstile); la demo ficticia ya no se publica. Paso a paso en [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), sección C.
+**Ramas de despliegue:** Cloudflare Pages publica el **frontend** desde `main`; Render publica el **backend** desde `beta-render`.
+
+Cloudflare Pages (gratis): repositorio `CristianBoto/DataDecisionAI`, rama `main`, directorio raíz `frontend`, build `npm run build`, salida `dist`. Render (Starter, 512 MB): rama `beta-render`, directorio raíz `backend`, build `pip install -r requirements.txt` (incluye `defusedxml`). La versión pública es la aplicación real con acceso por invitación (`VITE_DEMO_MODE=false`, backend con HTTPS y Turnstile); la demo ficticia ya no se publica. Paso a paso en [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), sección C.
 
 ## Funcionalidades actuales
 

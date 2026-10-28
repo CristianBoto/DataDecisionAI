@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import traceback
 import re
 
 from starlette.datastructures import Headers, MutableHeaders
@@ -100,3 +101,43 @@ def install_log_redaction() -> None:
     access = logging.getLogger("uvicorn.access")
     if not any(isinstance(f, RedactIdentifiersFilter) for f in access.filters):
         access.addFilter(RedactIdentifiersFilter())
+
+
+logger = logging.getLogger("app.errors")
+
+
+class SafeErrorMiddleware:
+    """Error inesperado: 500 genérico y registro SIN el mensaje de la excepción.
+
+    Los mensajes de Pandas o de los validadores pueden incluir valores del dataset
+    (por ejemplo, «could not convert string to float: '30111222'»). Se registran el
+    tipo de error, la ruta sin identificadores y la pila (archivo, línea y función),
+    sin el mensaje ni las variables. Sin este middleware, Starlette vuelve a lanzar la
+    excepción y uvicorn registra el traceback completo.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        started = False
+
+        async def tracking_send(message: Message) -> None:
+            nonlocal started
+            if message["type"] == "http.response.start":
+                started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, tracking_send)
+        except Exception as exc:  # noqa: BLE001 - es la última barrera antes del servidor
+            # Solo archivo, línea y función: ni el mensaje ni el texto de la línea (podría contener valores).
+            frames = "\n".join(f"  {f.filename}:{f.lineno} en {f.name}" for f in traceback.extract_tb(exc.__traceback__)[-6:])
+            logger.error("Error interno (%s) en %s %s\n%s", type(exc).__name__, scope.get("method"), redact(scope.get("path", "")), frames)
+            if not started:
+                await JSONResponse({"detail": "Ocurrió un error interno. No se guardaron tus datos; intentá de nuevo."}, status_code=500)(
+                    scope, receive, send
+                )

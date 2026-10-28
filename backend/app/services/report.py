@@ -3,8 +3,9 @@
 Tres piezas, todas sobre los resultados que YA calculó el motor Pandas (no se
 vuelve a calcular nada ni se relee ningún archivo):
 
-1. `ExecutionStore`: guarda en memoria el resultado de cada ejecución, con dueño y
-   vencimiento, para poder interpretarlo después. Otro visitante no lo ve (404).
+1. `ExecutionStore`: guarda en memoria, con dueño y vencimiento, el contexto AGREGADO y
+   acotado de cada ejecución (no el resultado completo: memoria acotada), para poder
+   interpretarlo después. Otro visitante no lo ve (404).
 2. `descriptive_summary`: resumen DETERMINÍSTICO, sin IA: totales, primer y último
    período, variaciones, máximos, mínimos, correlaciones y AUC, cada uno con la
    operación de la que sale. Nunca suma medidas de distintas unidades ni de
@@ -45,8 +46,11 @@ from app.services.ai_gateway import AIProvider, AIRequestStore, check_sendable, 
 from app.services.openai_provider import INTERPRETATION_INSTRUCTIONS, build_input
 
 EXECUTION_TTL_SECONDS = 6 * 3600
-MAX_EXECUTIONS_PER_OWNER = 5
-MAX_STORED_EXECUTIONS = 300
+# El frontend interpreta solo la última ejecución; se conservan dos por visitante.
+MAX_EXECUTIONS_PER_OWNER = 2
+MAX_STORED_EXECUTIONS = 100
+# Etiquetas (categorías, períodos) que viajan a la IA: sin caracteres de control y con largo acotado.
+MAX_LABEL_CHARS = 80
 # Filas agregadas por operación que pueden viajar a la IA (las series temporales conservan más períodos).
 MAX_CONTEXT_ROWS = 40
 MAX_CONTEXT_TEMPORAL_ROWS = 120
@@ -82,6 +86,9 @@ class ExecutionStore:
         self._lock = threading.Lock()
 
     def save(self, result: dict, summary: dict, objective: str | None, owner: str) -> str:
+        # Se guarda solo lo que necesita la interpretación (≈ decenas de KB), no el resultado completo
+        # (que con dispersiones y agrupaciones grandes ocupa ~15 MB en memoria).
+        context = build_context({"result": result, "summary": summary, "objective": objective})
         with self._lock:
             now = self._clock()
             for eid in [k for k, v in self._entries.items() if v["expires_at"] <= now]:
@@ -90,10 +97,7 @@ class ExecutionStore:
             for eid in mine[: max(0, len(mine) - MAX_EXECUTIONS_PER_OWNER + 1)]:
                 del self._entries[eid]
             execution_id = secrets.token_urlsafe(16)
-            self._entries[execution_id] = {
-                "result": result, "summary": summary, "objective": objective, "owner": owner,
-                "expires_at": now + EXECUTION_TTL_SECONDS,
-            }
+            self._entries[execution_id] = {"context": context, "owner": owner, "expires_at": now + EXECUTION_TTL_SECONDS}
             while len(self._entries) > MAX_STORED_EXECUTIONS:
                 self._entries.popitem(last=False)
             return execution_id
@@ -335,6 +339,14 @@ def descriptive_summary(result: dict) -> dict:
 
 # --- Contexto para la IA ---------------------------------------------------------------
 
+CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _safe_label(value: str) -> str:
+    """Etiqueta de un resultado para la IA: es un dato, no una instrucción (sin saltos de línea y acotada)."""
+    return CONTROL_CHARS.sub(" ", str(value))[:MAX_LABEL_CHARS]
+
+
 SAFE_STATS = ("pearson", "spearman", "n", "auc", "positives", "negatives", "bins", "rule", "sampled", "shown")
 
 
@@ -356,6 +368,7 @@ def build_context(entry: dict) -> InterpretationContext:
         if withheld:
             rows = []
         stats = {k: v for k, v in (op.get("stats") or {}).items() if k in SAFE_STATS} or None
+        rows = [{"keys": [_safe_label(k) for k in r["keys"]], "values": r["values"]} for r in rows]
         operations.append(ContextOperation(
             ref=ref, plan_title=plan["title"], source_alias=plan["source_alias"], operation=op["operation"],
             description=operation_title(op), status=op["status"], dimensions=op.get("dimensions") or [],
@@ -719,7 +732,7 @@ def prepare_interpretation(executions: ExecutionStore, store: AIRequestStore, *,
     entry = executions.get(execution_id, owner)
     if entry is None:
         raise AIGatewayError(404, "Los resultados ya no están disponibles (por ejemplo, se reinició el backend). Ejecutá el análisis de nuevo.")
-    context = build_context(entry)
+    context: InterpretationContext = entry["context"]
     tokens, max_cost = estimate_interpretation(context, settings)
     if tokens > settings.ai_max_input_tokens:
         raise AIGatewayError(413, "Los resultados superan el tamaño máximo permitido para la IA. No se envió nada.")

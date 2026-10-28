@@ -80,7 +80,7 @@ describe('navegación', () => {
         ),
     }
     renderApp('/analisis/cargar', profiler)
-    expect(screen.getByText('Perfilado real con el backend local')).toBeInTheDocument()
+    expect(screen.getByText('Perfilado real con el backend')).toBeInTheDocument()
     await user.upload(screen.getByTestId('file-input'), new File(['sede,minutos\nCentro,10\n'], 'turnos.csv', { type: 'text/csv' }))
 
     expect(await screen.findByText('Perfil del backend')).toBeInTheDocument()

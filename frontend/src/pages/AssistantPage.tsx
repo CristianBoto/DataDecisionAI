@@ -352,7 +352,7 @@ export function AssistantPage() {
         <Alert tone="info" title="Asistente con IA real (OpenAI)">
           Cada mensaje requiere tu autorización: antes de enviarlo ves el contenido exacto y su costo máximo estimado.
           Solo se envían el objetivo, el mensaje y los metadatos autorizados, nunca tus archivos ni sus valores. La IA
-          propone; los cálculos los hace Pandas en tu backend cuando apruebes y ejecutes un plan.
+          propone; los cálculos los hace Pandas en el backend de DataDecision AI cuando apruebes y ejecutes un plan.
           {aiStatus?.remaining_usd != null && aiStatus.budget_usd != null && (
             <> Presupuesto local disponible: USD {aiStatus.remaining_usd.toFixed(4)} de {aiStatus.budget_usd.toFixed(2)}.</>
           )}

@@ -68,7 +68,7 @@ export function AnalysisExecution({ plans }: { plans: SessionAIPlan[] }) {
       <Card className="space-y-3 p-5" role="region" aria-label="Ejecutar análisis">
         <p className="text-sm font-semibold text-slate-900">Ejecutar el análisis con Pandas</p>
         <p className="text-xs text-slate-600">
-          Tus archivos se vuelven a enviar a tu backend, se calculan en memoria las operaciones de los planes aprobados
+          Tus archivos se vuelven a enviar al backend de DataDecision AI, se calculan en memoria las operaciones de los planes aprobados
           y se descartan. No se consulta a la IA ni se envían datos a OpenAI. Las unidades y qué medidas se pueden sumar
           son las que confirmaste en «Revisar».
         </p>

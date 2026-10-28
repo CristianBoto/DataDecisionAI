@@ -726,6 +726,30 @@ Se agregaron:
 
 La revisión visual del PDF detectó y corrigió dos problemas de maquetación. Backend 292 de 292 y frontend 205 de 205. Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 30b.
 
+## 6x. Auditoría defensiva (Fase 4D, sin confirmar)
+
+**Objetivo.** Revisar el despliegue real (Render Starter: 512 MB, 0,5 CPU) con prioridad en datos, disponibilidad y gasto, sin dar por confirmado ningún riesgo antes de medirlo.
+
+**Método.** Lectura del código de cada frontera y mediciones locales con archivos sintéticos: memoria del proceso, tiempos con `cProfile`, un XLSX con entidades anidadas y carreras con hilos. Ninguna prueba se hizo contra producción.
+
+**Hallazgos principales.**
+- **Memoria:** con 512 MB, las tareas pesadas simultáneas (perfilado y ejecución con cupos separados) y los resultados guardados para el informe (~15 MB cada uno) podían provocar un reinicio por falta de memoria.
+- **Tiempo:** las ejecuciones no tenían tope y ocupaban el único cupo durante minutos.
+- **Registros:** los tracebacks podían llevar valores del dataset.
+- **Uso único:** la autorización no tenía lock y los pedidos simultáneos terminaban en error 500 (no en un doble envío).
+- **Ya mitigado:** expat ya rechazaba el XLSX malicioso.
+
+**Decisiones.** Se eligieron correcciones de bajo riesgo dentro de la arquitectura actual: cupo compartido, topes de tiempo y celdas, límites por invitación, contexto acotado, manejador de errores seguro y lock. El corte duro de tiempo y memoria por tarea exigiría procesos hijos (cambio de arquitectura, más memoria), y un plan con más CPU tiene costo mensual. Se documentaron como alternativas, sin implementarlas.
+
+**Problemas durante la implementación.**
+- **Escapes en los comandos:** el entorno interpretó secuencias como `\x00` y `\n` dentro de los heredocs y dejó un carácter NUL y un salto de línea en el código. Se detectó por un error de sintaxis y un control de caracteres sobre todo el código fuente. Se corrigió con ediciones directas.
+- **Nombres:** el nombre `_label` chocaba con una función existente del resumen. Se renombró antes de ejecutar las pruebas.
+- **Pila del registro:** la primera versión incluía el texto de la línea de código, que en la prueba contenía el valor. Ahora registra solo archivo, línea y función.
+
+**Verificación final antes del commit.** Se midió la memoria con una ejecución pesada y un perfilado a la vez: +120 MB, pico de 309 MB en local. Con las copias de la carga y la fragmentación de Linux, el margen sobre 512 MB quedaba en 60–110 MB. Se decidió **una tarea pesada a la vez en producción** (`MAX_HEAVY_TASKS` permite 2 con más memoria), con 429 inmediato y `Retry-After`. Se documentaron las ramas reales (Render: `beta-render`; Cloudflare Pages: `main`) y que el tope de 90 s es cooperativo.
+
+**Verificación.** Backend 308 de 308 y frontend 205 de 205; lint, typecheck y build sin errores. Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 31, y [AUDITORIA_SEGURIDAD.md](AUDITORIA_SEGURIDAD.md), sección 7.
+
 ## 7. Demo pública en Cloudflare Pages (commit `492b9f9`)
 
 - Configuración documentada en [DEPLOYMENT.md](DEPLOYMENT.md): carpeta `frontend`, `npm run build`, salida `dist`, `VITE_DEMO_MODE=true`.

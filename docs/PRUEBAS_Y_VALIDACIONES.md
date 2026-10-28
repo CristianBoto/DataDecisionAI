@@ -1045,3 +1045,36 @@ La verificación anterior solo exigía que cada cifra existiera en los resultado
 **Revisión visual del PDF:** se guardó en una carpeta temporal y se revisó página por página. Tildes, separadores de miles, unidades, tablas, gráficos, leyendas y pie se ven bien. La revisión encontró dos defectos, ya corregidos:
 - el título de un gráfico quedaba solo al pie de la página 1;
 - las notas de verificación aparecían dentro de «Limitaciones señaladas por la IA».
+
+## 31. Auditoría defensiva (✅ verificada, 28/10/2026)
+
+Cambios sin confirmar. **Sin pruebas contra producción, sin créditos y sin invitaciones reales.** Solo archivos sintéticos y proveedores falsos.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend | **308 de 308**: 292 anteriores y 16 en `tests/test_resilience.py` |
+| Frontend | **205 de 205** (2 textos y 4 fixtures actualizados) |
+| Lint, typecheck y build | Sin errores |
+
+| Prueba (`tests/test_resilience.py`) | Qué demuestra |
+|------|---------------|
+| Cupo compartido de tareas pesadas | Con 2 tareas de otros visitantes en curso, perfilar y ejecutar dan 429; al liberarse, 200. El cupo vuelve a 0 |
+| Un visitante no perfila mientras ejecuta | 429 con su propia tarea en curso |
+| Límites por invitación | 3.er perfilado y 2.ª ejecución: 429 con `Retry-After`. Otra invitación sigue en 200 |
+| Tope de tiempo (cooperativo) | Con un reloj simulado, la 1.ª operación se calcula (69.060) y las siguientes se informan «no calculadas»: plan parcial. No interrumpe una operación ya iniciada |
+| Producción: una tarea pesada | Cupo de 1 en producción, configurable a 2 y de 2 en desarrollo. Con el cupo ocupado: 429 en menos de 2 s con `Retry-After: 30`. Sin sesión: 401, la autenticación no cambia |
+| Tope de celdas combinadas | Error comprensible antes de calcular |
+| Memoria del informe | 3 ejecuciones con 2.000 puntos de dispersión: se guardan 2, sin el resultado completo (contexto < 5 KB); la más antigua da 404 |
+| Persistencia | Invitación, sesión y consumo sobreviven a 2 reinicios con la misma base; la revocación persiste |
+| Reserva interrumpida | Después del reinicio se cobra por su máximo |
+| Presupuesto en paralelo | 8 hilos con reservas de 0,3 USD sobre 1 USD: entran 3 y 5 reciben 402. El mismo visitante en paralelo: como máximo 1 |
+| Uso único atómico | 6 hilos con la misma autorización: 1 éxito y 5 respuestas 404 (antes, `KeyError`, es decir, error 500) |
+| Interpretaciones en paralelo | 3 autorizaciones simultáneas con cuota diaria de 1: un solo envío al proveedor y la cuota registrada |
+| Errores sin datos | Un `ValueError` con un valor: 500 genérico. El registro tiene el tipo de error y no el valor |
+| Etiquetas hacia la IA | Una categoría con salto de línea e instrucción inyectada llega sin control y con 80 caracteres como máximo. Las instrucciones aclaran que son datos |
+| XLSX con entidades anidadas | Rechazado en menos de 5 s, con defusedxml activo |
+| Temporales de carga | Un archivo de 1,6 MB pasa por un temporal de Starlette, que queda cerrado al terminar |
+
+**Memoria combinada** (sección 7.3b de AUDITORIA_SEGURIDAD.md): perfilado +60 MB, ejecución de 2 fuentes +60 MB y las dos a la vez +120 MB (pico de 309 MB). Margen insuficiente sobre 512 MB: una tarea pesada a la vez en producción.
+
+**Mediciones** (sección 7.1 de AUDITORIA_SEGURIDAD.md): memoria base de 164 MB y +70–90 MB por perfilado de 1 M de celdas. El perfilado bajó de 23,4 s a 5,2 s. Los resultados guardados pasaron de ~15 MB a menos de 5 KB por ejecución.

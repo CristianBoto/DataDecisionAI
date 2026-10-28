@@ -12,6 +12,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.deps import ConcurrencyGate, require_user
 from app.core.config import Settings, get_settings
+from app.core.rate_limit import RateLimiter
 from app.schemas.ai_plan import AIPlan
 from app.schemas.analysis import ExecutionRequest
 from app.services.ai_gateway import AIPlanStore
@@ -22,8 +23,14 @@ from app.services.report import ExecutionStore, descriptive_summary
 
 router = APIRouter(prefix="/analysis", tags=["análisis"])
 
-# Una ejecución a la vez: cada una puede leer hasta tres archivos en memoria.
+# Una ejecución a la vez: cada una puede leer hasta tres archivos en memoria. Además ocupa
+# un lugar del cupo de tareas pesadas que comparte con el perfilado.
 MAX_CONCURRENT_EXECUTIONS = 1
+# Tiempo máximo de procesamiento (cooperativo: no empiezan operaciones nuevas después).
+ANALYSIS_TIME_LIMIT_SECONDS = 90
+# Suma de celdas de los archivos de una ejecución: el doble del máximo por archivo.
+MAX_EXECUTION_CELLS_FACTOR = 2
+EXECUTIONS_PER_10_MINUTES = 10
 
 
 def get_ai_plans(request: Request) -> AIPlanStore:
@@ -36,6 +43,14 @@ def get_execution_gate(request: Request) -> ConcurrencyGate:
 
 def get_executions(request: Request) -> ExecutionStore:
     return request.app.state.executions
+
+
+def get_heavy_gate(request: Request) -> ConcurrencyGate:
+    return request.app.state.heavy_gate
+
+
+def get_limiter(request: Request) -> RateLimiter:
+    return request.app.state.rate_limiter
 
 
 async def _read(upload: UploadFile, max_bytes: int) -> bytes:
@@ -74,6 +89,8 @@ async def execute(
     settings: Settings = Depends(get_settings),
     gate: ConcurrencyGate = Depends(get_execution_gate),
     executions: ExecutionStore = Depends(get_executions),
+    heavy: ConcurrencyGate = Depends(get_heavy_gate),
+    limiter: RateLimiter = Depends(get_limiter),
 ) -> dict:
     """Ejecuta con Pandas las operaciones de los planes aprobados y devuelve los resultados.
 
@@ -87,6 +104,8 @@ async def execute(
         except ValidationError as exc:
             raise HTTPException(status_code=422, detail="El pedido de ejecución no es válido.") from exc
         plans = approved_plans(parsed.plan_ids, store, user.id)
+        if not limiter.hit(f"execute:{user.id}", EXECUTIONS_PER_10_MINUTES, 600):
+            raise HTTPException(429, "Ejecutaste muchos análisis seguidos. Esperá unos minutos.", headers={"Retry-After": "600"})
         needed = {plan.source_alias for _, plan in plans}
         lacking = sorted(needed - set(uploads))
         if lacking:
@@ -94,7 +113,7 @@ async def execute(
                 status_code=422,
                 detail=f"Falta el archivo de la fuente {', '.join(lacking)}. Volvé a cargarlo para ejecutar el análisis.",
             )
-        with gate.slot(user.id):
+        with heavy.slot(user.id), gate.slot(user.id):
             try:
                 files = {
                     alias: (await _read(f, settings.max_upload_bytes), f.filename or "")
@@ -109,6 +128,8 @@ async def execute(
                     files,
                     max_bytes=settings.max_upload_bytes,
                     max_cells=settings.max_dataset_cells,
+                    max_total_cells=MAX_EXECUTION_CELLS_FACTOR * settings.max_dataset_cells,
+                    time_limit_seconds=ANALYSIS_TIME_LIMIT_SECONDS,
                 )
             except (DatasetProfileError, PlanError) as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
