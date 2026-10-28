@@ -1,94 +1,154 @@
 # DataDecision AI
 
-Plataforma web para cargar datasets CSV o Excel, explicar en lenguaje común qué se necesita decidir y obtener indicadores, gráficos y recomendaciones basadas en datos.
+Plataforma web para analizar datasets CSV o Excel: la persona explica en lenguaje común qué necesita decidir, revisa cómo se interpretan sus datos y aprueba un plan de análisis. DataDecision AI calcula los resultados con Python y Pandas, los muestra en un dashboard y genera un informe descargable en PDF.
 
 Proyecto final de **Prácticas Profesionalizantes — Tecnicatura en Ciencia de Datos**.
 
-> **Demo pública:** https://datadecisionai.pages.dev (Cloudflare Pages)
-> La demo usa datos ficticios y no requiere backend. No cargues datos confidenciales en ella.
+> **Beta pública con acceso por invitación:** https://datadecisionai.pages.dev
+> Frontend React en Cloudflare Pages y backend FastAPI en Render. No es una demo ficticia: los archivos se procesan de verdad en el backend y el asistente usa OpenAI.
 
-**MVP académico con arquitectura preparada para crecer.** Esta versión prioriza un recorrido completo, verificable y honesto: lo simulado se marca como DEMO y las piezas reales se integran de a una (hoy, el perfilado de datos con Pandas). La separación entre interfaz, servicios y backend permite sumar persistencia, IA y exportaciones sin reescribir la aplicación.
+> ⚠️ **No cargues información personal, sensible o confidencial en la beta pública** (datos de personas identificables, salud, finanzas personales, datos de clientes o de una organización) sin una evaluación previa de privacidad y la autorización de quien sea responsable de esos datos. La beta es un MVP académico: tiene protecciones, pero **no garantiza confidencialidad** (ver [Seguridad](#seguridad) y [Limitaciones](#limitaciones-conocidas)). Para probarla, usá los **datasets sintéticos** que ofrece la pantalla de carga.
 
-### Documentación del proyecto
+## Documentación del proyecto
 
 | Documento | Contenido |
 |-----------|-----------|
-| [Bitácora de desarrollo](docs/BITACORA_DESARROLLO.md) | Idea, decisiones, stack, problemas y aprendizajes (base de la exposición final) |
-| [Pruebas y validaciones](docs/PRUEBAS_Y_VALIDACIONES.md) | Pruebas verificadas y comunicadas, resultados y pendientes |
-| [Seguridad y privacidad](docs/SEGURIDAD.md) | Protecciones existentes, procesamiento local, OpenAI/Ollama y controles faltantes |
-| [Arquitectura](docs/ARCHITECTURE.md) · [Contrato de la API](docs/API_CONTRACT.md) · [Despliegue](docs/DEPLOYMENT.md) · [Próximos pasos](docs/NEXT_STEPS.md) | Documentación técnica |
+| [Bitácora de desarrollo](docs/BITACORA_DESARROLLO.md) | Idea, decisiones, problemas y aprendizajes de cada fase (base de la exposición final) |
+| [Pruebas y validaciones](docs/PRUEBAS_Y_VALIDACIONES.md) | Pruebas automatizadas y manuales de cada fase, con sus resultados |
+| [Seguridad y privacidad](docs/SEGURIDAD.md) | Frontera de privacidad con la IA, controles implementados y limitaciones |
+| [Auditoría de seguridad](docs/AUDITORIA_SEGURIDAD.md) | Auditorías de la beta pública y de la Fase 4D, con mediciones y controles a revisar en Render, Cloudflare, GitHub y OpenAI |
+| [Arquitectura](docs/ARCHITECTURE.md) | Diseño técnico de cada fase (frontera de IA, motor Pandas, motor generalista, informe) |
+| [Despliegue](docs/DEPLOYMENT.md) | Configuración de Render y Cloudflare Pages, variables y verificaciones |
+| [Contrato de la API (plan original)](docs/API_CONTRACT.md) · [Próximos pasos (plan original)](docs/NEXT_STEPS.md) | Documentos de planificación iniciales, conservados como registro histórico: la API implementada es la descrita en ARCHITECTURE.md |
 
-## Estado del proyecto (v0.1)
+## Estado de las funcionalidades
 
-| Parte | Estado real |
-|-------|-------------|
-| Interfaz completa (carga, asistente, confirmación, workspace, exportación) | ✅ Funciona |
-| Vista previa local de CSV en el navegador | ✅ Funciona (preliminar, sin enviar el archivo) |
-| Perfilado de CSV/XLSX con FastAPI + Pandas | ✅ Funciona en ejecución local (`POST /api/datasets/profile`, sin guardar el archivo) |
-| Asistente de requisitos (IA 1) | 🟡 Simulación DEMO con guion fijo |
-| Análisis, gráficos y hallazgos | 🟡 Solo resultados ficticios del dataset de ejemplo |
-| Exportación PDF, Excel, Word y Canva | 🟡 Interfaz lista; generación pendiente de backend |
-| Backend FastAPI | 🟡 `/api/health` y perfilado de datasets |
-| SQLite, OpenAI u Ollama, autenticación | ❌ Pendiente |
+| Funcionalidad | Estado | Limitaciones |
+|---------------|--------|--------------|
+| **Acceso por invitación** con Cloudflare Turnstile | ✅ Implementado | Sin registro público, roles ni recuperación de cuenta. Las invitaciones se crean desde la consola del servidor |
+| **Carga y perfilado de CSV/XLSX** con Pandas (hasta 3 archivos, cada uno analizado por separado) | ✅ Implementado | Tamaño, filas, columnas y celdas limitados. Solo la primera hoja del XLSX. No se unen archivos |
+| **Revisión de los datos y de la privacidad**: tipo de cada columna, unidad, si se puede sumar, dependencias y marcadores de ausencia | ✅ Implementado | Las sugerencias son heurísticas: hay que confirmarlas |
+| **Conversación con OpenAI** (asistente de requisitos) | ✅ Implementado | Cada mensaje requiere autorización explícita. Cuotas y presupuesto limitados |
+| **Propuesta y aprobación del plan** | ✅ Implementado | Catálogo cerrado de 14 operaciones. Las operaciones incompatibles con los datos se descartan antes de aprobar |
+| **Cálculos reales con Pandas** (conteos, sumas, promedios, medianas, mínimos, máximos, frecuencias, agrupaciones, comparaciones, series temporales, histogramas, correlaciones y curva ROC) | ✅ Implementado | Una fuente por plan. Tope de tiempo y de celdas por ejecución |
+| **Dashboard con Recharts** (barras, líneas, torta, histograma, dispersión y ROC, con vista de tabla; eje, series y filtros elegibles en resultados con varias dimensiones) | ✅ Implementado | Hasta 6 series por gráfico. Los resultados viven en la pestaña del navegador |
+| **Informe descriptivo** calculado sin IA | ✅ Implementado | Describe los resultados; no explica causas |
+| **Interpretación opcional con OpenAI**, con autorización y **validación de afirmaciones** | ✅ Implementado | Cada cifra se recalcula sobre los resultados de Pandas. Las afirmaciones sin cifras se marcan «no verificadas» |
+| **Descarga de PDF** con jsPDF (en el navegador) | ✅ Implementado | Fuentes estándar (Latin-1). Los gráficos usan la vista predeterminada |
+| Exportación a Excel, Word o Canva | ❌ No implementado | Solo existe como formulario ilustrativo en el modo DEMO |
+| Persistencia de proyectos, archivos o resultados | ❌ No implementado (por diseño) | Ver [Limitaciones](#limitaciones-conocidas) |
 
-## Modalidades de uso
+## Recorrido de un análisis
 
-El mismo código se usa de dos formas (detalle en [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)):
+1. **Cargar:** se suben hasta 3 archivos CSV o XLSX (o un dataset sintético de prueba). El backend los perfila con Pandas: filas, columnas, vacíos, duplicados, tipo de cada columna y advertencias.
+2. **Revisar:** la persona confirma o corrige la interpretación de cada columna y elige qué columnas puede conocer la IA y con qué nombre. Ve el contenido exacto que se compartiría.
+3. **Conversar:** el asistente (OpenAI) entiende el objetivo, pregunta lo que falta y propone planes. Cada envío se autoriza; también se puede autorizar una conversación por tiempo y cantidad de mensajes acotados.
+4. **Confirmar:** la persona aprueba los planes y ejecuta el análisis. Los archivos se vuelven a enviar al backend, se calculan con Pandas y se descartan.
+5. **Resultados:** dashboard, tablas exactas, informe descriptivo, interpretación opcional con IA, vista previa y descarga en PDF.
 
-1. **Demo pública gratuita**: solo el frontend, en modo DEMO, publicado en Cloudflare Pages. Sirve para mostrar el flujo. Los archivos que elija el visitante se leen únicamente en su navegador.
-2. **Instalación privada**: frontend + FastAPI + Pandas + SQLite en una computadora o servidor interno de una organización, con sus propios datos y configuración. OpenAI sería opcional y requeriría autorización y clave propias. **Todavía no está lista para datos confidenciales**: faltan los controles de seguridad listados en DEPLOYMENT.md.
+## Privacidad: qué datos van a cada lugar
 
-## Qué problema resuelve
+| Lugar | Qué recibe o guarda |
+|-------|---------------------|
+| **Navegador** | Los archivos elegidos, en la memoria de la pestaña, para volver a enviarlos al ejecutar. El token de sesión, en `sessionStorage`, que se borra al cerrar la pestaña. No se usa `localStorage` para datos |
+| **Backend en Render** (por HTTPS) | Los **archivos completos**, para perfilarlos y calcular. Se procesan en memoria y **no se guardan**. Las cargas grandes pueden pasar por un archivo temporal que se borra al terminar el pedido. En memoria, mientras el proceso sigue activo: los planes aprobados y el contexto agregado de las últimas 2 ejecuciones de cada visitante, por 6 horas |
+| **Base SQLite** (disco persistente de Render) | Huellas SHA-256 de invitaciones y sesiones (nunca los códigos), vencimientos y revocaciones. El consumo de la IA: fecha, visitante, modelo, tokens y costo. **No guarda datasets, objetivos, mensajes ni resultados** |
+| **OpenAI** (solo con autorización explícita de cada envío) | En la **conversación**: el objetivo, los mensajes y los **metadatos** de las columnas autorizadas (nombre, formato, tipo, rango aproximado de valores distintos, unidad, si se puede sumar). En la **interpretación**: el objetivo, la cantidad de filas y columnas y los **resultados agregados** de Pandas (totales por grupo o período, intervalos, correlaciones, AUC), que **incluyen nombres de categorías** de los datos. **Nunca:** archivos, filas, valores individuales, nombres de archivo ni puntos de dispersión o ROC |
 
-Muchas personas tienen datos en planillas pero no saben qué análisis hacer ni cómo interpretarlo. DataDecision AI combina ciencia de datos en Python con dos roles de inteligencia artificial:
+Las solicitudes a OpenAI se envían con `store=False`. El tratamiento de esos datos por OpenAI se rige por sus propios términos. Detalle en [docs/SEGURIDAD.md](docs/SEGURIDAD.md).
 
-- **IA 1 — Asistente de requisitos**: conversa con el usuario, revisa el perfil del dataset, detecta información faltante, hace preguntas y propone un análisis que el usuario debe aprobar. Nunca inventa datos.
-- **IA 2 — Analista de datos**: a partir del plan aprobado, coordina los cálculos con Pandas, prepara gráficos, evalúa si la evidencia respalda cada conclusión y genera el contenido de los informes.
+## Arquitectura
 
-Sirve para cualquier dato tabular: educación, ventas, finanzas, recursos humanos, logística, etc.
-
-## Tecnologías
+```
+Navegador (React + TypeScript)        Backend (FastAPI + Python, Render)              OpenAI
+Cloudflare Pages, rama main           rama beta-render, 1 instancia
+──────────────────────────────        ────────────────────────────────────            ──────
+Carga, revisión, chat, dashboard ──►  Acceso: invitaciones, sesiones, Turnstile
+Informe y PDF (jsPDF)          HTTPS  Perfilado y motor: Pandas, NumPy, scikit-learn
+                                      Frontera de IA: autorización, presupuesto ──►  Responses API
+                                      SQLite (/var/data): sesiones y consumo          (salida estructurada)
+```
 
 | Capa | Tecnologías |
 |------|-------------|
-| Frontend | React 19, Vite 7, TypeScript, Tailwind CSS 4, React Router 7, Recharts 3, Lucide React |
-| Pruebas frontend | Vitest, Testing Library, jsdom |
-| Backend | Python 3.12, FastAPI, Uvicorn, pydantic-settings, Pandas, NumPy, scikit-learn, openpyxl + defusedxml, SQLite, SDK de OpenAI, Pytest |
-| Informe PDF | jsPDF (en el navegador, cargado bajo demanda) |
-
-## Arquitectura general
+| Frontend | React 19, TypeScript, Vite 7, Tailwind CSS 4, React Router 7, Recharts 3, jsPDF (cargado bajo demanda), Lucide React |
+| Backend | Python 3.12, FastAPI, Uvicorn, Pydantic, Pandas, NumPy, scikit-learn (curva ROC), openpyxl + defusedxml, SDK oficial de OpenAI |
+| Persistencia | SQLite en un disco persistente de Render (solo acceso y consumo de la IA) |
+| Plataformas | Cloudflare Pages (frontend), Render Starter (backend), GitHub (repositorio y despliegue automático), Cloudflare Turnstile |
+| Pruebas | Pytest y Vitest con Testing Library: 308 pruebas de backend y 205 de frontend, con proveedores de IA falsos |
 
 ```
 DataDecisionAI/
-├── frontend/            React + Vite
-│   └── src/
-│       ├── components/  UI reutilizable, chat, carga, gráficos, workspace
-│       ├── context/     Servicio inyectable y sesión (solo en memoria)
-│       ├── hooks/       useService, useAsync, useConversation, useWorkspace…
-│       ├── layouts/     Público, asistente por pasos, workspace con sidebar
-│       ├── lib/         Config, CSV local, validación, formatos
-│       ├── mocks/       Datos FICTICIOS y guion del asistente DEMO
-│       ├── pages/       Pantallas
-│       ├── services/    Interfaz única + proveedor DEMO + cliente HTTP
-│       └── types/       Tipos de dominio (contrato con el backend)
-├── backend/             FastAPI
-│   ├── app/
-│   │   ├── main.py      App, CORS, routers
-│   │   ├── core/        Configuración
-│   │   ├── api/         Routers (hoy: /api/health)
-│   │   ├── schemas/     Modelos Pydantic
-│   │   ├── services/    Lógica futura (Pandas, IA, exportación)
-│   │   ├── models/      Tablas futuras
-│   │   └── db/          Conexión futura
+├── frontend/src/
+│   ├── components/   carga, revisión, chat, análisis, gráficos, informe (report/), acceso
+│   ├── pages/        Cargar, Revisar, Asistente, Confirmar, Resultados (y workspace del modo DEMO)
+│   ├── lib/          contexto para la IA, dashboard, informe y PDF, controles de compilación
+│   ├── services/     clientes del backend (perfilado, IA, motor) y proveedor DEMO
+│   └── test/         pruebas y respuestas reales del motor como fixtures
+├── backend/
+│   ├── app/api/routes/   health, auth, datasets, ai, analysis
+│   ├── app/services/     perfilado, semántica de columnas, motor, frontera de IA, presupuesto, informe
+│   ├── app/core/         configuración, límites por IP, encabezados y registros seguros
+│   ├── scripts/          servidor local con IA simulada (pruebas sin créditos)
 │   └── tests/
-└── docs/                ARCHITECTURE, API_CONTRACT, DEPLOYMENT, NEXT_STEPS
+└── docs/
 ```
 
-Los componentes nunca llaman a `fetch` ni importan mocks: usan la interfaz `DataDecisionService`. Ver [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) y [docs/API_CONTRACT.md](docs/API_CONTRACT.md).
+Detalle técnico en [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Instalación (Windows PowerShell)
+## Seguridad
 
-Requisitos: Node.js 20.19+ (recomendado 22) y Python 3.11+.
+Protecciones implementadas (no equivalen a seguridad absoluta):
+
+- **Acceso:**
+  - toda ruta de datos exige una sesión de invitación, sin modo de omitirla;
+  - códigos de 144 bits y tokens de 256 bits, con solo sus huellas en la base;
+  - sesiones de 12 h, como máximo 3 por invitación, y revocar una invitación cierra sus sesiones;
+  - Turnstile y 10 intentos de canje cada 15 minutos por IP.
+- **Aislamiento:** solicitudes, conversaciones, planes, ejecuciones e interpretaciones tienen dueño. Para otro visitante no existen (404).
+- **Cargas:**
+  - se rechazan antes de leer el cuerpo si vienen sin sesión, desde un origen no autorizado o con un tamaño excedido;
+  - límites de bytes, filas, columnas y celdas;
+  - los XLSX se descomprimen con tope real y su XML se lee con protección contra la expansión de entidades.
+- **IA y gasto:**
+  - autorización de uso único sobre el contenido exacto;
+  - reserva del costo máximo antes de enviar, en una transacción de SQLite;
+  - presupuesto global y por invitación, topes diarios y una sola consulta en curso por visitante;
+  - las respuestas se validan (planes contra el catálogo, cifras recalculadas) y nunca se ejecuta código producido por la IA.
+- **Recursos (Fase 4D):**
+  - una sola tarea pesada a la vez en producción; el exceso recibe 429 al instante;
+  - tope de 90 s por ejecución y de celdas combinadas;
+  - por invitación, 30 perfilados y 10 ejecuciones cada 10 minutos, además de 120 solicitudes por minuto por IP.
+- **Producción:**
+  - el backend no arranca con una configuración insegura (sin Turnstile, sin HTTPS en CORS o sin el disco persistente confirmado);
+  - HTTPS obligatorio, HSTS y CSP;
+  - sin `/docs` público;
+  - errores internos sin datos en los registros.
+- **Secretos:** la clave de OpenAI vive solo en el backend. Los `.env`, las bases SQLite y los datasets están excluidos de Git.
+
+Lo que **no** existe: cifrado propio de los datos en reposo, registro de auditoría por usuario, roles, políticas de retención configurables ni evaluación formal de privacidad. Detalle en [docs/SEGURIDAD.md](docs/SEGURIDAD.md) y [docs/AUDITORIA_SEGURIDAD.md](docs/AUDITORIA_SEGURIDAD.md).
+
+## Limitaciones conocidas
+
+- **Servidor chico:** Render Starter, con 512 MB de RAM y 0,5 CPU. Los archivos grandes tardan (perfilar 1 M de celdas lleva varios segundos).
+- **Una tarea pesada por vez:** perfilado o ejecución, para no agotar la memoria. Si el servidor está ocupado, la respuesta es **429** y hay que reintentar en unos segundos. No hay cola.
+- **El tope de 90 s es cooperativo:** deja de empezar operaciones nuevas y las informa como «no calculadas», pero no detiene una operación individual ya iniciada.
+- **Datos en memoria:** un reinicio o redespliegue del backend borra los planes, los permisos de conversación y los resultados guardados para interpretar. Los resultados también viven solo en la pestaña: al recargarla se pierden y hay que volver a cargar los archivos.
+- **Alcance del análisis:** una fuente por plan (no se unen archivos), operaciones de un catálogo cerrado, sin modelos predictivos (la curva ROC evalúa puntuaciones existentes) y sin causalidad.
+- **IA:** puede equivocarse. Las cifras se verifican, pero el razonamiento sin cifras se marca como no verificado y conviene revisarlo.
+- **PDF:** se genera en el navegador, con la vista predeterminada de cada gráfico y hasta 25 filas por tabla, con aviso.
+
+## Pendiente y fuera de alcance del MVP
+
+- Exportación a Excel, Word y formatos para Canva.
+- Guardar proyectos y resultados entre sesiones (hoy, deliberadamente, no se guardan datos).
+- Unir o relacionar varios archivos en un mismo análisis.
+- Roles, auditoría por usuario, cifrado en reposo y políticas de retención, necesarios para datos confidenciales o una instalación empresarial.
+- Corte duro de tiempo y memoria por tarea (exigiría procesos separados o un servidor con más recursos).
+
+## Instalación local (Windows PowerShell)
+
+Requisitos: Node.js 20.19 o superior (recomendado 22) y Python 3.12 (la versión con la que se probó).
 
 ```powershell
 # Frontend
@@ -106,18 +166,7 @@ Copy-Item .env.example .env
 
 > Si PowerShell bloquea `Activate.ps1`, ejecutá una vez: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
-## Iniciar el frontend
-
-```powershell
-cd frontend
-npm run dev
-```
-
-Abrí http://localhost:5173.
-
-Otros comandos: `npm run build`, `npm run lint`, `npm test`, `npm run preview`.
-
-## Iniciar el backend
+### Iniciar el backend
 
 ```powershell
 cd backend
@@ -125,7 +174,13 @@ cd backend
 uvicorn app.main:app --reload --port 8000
 ```
 
-**Acceso por invitación.** Con backend, la aplicación pide un código de invitación (no hay modo de omitirlo). Para generar uno en tu equipo, desde `backend/` con el entorno activado:
+- Salud: http://localhost:8000/api/health
+- Documentación interactiva (solo fuera de producción): http://localhost:8000/docs
+- Pruebas: `python -m pytest`
+
+La IA externa está deshabilitada por defecto (`AI_ENABLED=false`). Para usarla hay que configurar `OPENAI_API_KEY` en `backend/.env` (nunca en el frontend), y cada envío igual requiere autorización.
+
+**Invitaciones.** Con backend, la aplicación pide un código de invitación. Para generar uno, desde `backend/` con el entorno activado:
 
 ```powershell
 python -m app.cli invite --label "Desarrollo" --days 30   # muestra el código UNA sola vez
@@ -133,98 +188,52 @@ python -m app.cli list                                    # invitaciones, sin c�
 python -m app.cli revoke <id>                             # revoca y cierra sus sesiones
 ```
 
-- El código se guarda solo como huella en `backend/data/datadecision.db` (excluida de Git). No lo copies en archivos versionados.
-- En desarrollo no se exige Cloudflare Turnstile si `TURNSTILE_SECRET_KEY` está vacía.
-- Cada invitación tiene su propia cuota de IA (`AI_USER_BUDGET_USD`, `AI_USER_DAILY_REQUESTS`).
+- **Dónde se guarda:** el código queda solo como huella en `backend/data/datadecision.db`, excluida de Git. No lo copies en archivos versionados.
+- **Turnstile en desarrollo:** no se exige si `TURNSTILE_SECRET_KEY` está vacía; en producción es obligatorio.
+- **Cuota de IA:** cada invitación tiene la suya (`AI_USER_BUDGET_USD`, `AI_USER_DAILY_REQUESTS`).
 
-**Prueba integral sin consumir créditos.** Un backend local con la IA **simulada** (no lee `.env` ni usa tu clave; base temporal):
+### Iniciar el frontend
+
+En `frontend/.env.local`, para usar el backend local:
+
+```
+VITE_DEMO_MODE=false
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+```powershell
+cd frontend
+npm run dev
+```
+
+Abrí http://localhost:5173. Otros comandos: `npm run build`, `npm run lint`, `npm test`, `npm run preview`.
+
+### Prueba integral sin consumir créditos
+
+Un backend local con la IA **simulada**: no lee `.env`, no usa tu clave y trabaja con una base temporal. Desde `backend/`:
 
 ```powershell
 python scripts/simulated_ai_server.py   # muestra un código de invitación de prueba
 ```
 
-Con el frontend en modo real (`VITE_DEMO_MODE=false`, `VITE_API_BASE_URL=http://127.0.0.1:8000`):
+Con el frontend configurado como en la sección anterior:
 1. Ingresá con ese código.
-2. En «Cargar datos», elegí un **dataset sintético de prueba**.
-3. Recorré Revisar → Conversar → Confirmar → Ejecutar.
+2. Elegí un **dataset sintético de prueba** en «Cargar».
+3. Recorré Revisar → Conversar → Confirmar → Resultados, incluida la interpretación y el PDF.
 
-Todo es real (Pandas, validación, dashboard) salvo la respuesta de la IA.
+Todo es real (Pandas, validación, dashboard, informe) salvo las respuestas de la IA, que se identifican como simuladas. La interpretación simulada incluye a propósito afirmaciones incorrectas, para mostrar cómo las descarta la verificación.
 
-- Salud: http://localhost:8000/api/health
-- Documentación interactiva: http://localhost:8000/docs
-- Pruebas: `python -m pytest`
+## Modo DEMO (solo desarrollo)
 
-## Modo DEMO
+`VITE_DEMO_MODE=true` (el valor del `.env.example`) usa un proveedor DEMO que funciona sin backend: asistente con guion fijo, resultados **ficticios** del dataset de ejemplo, workspace y formularios de exportación ilustrativos. Todo se marca como DEMO, y los archivos solo se leen en el navegador para una vista previa preliminar.
 
-Se controla con `VITE_DEMO_MODE` en `frontend/.env.local`:
+**El modo DEMO no se publica.** En Cloudflare Pages la compilación falla si `VITE_DEMO_MODE` no es `false`, si `VITE_API_BASE_URL` no usa `https://` (o apunta a localhost) o si falta `VITE_TURNSTILE_SITE_KEY` (`frontend/src/lib/buildChecks.ts`). Para compilar fuera de Pages, la variable debe estar definida explícitamente. Reiniciá `npm run dev` después de cambiar el `.env.local`.
 
-| Valor | Comportamiento |
-|-------|----------------|
-| `true` (por defecto en `npm run dev`) | Proveedor DEMO: funciona sin backend, sin base de datos y sin API key. Respuestas simuladas y resultados ficticios, siempre marcados como DEMO. |
-| `false` | Aplicación real contra `VITE_API_BASE_URL` (FastAPI): Pandas, OpenAI y dashboards, con acceso por invitación. |
+## Publicación
 
-Para compilar (`npm run build`) la variable debe estar definida explícitamente. En Cloudflare Pages la compilación **falla** si no es `false`, si el backend no usa `https://` o si falta `VITE_TURNSTILE_SITE_KEY`: la versión pública no puede quedar en DEMO por olvidar una variable (`src/lib/buildChecks.ts`).
+| Parte | Plataforma | Rama | Configuración |
+|-------|-----------|------|---------------|
+| Frontend | Cloudflare Pages | `main` | Directorio raíz `frontend`, build `npm run build`, salida `dist`. Variables `VITE_DEMO_MODE=false`, `VITE_API_BASE_URL` (https) y `VITE_TURNSTILE_SITE_KEY` |
+| Backend | Render Starter (512 MB) | `beta-render` | Directorio raíz `backend`, build `pip install -r requirements.txt` (incluye `defusedxml`), una instancia, disco persistente en `/var/data` |
 
-Reiniciá `npm run dev` después de cambiar el `.env.local`.
-
-En modo DEMO la app no hace ninguna solicitud de red con los datos: la vista previa de CSV se calcula en el navegador y no se usa `localStorage`.
-
-### Perfilado real con Pandas (solo ejecución local)
-
-`VITE_BACKEND_PROFILING=true` hace que la pantalla de carga envíe el CSV/XLSX a `POST /api/datasets/profile` y muestre el perfil calculado por Pandas: filas y columnas reales, vacíos por columna, filas duplicadas, primeras filas y advertencias. El asistente y los resultados **siguen en DEMO**. Si el backend falla, se muestra el error; no se reemplaza por datos locales ni ficticios.
-
-1. Iniciá el backend (sección anterior) en `http://127.0.0.1:8000`.
-2. Creá `frontend/.env.local` con:
-
-   ```
-   VITE_DEMO_MODE=true
-   VITE_BACKEND_PROFILING=true
-   VITE_API_BASE_URL=http://127.0.0.1:8000
-   ```
-
-3. `npm run dev` y abrí http://localhost:5173/analisis/cargar.
-
-El backend ya permite por CORS `http://localhost:5173` y `http://127.0.0.1:5173`. En la demo pública de Cloudflare **no** se define `VITE_BACKEND_PROFILING` (queda en `false`), así que no hay llamadas al backend.
-
-## Publicar la demo
-
-**Ramas de despliegue:** Cloudflare Pages publica el **frontend** desde `main`; Render publica el **backend** desde `beta-render`.
-
-Cloudflare Pages (gratis): repositorio `CristianBoto/DataDecisionAI`, rama `main`, directorio raíz `frontend`, build `npm run build`, salida `dist`. Render (Starter, 512 MB): rama `beta-render`, directorio raíz `backend`, build `pip install -r requirements.txt` (incluye `defusedxml`). La versión pública es la aplicación real con acceso por invitación (`VITE_DEMO_MODE=false`, backend con HTTPS y Turnstile); la demo ficticia ya no se publica. Paso a paso en [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), sección C.
-
-## Funcionalidades actuales
-
-- Pantalla inicial con presentación y explicación del flujo.
-- Carga por arrastrar o seleccionar; acepta CSV y XLSX, rechaza PDF y otros formatos con mensajes claros; muestra nombre, tamaño y estado.
-- **Vista previa real de CSV** calculada en el navegador (columnas, tipos inferidos, primeras filas, vacíos), marcada como preliminar.
-- Excel: se acepta; en DEMO sin backend se indica que la vista previa llegará con el backend (no se inventan columnas).
-- **Perfilado real con Pandas** (opcional, local): con `VITE_BACKEND_PROFILING=true`, CSV y XLSX se perfilan en FastAPI mediante `POST /api/datasets/profile`.
-- Chat con el asistente (simulado en DEMO, con guion determinista basado en el perfil real del dataset).
-- Propuesta versionada con estado de viabilidad (viable, parcial, insuficiente), modificaciones y aprobación obligatoria.
-- Workspace con sidebar, indicadores, gráficos de barras, líneas, áreas y distribución (con vista de tabla), hallazgos con nivel de evidencia, limitaciones, panel del asistente y vista del dataset.
-- Sección **Exportar análisis**: PDF, Excel, Word y Canva (PDF/PPTX) con formulario validado; indica claramente que todavía no está disponible.
-- Estados de carga, vacíos y de error; diseño responsive.
-- Backend con `/api/health`, CORS de desarrollo y pruebas.
-
-## Funcionalidades pendientes
-
-- Persistencia, carga real de archivos guardados y perfil por `datasetId` (hoy el perfilado con Pandas existe, pero sin guardar el archivo).
-- IA 1 e IA 2 con OpenAI desde FastAPI.
-- Cálculos reales, validación de resultados y gráficos con datos reales.
-- Generación de PDF, Excel, Word y archivos para Canva.
-- Despliegue del backend e instalación privada completa.
-- Controles de privacidad y seguridad: autenticación, HTTPS, cifrado, retención, auditoría y consentimiento para OpenAI.
-- Edición posterior de informes.
-
-Detalle en [docs/NEXT_STEPS.md](docs/NEXT_STEPS.md). Estas etapas se desarrollarán después con ChatGPT siguiendo [docs/API_CONTRACT.md](docs/API_CONTRACT.md).
-
-## Seguridad
-
-Lo que ya existe:
-
-- Los `.env` están excluidos de git; solo se versionan los `.env.example` sin secretos.
-- La API key de OpenAI se usará exclusivamente en el backend.
-- El frontend no guarda archivos ni datos en `localStorage` y, en modo DEMO, no envía archivos por la red.
-- Datasets subidos, bases locales e informes generados están excluidos en `.gitignore`.
-
-Lo que **todavía no** existe: autenticación, cifrado, auditoría y políticas de retención. Por eso la aplicación **no garantiza hoy confidencialidad empresarial**. Detalle en [docs/SEGURIDAD.md](docs/SEGURIDAD.md).
+Un cambio en la API debe llegar primero a `beta-render` (backend) y después a `main` (frontend). Paso a paso, variables y verificaciones en [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), sección C. Controles a revisar en los paneles: [docs/AUDITORIA_SEGURIDAD.md](docs/AUDITORIA_SEGURIDAD.md), sección 7.6.
