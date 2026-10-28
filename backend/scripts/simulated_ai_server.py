@@ -30,6 +30,7 @@ import uvicorn  # noqa: E402
 from app.core.config import Settings  # noqa: E402
 from app.main import create_app  # noqa: E402
 from app.schemas.ai_plan import AIAssistantReply  # noqa: E402
+from app.schemas.interpretation import AIInterpretation  # noqa: E402
 from app.services.openai_provider import ProviderResult  # noqa: E402
 
 
@@ -70,6 +71,56 @@ class SimulatedProvider:
                        "charts": [], "limitations": ["Plan generado por la IA simulada de pruebas."]}],
         }
         return ProviderResult(AIAssistantReply.model_validate(reply), 1200, 400)
+
+
+    def interpret(self, context, settings) -> ProviderResult:
+        """Interpretación SIMULADA con claims. Incluye a propósito una atribución a otra categoría, un porcentaje
+        erróneo y una frase causal, para que se vea cómo los descarta la verificación del backend."""
+        ok = [o for o in context.operations if o.status == "ok"]
+        failed = [o for o in context.operations if o.status == "error"]
+        items, wrong = [], []
+        series = next((o for o in ok if o.temporal_dimension and o.rows), None)
+        if series:
+            t = series.dimensions.index(series.temporal_dimension)
+            others = [i for i in range(len(series.dimensions)) if i != t]
+            first = series.rows[0]
+            group = [r for r in series.rows if all(r.keys[i] == first.keys[i] for i in others)]
+            group.sort(key=lambda r: r.keys[t])
+            a, b = group[0], group[-1]
+            keys = [{"dimension": series.dimensions[i], "value": a.keys[i]} for i in others]
+            name = ", ".join(a.keys[i] for i in others)
+            m = series.measures[0]
+            unit = m.unit
+            change = b.values[0] - a.values[0]
+            claim = {"ref": series.ref, "measure": m.column, "keys": keys, "period_from": a.keys[t], "period_to": b.keys[t],
+                     "unit": unit}
+            items.append({"text": f"{name}: pasó de {a.values[0]:g} a {b.values[0]:g}{f' {unit}' if unit else ''} entre "
+                                  f"{a.keys[t]} y {b.keys[t]}.",
+                          "evidence": [series.ref],
+                          "claims": [{**claim, "kind": "value", "keys": keys + [{"dimension": series.temporal_dimension, "value": a.keys[t]}],
+                                      "period_from": None, "period_to": None, "value": a.values[0]},
+                                     {**claim, "kind": "value", "keys": keys + [{"dimension": series.temporal_dimension, "value": b.keys[t]}],
+                                      "period_from": None, "period_to": None, "value": b.values[0]}]})
+            other = next((r for r in series.rows if any(r.keys[i] != a.keys[i] for i in others)), None)
+            if other is not None:
+                wrong.append({"text": f"{', '.join(other.keys[i] for i in others)} creció {change:g}{f' {unit}' if unit else ''} "
+                                      f"entre {a.keys[t]} y {b.keys[t]}.",
+                              "evidence": [series.ref], "claims": [{**claim, "kind": "change", "value": change}]})
+            wrong.append({"text": f"{name} creció un 37 % entre {a.keys[t]} y {b.keys[t]}.", "evidence": [series.ref],
+                          "claims": [{**claim, "kind": "change_pct", "unit": "%", "value": 37}]})
+            wrong.append({"text": f"El aumento de {name} se debe a la publicidad.", "evidence": [series.ref], "claims": []})
+        reply = {
+            "executive_summary": [{"text": "Interpretación SIMULADA (no proviene de OpenAI).", "evidence": [o.ref for o in ok[:1]],
+                                   "claims": []}] + items[:1],
+            "findings": items + wrong,
+            "trends": [],
+            "recommendations": [{"text": "Revisar los resultados de cada operación antes de decidir.",
+                                 "evidence": [o.ref for o in ok[:1]], "claims": []}],
+            "limitations": ["Respuesta generada por la IA simulada de pruebas."]
+            + [f"No se pudo calcular {o.ref}: {o.error}" for o in failed],
+            "data_quality": [w for o in context.operations for w in o.warnings][:3],
+        }
+        return ProviderResult(AIInterpretation.model_validate(reply), 1500, 500)
 
 
 def main() -> None:

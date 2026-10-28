@@ -96,6 +96,60 @@ export interface PreparedAIRequest {
   estimated_max_cost_usd?: number | null
 }
 
+/** Cifra de una afirmación, ya recalculada por el backend sobre los resultados de Pandas. */
+export interface VerifiedClaim {
+  ref: string
+  measure: string
+  kind: 'value' | 'share_pct' | 'change' | 'change_pct' | 'statistic'
+  keys: { dimension: string; value: string }[]
+  period_from: string | null
+  period_to: string | null
+  /** Valor real del resultado (no el que escribió la IA). */
+  value: number
+  unit: string | null
+}
+
+/**
+ * Afirmación de la interpretación con las operaciones (refs) que la respaldan.
+ * verified: cada cifra se recalculó y el texto nombra sus categorías y períodos.
+ * unverified: no tiene cifras; no se pudo comprobar y se muestra así.
+ */
+export interface InterpretationItem {
+  text: string
+  evidence: string[]
+  status: 'verified' | 'unverified'
+  claims: VerifiedClaim[]
+}
+
+/** Interpretación de la IA YA verificada por el backend contra los resultados. */
+export interface AIInterpretation {
+  executive_summary: InterpretationItem[]
+  findings: InterpretationItem[]
+  trends: InterpretationItem[]
+  recommendations: InterpretationItem[]
+  limitations: string[]
+  data_quality: string[]
+}
+
+export interface AIInterpretationResult {
+  interpretation: AIInterpretation
+  /** Qué se descartó en la verificación y por qué. */
+  notes: string[]
+  usage: AIUsage
+}
+
+/** Contexto AGREGADO que armó el backend a partir de la ejecución: es lo que se aprueba. */
+export interface PreparedInterpretation {
+  request_id: string
+  payload: Record<string, unknown>
+  payload_sha256: string
+  expires_in_seconds: number
+  ai_enabled: boolean
+  external_calls_implemented: boolean
+  estimated_input_tokens?: number
+  estimated_max_cost_usd?: number | null
+}
+
 export interface AIGatewayClient {
   status(): Promise<AIStatus>
   prepare(payload: AIContextPayload): Promise<PreparedAIRequest>
@@ -107,6 +161,11 @@ export interface AIGatewayClient {
   revokeConversation?(conversationId: string): Promise<void>
   /** Registra la aprobación de un plan validado. No ejecuta cálculos. */
   approvePlan?(planId: string): Promise<{ plan_id: string; status: string; executed: boolean }>
+  /** Fase 4C: prepara la interpretación de una ejecución propia (no envía nada). */
+  prepareInterpretation?(executionId: string): Promise<PreparedInterpretation>
+  /** Envío autorizado (uso único) del contenido exacto que se mostró. */
+  authorizeInterpretation?(requestId: string, payloadSha256: string): Promise<AIInterpretationResult>
+  cancelInterpretation?(requestId: string): Promise<void>
 }
 
 export function createAIGatewayClient(baseUrl: string): AIGatewayClient {
@@ -126,6 +185,14 @@ export function createAIGatewayClient(baseUrl: string): AIGatewayClient {
       http.empty(`/api/ai/conversations/${id(conversationId)}`, { method: 'DELETE' }),
     cancel: (requestId) => http.empty(`/api/ai/requests/${id(requestId)}`, { method: 'DELETE' }),
     approvePlan: (planId) => http.json(`/api/ai/plans/${id(planId)}/approve`, { method: 'POST', body: {} }),
+    prepareInterpretation: (executionId) =>
+      http.json<PreparedInterpretation>('/api/ai/interpretations', { method: 'POST', body: { execution_id: executionId } }),
+    authorizeInterpretation: (requestId, payloadSha256) =>
+      http.json<AIInterpretationResult>(`/api/ai/interpretations/${id(requestId)}/authorize`, {
+        method: 'POST',
+        body: { payload_sha256: payloadSha256, confirm: true },
+      }),
+    cancelInterpretation: (requestId) => http.empty(`/api/ai/interpretations/${id(requestId)}`, { method: 'DELETE' }),
   }
 }
 

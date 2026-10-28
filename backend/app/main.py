@@ -22,6 +22,7 @@ from app.services.ai_gateway import AIConversationStore, AIPlanStore, AIRequestS
 from app.services.auth import AuthService, CloudflareTurnstile, DevelopmentTurnstile
 from app.services.database import Database
 from app.services.openai_provider import OpenAIProvider
+from app.services.report import ExecutionStore
 
 # Margen para el encabezado y los separadores de multipart sobre el límite del archivo.
 MULTIPART_OVERHEAD_BYTES = 1024 * 1024
@@ -83,6 +84,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.ai_budget.import_legacy_ledger(Path(settings.ai_legacy_usage_file))
     app.state.ai_plans = AIPlanStore()
     app.state.ai_conversations = AIConversationStore()
+    # Fase 4C: resultados de Pandas para el informe y solicitudes de interpretación (separadas de las de planes).
+    app.state.executions = ExecutionStore()
+    app.state.interpretation_requests = AIRequestStore()
     app.state.profile_gate = ConcurrencyGate(
         total=MAX_CONCURRENT_PROFILES,
         per_user=MAX_PROFILES_PER_USER,

@@ -2,7 +2,7 @@ import { createContext } from 'react'
 import type { Dataset, DatasetProfile } from '@/types/domain'
 import type { AnalysisSource } from '@/lib/datasetCatalog'
 import type { SourceReview } from '@/lib/aiContext'
-import type { AIAuthorizeResult } from '@/services/aiGateway'
+import type { AIAuthorizeResult, AIInterpretationResult } from '@/services/aiGateway'
 import type { ExecutionResponse } from '@/services/analysisEngine'
 
 /**
@@ -54,6 +54,8 @@ export interface AnalysisSessionState {
   aiConversationGrant: AIConversationGrant | null
   /** Último resultado del motor de análisis (Pandas) para los planes confirmados. */
   analysisRun: ExecutionResponse | null
+  /** Interpretación con IA de ese resultado (verificada por el backend); se descarta al volver a ejecutar. */
+  analysisInterpretation: AIInterpretationResult | null
 }
 
 export interface AnalysisSessionValue extends AnalysisSessionState {
@@ -75,6 +77,7 @@ export interface AnalysisSessionValue extends AnalysisSessionState {
   confirmPlans: (planIds: string[]) => void
   setAIConversationGrant: (grant: AIConversationGrant | null) => void
   setAnalysisRun: (run: ExecutionResponse | null) => void
+  setAnalysisInterpretation: (interpretation: AIInterpretationResult | null) => void
   reset: () => void
 }
 

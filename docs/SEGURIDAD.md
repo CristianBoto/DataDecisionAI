@@ -418,3 +418,37 @@ El modo real ya no tiene respuestas simuladas: si la IA no está disponible, no 
 - **Sin modelos:** no se entrena ningún modelo ni se generan predicciones; la ROC evalúa puntuaciones existentes.
 - **Límites:** como máximo 2.000 puntos de dispersión, 30 intervalos de histograma y 500 puntos de curva ROC (el AUC usa todos los umbrales).
 - **Dependencia:** scikit-learn 1.9.1, con versión fija en `requirements.txt`.
+
+
+## 12. Informe interpretativo con IA (Fase 4C)
+
+La interpretación de resultados es un **segundo tipo de envío** a OpenAI, con la misma frontera de consentimiento que la conversación.
+
+### Qué se envía y qué no
+
+| Se envía (solo tras autorizar) | Nunca se envía |
+|--------------------------------|----------------|
+| El objetivo revisado por la persona | Los archivos CSV/XLSX |
+| Alias, filas y columnas de cada fuente | Las filas originales y los valores individuales |
+| Resultados **agregados** de Pandas: totales por grupo o período, intervalos del histograma, correlaciones, AUC | Los puntos de una dispersión o de una curva ROC |
+| Advertencias del motor y motivos de las operaciones fallidas | Los nombres de los archivos |
+| El resumen descriptivo ya calculado | La clase positiva de la ROC y los valores declarados faltantes |
+
+**Cambio respecto de la conversación:** los resultados agregados incluyen **nombres de categorías** de los datos (por ejemplo, «Alimentos» o «Norte») y cifras agregadas. Por eso el panel de autorización lo dice expresamente y muestra el JSON completo antes de enviar. Si la persona no autoriza, no sale nada.
+
+### Controles
+
+- **Contexto armado por el backend.** El navegador solo envía `execution_id`. El backend construye el contexto a partir de la ejecución guardada, así que no se puede inyectar otro contenido.
+- **Uso único y contenido exacto.** Se autoriza la huella SHA-256 del contenido mostrado. Otra huella da 409; reutilizar la autorización, 404; pasados 5 minutos, 410.
+- **Aislamiento.** Ejecuciones y solicitudes tienen dueño: para otro visitante no existen (404). Las solicitudes de interpretación están en un almacén separado del de planes, así que una no se puede usar como la otra. Todo `/api/ai/*` sigue exigiendo sesión y origen autorizado.
+- **Presupuesto.** `metered_call` aplica la misma reserva del costo máximo, cuota por visitante, tope diario y registro en SQLite que la conversación. `AI_ENABLED=false` rechaza el envío (403) y descarta la solicitud preparada.
+- **Tamaño.** Contexto acotado (40 filas por operación, 120 en series temporales) y rechazo si supera `AI_MAX_INPUT_TOKENS` (413).
+- **Respuesta verificada.** Cada cifra llega declarada como claim y se recalcula sobre los resultados de Pandas (operación, categoría, período, unidad y signo). El texto debe estar atado a sus claims. Se descartan las atribuciones a otra categoría o período, las unidades incompatibles, los porcentajes erróneos, el lenguaje causal y las afirmaciones apoyadas en operaciones fallidas (ver ARCHITECTURE.md). Si no queda un resumen ni un hallazgo, la respuesta se rechaza (502) y el consumo queda registrado.
+- **Sin filas individuales encubiertas.** Si una agrupación tiene tantos grupos como registros, sus filas no se envían a la IA.
+- **Sin ejecución de código.** La IA devuelve texto estructurado. No se ejecuta nada de lo que produce.
+- **PDF en el navegador.** Se genera localmente con jsPDF y no viaja a ningún servidor. La CSP no cambia: las imágenes de los gráficos son `data:`, ya permitidas en `img-src`. El PDF se arma solo con lo que la propia sesión recibió: su ejecución y su interpretación. No hay un endpoint de descarga que acepte identificadores, y las ejecuciones e interpretaciones de otra sesión dan 404.
+
+### Limitaciones
+
+- Las afirmaciones sin cifras no se pueden verificar: se muestran marcadas como no verificadas.
+- Los resultados guardados para interpretar viven en memoria del proceso: se pierden al reiniciar y no se comparten entre instancias (el despliegue usa una sola).

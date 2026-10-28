@@ -18,6 +18,7 @@ from app.services.ai_gateway import AIPlanStore
 from app.services.analysis_engine import PlanError, execute_analysis
 from app.services.auth import User
 from app.services.dataset_profiler import DatasetProfileError
+from app.services.report import ExecutionStore, descriptive_summary
 
 router = APIRouter(prefix="/analysis", tags=["análisis"])
 
@@ -31,6 +32,10 @@ def get_ai_plans(request: Request) -> AIPlanStore:
 
 def get_execution_gate(request: Request) -> ConcurrencyGate:
     return request.app.state.execution_gate
+
+
+def get_executions(request: Request) -> ExecutionStore:
+    return request.app.state.executions
 
 
 async def _read(upload: UploadFile, max_bytes: int) -> bytes:
@@ -68,8 +73,13 @@ async def execute(
     user: User = Depends(require_user),
     settings: Settings = Depends(get_settings),
     gate: ConcurrencyGate = Depends(get_execution_gate),
+    executions: ExecutionStore = Depends(get_executions),
 ) -> dict:
-    """Ejecuta con Pandas las operaciones de los planes aprobados y devuelve los resultados."""
+    """Ejecuta con Pandas las operaciones de los planes aprobados y devuelve los resultados.
+
+    También devuelve el resumen descriptivo (sin IA) y un identificador para interpretar
+    después ESTOS resultados: quedan en memoria, solo para este visitante.
+    """
     uploads = {alias: f for alias, f in (("A", file_A), ("B", file_B), ("C", file_C)) if f is not None}
     try:
         try:
@@ -92,7 +102,7 @@ async def execute(
                     if alias in needed
                 }
                 # Pandas es síncrono: se ejecuta en un hilo para no bloquear el servidor.
-                return await run_in_threadpool(
+                result = await run_in_threadpool(
                     execute_analysis,
                     parsed,
                     plans,
@@ -102,6 +112,10 @@ async def execute(
                 )
             except (DatasetProfileError, PlanError) as exc:
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
+        summary = descriptive_summary(result)
+        result["summary"] = summary
+        result["execution_id"] = executions.save(result, summary, parsed.objective, user.id)
+        return result
     finally:
         for upload in uploads.values():
             await upload.close()

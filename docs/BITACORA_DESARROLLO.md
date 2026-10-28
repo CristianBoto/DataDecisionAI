@@ -692,6 +692,40 @@ Se comprobó en pruebas automáticas y en la aplicación.
 
 Backend 273 de 273 y frontend 197 de 197; lint, typecheck y build sin errores. Recorrido completo en el navegador (Cargar → Revisar → Conversar → Confirmar → Ejecutar → Resultados) con la IA simulada y el dataset sintético de ventas: el total calculado (69.060) coincide con la suma de la tabla por mes y rubro.
 
+## 6w. Informe interpretativo y exportación PDF (Fase 4C, sin confirmar)
+
+**Objetivo.** Después de los gráficos, explicar los resultados reales en un informe: hallazgos, tendencias, recomendaciones y limitaciones, adaptado al objetivo y a lo que efectivamente se calculó. También debía poder descargarse en PDF aunque la IA estuviera deshabilitada.
+
+**Diagnóstico de la arquitectura existente.**
+- Los resultados de Pandas solo vivían en el navegador. Para interpretarlos sin que el navegador pudiera alterar lo enviado, el backend tenía que conservarlos.
+- La frontera de IA (preparar → mostrar → autorizar una vez → reservar presupuesto → validar) ya resolvía el consentimiento. Solo faltaba reutilizarla para otro tipo de contenido.
+- Los gráficos del dashboard son SVG de Recharts: se pueden capturar como imagen sin dibujarlos de nuevo.
+
+**Decisiones.**
+- **Resumen descriptivo determinístico en el backend**, sin IA. Es la base del informe y lo que permite el PDF sin OpenAI. Sus cifras son, además, las únicas «derivadas» que la IA puede citar.
+- **Contexto armado por el backend** desde la ejecución guardada, con dueño y vencimiento. El navegador solo envía el identificador.
+- **Verificación de la respuesta** por reglas explicables: cifras presentes en los resultados, sin lenguaje causal y con operaciones calculadas como respaldo.
+- **PDF en el navegador con jsPDF**, cargado bajo demanda. Se descartaron la generación en el servidor (más dependencias y más carga en Render) y la impresión del navegador (no da un archivo con el mismo contenido en todos los equipos).
+- **Refactor sin cambio de comportamiento:** la reserva y liquidación del presupuesto pasaron a `metered_call`, y la llamada a OpenAI a `_parse`, compartidas por la conversación y la interpretación.
+
+**Problemas durante la implementación.**
+- **Lectura de cifras:** «0,5» se leía también como «5» (separador de miles), y la cifra inventada pasaba la verificación. Ahora el separador de miles solo vale con grupos de 3 dígitos. Lo detectó la prueba de cifras rechazadas.
+- **Fines de línea:** los archivos del frontend usan CRLF, y los reemplazos automáticos fallaban. Se editó respetando el formato de cada archivo.
+- **Verificación en el navegador:** el panel estaba oculto y las capturas salían en blanco. El PDF se verificó interceptando la descarga y extrayendo el texto y las imágenes de sus flujos, sin guardar archivos en el equipo.
+
+**Cómo defenderlo.** La IA nunca calcula: redacta sobre resultados de Pandas que el backend conserva, que la persona ve completos antes de autorizar, y su texto se filtra contra esos mismos resultados. Cada afirmación lleva la referencia de la operación que la respalda, y el resumen determinístico está siempre en el informe para contrastarla. Detalle en [ARCHITECTURE.md](ARCHITECTURE.md) («Informe interpretativo y exportación PDF»), [SEGURIDAD.md](SEGURIDAD.md) (sección 12) y [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md) (sección 30).
+
+**Verificación.** Backend 285 de 285 y frontend 204 de 204; lint, typecheck y build sin errores. Recorrido completo en el navegador con la IA simulada y el PDF verificado (4 páginas, 2 gráficos reales).
+
+**Revisión final antes del commit.** La primera versión reconocía un riesgo: una cifra real podía atribuirse a otra categoría y pasar la verificación. Se cambió el contrato con la IA: cada cifra se declara como un claim (operación, medida, categorías, período, unidad, tipo y valor), y el backend la recalcula sobre las filas de Pandas y ata el texto a sus claims (`check_claim` y `_check_text`). Lo que no se puede verificar se descarta con su motivo. Las afirmaciones sin cifras se conservan marcadas como no verificadas.
+
+Se agregaron:
+- el resumen ejecutivo descriptivo (sin IA);
+- la retención de agrupaciones a nivel de registro;
+- notas de vista y filtros predeterminados en cada gráfico del PDF.
+
+La revisión visual del PDF detectó y corrigió dos problemas de maquetación. Backend 292 de 292 y frontend 205 de 205. Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 30b.
+
 ## 7. Demo pública en Cloudflare Pages (commit `492b9f9`)
 
 - Configuración documentada en [DEPLOYMENT.md](DEPLOYMENT.md): carpeta `frontend`, `npm run build`, salida `dist`, `VITE_DEMO_MODE=true`.

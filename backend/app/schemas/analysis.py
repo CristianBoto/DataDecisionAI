@@ -65,6 +65,8 @@ class SourceMapping(_Strict):
 class ExecutionRequest(_Strict):
     plan_ids: list[str] = Field(min_length=1, max_length=6)
     sources: list[SourceMapping] = Field(min_length=1, max_length=MAX_SOURCES)
+    # Objetivo revisado por la persona (el mismo que pudo compartir con la IA). Solo se usa en el informe.
+    objective: str | None = Field(default=None, max_length=2000)
 
     @model_validator(mode="after")
     def unique(self) -> ExecutionRequest:

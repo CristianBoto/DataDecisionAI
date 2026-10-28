@@ -65,7 +65,8 @@ export function buildExecution(
     })
 
   return {
-    request: { plan_ids: plans.map((p) => p.planId), sources: requestSources },
+    // El objetivo revisado acompaña los resultados solo para el informe (el motor no lo usa).
+    request: { plan_ids: plans.map((p) => p.planId), sources: requestSources, objective: review.objective.trim() || undefined },
     files,
     problem: missingFiles.length
       ? `Falta el archivo original de la fuente ${missingFiles.join(', ')}. El navegador lo guarda solo en memoria: volvé a cargarlo en «Cargar datos».`

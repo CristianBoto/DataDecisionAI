@@ -23,14 +23,9 @@ import { Activity, BarChart3, LineChart as LineIcon, PieChart as PieIcon, Scatte
 import type { Chart, ChartSeries, ChartType } from '@/types/domain'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { cn } from '@/lib/cn'
+import { seriesColor } from '@/lib/chartColors'
 import { formatCompact, formatValue } from '@/lib/format'
 
-/**
- * Paleta categórica validada (orden fijo, nunca rotado): azul, naranja, aqua.
- * Los colores siguen a la serie, no a su posición en un filtro. Los tres
- * siguientes solo se usan cuando hay más series (resultados reales con varias categorías).
- */
-const SERIES_COLORS = ['#2a78d6', '#eb6834', '#1baf7a', '#8b5cf6', '#d4a20b', '#64748b']
 const GRID_COLOR = '#e2e8f0'
 const AXIS_TICK = { fill: '#64748b', fontSize: 12 }
 
@@ -67,10 +62,6 @@ function PointTooltip({ active, payload, chart }: TooltipContentProps<number, st
 function display(value: number, series?: ChartSeries): string {
   const formatted = formatValue(value, series?.format)
   return series?.unit ? `${formatted} ${series.unit}` : formatted
-}
-
-function seriesColor(index: number) {
-  return SERIES_COLORS[index % SERIES_COLORS.length]
 }
 
 function ChartTooltip({ active, payload, label, series }: TooltipContentProps<number, string> & { series: ChartSeries[] }) {

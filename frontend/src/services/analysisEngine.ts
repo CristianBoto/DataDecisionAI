@@ -31,6 +31,8 @@ export interface ColumnMapping {
 export interface ExecutionRequest {
   plan_ids: string[]
   sources: { alias: 'A' | 'B' | 'C'; columns: ColumnMapping[] }[]
+  /** Objetivo revisado por la persona: solo se usa en el informe. */
+  objective?: string
 }
 
 export interface ResultMeasure {
@@ -69,12 +71,39 @@ export interface PlanResult {
   warnings: string[]
 }
 
+/** Hechos de una operación del resumen descriptivo (calculado en el backend, sin IA). */
+export interface SummaryItem {
+  /** Referencia de la operación: "P1.O2" = plan 1, operación 2. */
+  ref: string
+  plan_title: string
+  source_alias: string
+  title: string
+  operation: string
+  status: 'ok' | 'error'
+  facts: string[]
+  warnings: string[]
+  error: string | null
+}
+
+export interface DescriptiveSummary {
+  generated_by: 'pandas'
+  status: 'complete' | 'partial' | 'empty'
+  /** Resumen ejecutivo descriptivo: un hecho por operación calculada (sin IA). */
+  executive: string[]
+  items: SummaryItem[]
+  notes: string[]
+}
+
 export interface ExecutionResponse {
   engine: 'pandas'
   executed_at: string
   sources: { alias: string; rows: number; columns: number }[]
   results: PlanResult[]
   notes: string[]
+  /** Resumen verificable de estos resultados (Fase 4C). */
+  summary?: DescriptiveSummary
+  /** Identificador para interpretar ESTOS resultados con la IA (en memoria del backend, solo para este visitante). */
+  execution_id?: string
 }
 
 export interface AnalysisEngineClient {

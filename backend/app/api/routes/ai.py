@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from app.api.deps import require_user
 from app.core.config import Settings, get_settings
 from app.schemas.ai_context import AIContext, AIStatus, AuthorizeRequest, PreparedRequest
+from app.schemas.interpretation import AuthorizeInterpretation, PrepareInterpretation
 from app.services.ai_budget import AIBudget
 from app.services.ai_gateway import (
     AIConversationStore,
@@ -23,6 +24,7 @@ from app.services.ai_gateway import (
     send_in_conversation,
 )
 from app.services.auth import User
+from app.services.report import ExecutionStore, authorize_interpretation, prepare_interpretation
 
 router = APIRouter(prefix="/ai", tags=["ia"], dependencies=[Depends(require_user)])
 
@@ -172,3 +174,58 @@ def approve_plan(plan_id: str, plans: AIPlanStore = Depends(get_ai_plans), user:
         return plans.approve(plan_id, user.id)
     except AIGatewayError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+# --- Fase 4C: interpretación de resultados ya calculados ----------------------------------
+
+def get_executions(request: Request) -> ExecutionStore:
+    return request.app.state.executions
+
+
+def get_interpretation_requests(request: Request) -> AIRequestStore:
+    return request.app.state.interpretation_requests
+
+
+@router.post("/interpretations", status_code=status.HTTP_201_CREATED)
+def prepare_interpretation_request(
+    body: PrepareInterpretation,
+    settings: Settings = Depends(get_settings),
+    executions: ExecutionStore = Depends(get_executions),
+    store: AIRequestStore = Depends(get_interpretation_requests),
+    provider: AIProvider = Depends(get_ai_provider),
+    user: User = Depends(require_user),
+) -> dict:
+    """Arma el contexto AGREGADO de una ejecución propia y lo devuelve para revisión. No envía nada."""
+    try:
+        return prepare_interpretation(
+            executions, store, execution_id=body.execution_id, owner=user.id, settings=settings, provider=provider
+        )
+    except AIGatewayError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/interpretations/{request_id}/authorize")
+def authorize_interpretation_request(
+    request_id: str,
+    body: AuthorizeInterpretation,
+    settings: Settings = Depends(get_settings),
+    store: AIRequestStore = Depends(get_interpretation_requests),
+    provider: AIProvider = Depends(get_ai_provider),
+    budget: AIBudget = Depends(get_ai_budget),
+    user: User = Depends(require_user),
+) -> dict:
+    """Envío autorizado (uso único) de la interpretación, con presupuesto y verificación de la respuesta."""
+    try:
+        return authorize_interpretation(
+            store, provider, budget, settings=settings, request_id=request_id, approved_sha256=body.payload_sha256,
+            owner=user.id,
+        )
+    except AIGatewayError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.delete("/interpretations/{request_id}", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_interpretation_request(
+    request_id: str, store: AIRequestStore = Depends(get_interpretation_requests), user: User = Depends(require_user)
+) -> None:
+    store.cancel(request_id, user.id)

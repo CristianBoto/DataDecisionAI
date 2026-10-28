@@ -258,7 +258,7 @@ class AIConversationStore:
                     self._grants[conversation_id].busy = False
 
 
-def _check_sendable(provider: AIProvider, settings: Settings) -> tuple[float, float]:
+def check_sendable(provider: AIProvider, settings: Settings) -> tuple[float, float]:
     if not provider.implemented:
         raise AIGatewayError(501, "La conexión con OpenAI no está disponible. No se envió nada.")
     if not settings.openai_api_key:
@@ -273,16 +273,12 @@ def _check_sendable(provider: AIProvider, settings: Settings) -> tuple[float, fl
     return prices
 
 
-def _send(context: AIContext, provider: AIProvider, budget: AIBudget, plans: AIPlanStore, settings: Settings, owner: str) -> dict:
-    """Envío con todos los límites (tamaño, presupuesto, solicitudes) y validación de la respuesta."""
-    prices = _check_sendable(provider, settings)
-    input_estimate, max_cost = estimate_request(context, settings)
-    if input_estimate > settings.ai_max_input_tokens:
-        raise AIGatewayError(413, "El contexto supera el tamaño máximo permitido para la IA. No se envió nada.")
-
+def metered_call(call, *, budget: AIBudget, settings: Settings, owner: str, max_cost: float | None,
+                 prices: tuple[float, float]) -> tuple[ProviderResult, float]:
+    """Reserva el costo máximo, llama al proveedor y registra el consumo real (o el máximo si pudo cobrarse)."""
     reservation = budget.reserve(owner, max_cost or 0.0)
     try:
-        result = provider.send(context, settings)
+        result = call()
     except BaseException as exc:
         # Si la solicitud pudo haberse cobrado (p. ej., tiempo agotado), se registra el máximo estimado.
         may_have_cost = exc.may_have_cost if isinstance(exc, ProviderCallError) else True
@@ -304,6 +300,19 @@ def _send(context: AIContext, provider: AIProvider, budget: AIBudget, plans: AIP
         output_tokens=result.output_tokens,
         cost=cost,
         estimated=False,
+    )
+    return result, cost
+
+
+def _send(context: AIContext, provider: AIProvider, budget: AIBudget, plans: AIPlanStore, settings: Settings, owner: str) -> dict:
+    """Envío con todos los límites (tamaño, presupuesto, solicitudes) y validación de la respuesta."""
+    prices = check_sendable(provider, settings)
+    input_estimate, max_cost = estimate_request(context, settings)
+    if input_estimate > settings.ai_max_input_tokens:
+        raise AIGatewayError(413, "El contexto supera el tamaño máximo permitido para la IA. No se envió nada.")
+
+    result, cost = metered_call(
+        lambda: provider.send(context, settings), budget=budget, settings=settings, owner=owner, max_cost=max_cost, prices=prices
     )
     if result.reply is None:
         raise AIGatewayError(502, f"{result.problem} Se registró el consumo; no se guardó ningún plan.")

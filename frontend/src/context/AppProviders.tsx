@@ -19,9 +19,10 @@ const EMPTY_SESSION: AnalysisSessionState = {
   confirmedPlanIds: [],
   aiConversationGrant: null,
   analysisRun: null,
+  analysisInterpretation: null,
 }
 // Lo que depende de la frontera de privacidad: conversación, planes y permiso de conversación.
-const CONVERSATION_RESET = { aiChat: [], approvedPlanIds: [], confirmedPlanIds: [], aiConversationGrant: null, analysisRun: null }
+const CONVERSATION_RESET = { aiChat: [], approvedPlanIds: [], confirmedPlanIds: [], aiConversationGrant: null, analysisRun: null, analysisInterpretation: null }
 // Cambiar las fuentes obliga a revisar de nuevo, a crear otro proyecto y a empezar otra conversación.
 const SOURCES_CHANGED = { projectId: null, review: null, reviewConfirmed: false, ...CONVERSATION_RESET }
 
@@ -85,7 +86,11 @@ export function AppProviders({
     setSession((current) => ({ ...current, aiConversationGrant }))
   }, [])
   const setAnalysisRun = useCallback((analysisRun: AnalysisSessionState['analysisRun']) => {
-    setSession((current) => ({ ...current, analysisRun }))
+    // Resultados nuevos: la interpretación anterior ya no corresponde.
+    setSession((current) => ({ ...current, analysisRun, analysisInterpretation: null }))
+  }, [])
+  const setAnalysisInterpretation = useCallback((analysisInterpretation: AnalysisSessionState['analysisInterpretation']) => {
+    setSession((current) => ({ ...current, analysisInterpretation }))
   }, [])
 
   // Un permiso que se descarta (revocación, cambio de fuentes o de revisión) también se revoca en el backend.
@@ -119,6 +124,7 @@ export function AppProviders({
       confirmPlans,
       setAIConversationGrant,
       setAnalysisRun,
+      setAnalysisInterpretation,
       reset,
     }),
     [
@@ -135,6 +141,7 @@ export function AppProviders({
       confirmPlans,
       setAIConversationGrant,
       setAnalysisRun,
+      setAnalysisInterpretation,
       reset,
     ],
   )

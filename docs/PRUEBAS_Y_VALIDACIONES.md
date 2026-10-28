@@ -967,3 +967,81 @@ Cambios sin confirmar. **Sin llamadas reales a OpenAI ni consumo.** La IA se sim
   - indicadores por magnitud: desempleo 7,4 % (promedio), exportaciones 5.940 millones USD y población 14.557.500, que coinciden con el cálculo manual;
   - líneas por región con el filtro indicador/unidad: al elegir «exportaciones», la unidad pasa sola a «millones USD».
 - **Móvil:** sin desplazamiento horizontal a 375 px.
+
+
+## 30. Informe interpretativo y exportación PDF (✅ verificada, 27/10/2026)
+
+Cambios sin confirmar. **Sin llamadas reales a OpenAI ni consumo.** La IA se simula con `FakeProvider.interpret` en las pruebas y con `scripts/simulated_ai_server.py` en el navegador.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend (`python -m pytest`) | **285 de 285**: 273 anteriores y 12 en `tests/test_report.py` |
+| Frontend (`npm test`) | **204 de 204** en 23 archivos: 197 anteriores y 7 en `src/test/report.test.tsx` |
+| Lint, typecheck y build | Sin errores. jsPDF queda en un fragmento aparte (`jspdf.es.min`, 126 KB gzip) que solo se descarga al generar el PDF |
+
+**Backend** (`tests/test_report.py`), con el dataset sintético de ventas de 72 filas (el mismo que genera el frontend):
+
+| Prueba | Qué se verifica |
+|--------|-----------------|
+| Exactitud del resumen | Total **69.060 ARS**. Alimentos pasó de 5.080 a 5.580 ARS (+500, +9,8 %). Comparación por canal con participación. Histograma de 72 valores. Todo con la IA deshabilitada |
+| Formato largo (indicadores económicos) | Tres hechos separados (7,5 %, 3.000.000 personas y 620 millones USD), nunca un total mezclado. Serie de ventas externas 300 → 320 |
+| Resultados parciales | La operación fallida no produce hechos y conserva su motivo. Estado `partial` y nota «1 de 3 operaciones no se pudieron calcular» |
+| Autorización y verificación | Preparar no envía nada y muestra objetivo, refs y costo. La IA recibe exactamente lo mostrado. Se descartan una cifra inventada (45.000), una frase causal («provoca») y un hallazgo que cita una operación inexistente. Consumo registrado. La autorización no se puede reutilizar |
+| Dispersión y ROC | El contexto no lleva puntos (solo estadísticos) ni la clase positiva. AUC 0,889 en el resumen. Aviso de causalidad en la correlación |
+| Operación fallida citada por la IA | El hallazgo se descarta y la nota identifica `P1.O2` como «no se interpreta» |
+| IA deshabilitada | El resumen existe, autorizar da 403 y el proveedor no recibe nada |
+| Contenido alterado y respuesta sin respaldo | Otra huella: 409, sin envío. Una respuesta sin cifras verificables: 502 |
+| Aislamiento | Otro visitante no puede preparar con un `execution_id` ajeno ni autorizar una solicitud ajena (404). Una solicitud de interpretación no sirve en el endpoint de planes. Sin sesión: 401 |
+| Lectura de cifras | Aceptadas: 69.060, 69060, 9,8 y 10 (redondeo), 0,89 y 72. Rechazadas: 45.000, 9,7, 0,5, 70.000 y 13,4. «0,5» no se lee como «5» |
+| Aclaraciones | «La correlación no implica causalidad» se conserva y «se debe a la inflación» se descarta |
+
+**Frontend** (`src/test/report.test.tsx`), con la respuesta del motor **real** para ese dataset (`fixtures/salesReportResponse.json`, con una operación fallida):
+- **Modelo del informe:** fuentes (72 registros), metodología `P1.O1` a `P1.O5` con la fallida, indicador 69.060 ARS, gráficos sin animación y tablas sin la operación fallida.
+- **Resumen en pantalla:** identificado como «Calculado con Pandas · sin IA», con el motivo de la operación fallida.
+- **Autorización explícita:** el panel muestra el JSON exacto, el costo (USD 0.0021) y qué nunca se envía. Nada se envía hasta pulsar «Autorizar y enviar». La interpretación se marca «Generada por IA · verificada», con sus refs en la vista previa.
+- **Cancelar:** cancela la solicitud en el backend y no envía nada.
+- **Sin IA:** no aparece el botón. La vista previa y el PDF dicen «No se incluyó una interpretación con IA» y usan solo el resumen.
+- **PDF:** se genera con y sin interpretación (encabezado `%PDF-`, 2 o más páginas). Los caracteres fuera de Latin-1 se reemplazan.
+
+**Verificación en el navegador.** Backend real con IA **simulada**, frontend con backend y dataset sintético de ventas:
+- **Resumen:** coincide con los valores verificados (69.060 ARS; 5.080 → 5.580 ARS en Alimentos).
+- **Panel de autorización:** el contenido tiene solo agregados (18 filas de la serie, 1 total, 8 intervalos), sin nombre de archivo, y un costo máximo de USD 0.0015 (~2.523 tokens).
+- **Verificación de la respuesta:** la IA simulada incluye a propósito una cifra inventada («37 %») y una frase causal. Ambas se descartaron y se informó.
+- **PDF (interceptado en la página, sin guardarlo en el equipo):** 4 páginas, 43 KB, con los **2 gráficos reales** como imágenes. El texto extraído tiene, en orden: título y fechas, objetivo, fuentes (72 registros), metodología, indicador, tablas, resumen «sin IA» e interpretación «Redactada por la IA… verificada». Sin errores en la consola.
+
+### 30b. Revisión final: verificación por claims (✅ 27/10/2026)
+
+La verificación anterior solo exigía que cada cifra existiera en los resultados. Ahora cada cifra se declara como claim y se **recalcula**.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend | **292 de 292**: 273 anteriores y 19 en `tests/test_report.py` |
+| Frontend | **205 de 205** en 23 archivos: 197 anteriores y 8 en `src/test/report.test.tsx` |
+| Lint, typecheck y build | Sin errores |
+
+**Pruebas de exactitud** (`tests/test_report.py`, dataset de ventas de 72 filas, total 69.060, e indicadores en formato largo):
+
+| Caso | Ejemplo | Resultado |
+|------|---------|-----------|
+| Claims correctos | Total 69.060 ARS; Alimentos +500 ARS y +9,8 % (2025-01 → 2025-06); Local 79 % y 54.840 ARS | Verificados. El valor guardado es el recalculado (9,84…) |
+| Atribución equivocada | «Bebidas vendió 5.580 ARS en 2025-06» (la cifra es de Alimentos) | Descartada: no nombra «Alimentos» |
+| | Claim de Bebidas con 5.580 | Descartada: el resultado es 4.060 ARS |
+| | «Alimentos… más que Bebidas» | Descartada: nombra otra categoría |
+| | Cifra sin rubro | Descartada: no identifica todas sus categorías |
+| Período incorrecto | 5.580 en 2025-05; texto «entre 2025-01 y 2025-05» con claim hasta 2025-06; período 2025-07 | Descartadas: el resultado es 5.480, no nombra «2025-06», período inexistente |
+| Unidades incompatibles | 69.060 USD; «69.060 %»; sin unidad; desocupación «7,5 personas» | Descartadas. «7,5 %» con indicador y unidad completos: verificada |
+| Porcentajes erróneos | +12 % (real 9,84 %); 80 % (real 79,41 %) | Descartados con el valor real |
+| Dirección y signo | «cayó 9,8 %» con variación positiva; claim −9,8 | Descartados |
+| Causalidad | «… debido a la inflación»; «La publicidad provoca…» | Descartadas. «No implica causalidad» se conserva como no verificada |
+| Cifras sin declarar | «Alimentos creció 500 ARS» sin claim; «Bebidas 700 ARS» de más | Descartadas. Una frase sin cifras queda como no verificada |
+| Operaciones fallidas | Claim o evidencia en una operación con error | Descartados |
+| Agrupación a nivel de registro | 3 clientes, 3 filas | Las filas no viajan a la IA (`rows_withheld`) y la cifra no se puede verificar |
+| Aislamiento | Ejecución o solicitud de otra sesión | 404, sin cifras de la otra sesión en la respuesta |
+
+**Frontend:** la vista previa separa «Hallazgos principales» (solo verificados) de «No verificadas automáticamente». El PDF, generado **sin comprimir** en la prueba para leer su texto, incluye: objetivo con tildes, resumen ejecutivo descriptivo, hallazgos calculados, «69.060 ARS», «Se listan 25 de 30 filas», «Vista predeterminada», el aviso de gráfico no convertido, «Hallazgos respaldados por los cálculos» con sus refs, el bloque de no verificadas, advertencias y numeración de páginas.
+
+**Flujo completo en el navegador** (backend real, IA simulada, dataset de ventas). La IA simulada incluye a propósito una atribución a otro rubro, un porcentaje del 37 % y una frase causal. Las tres se descartaron con su motivo, y se conservó la afirmación verificada sobre Alimentos.
+
+**Revisión visual del PDF:** se guardó en una carpeta temporal y se revisó página por página. Tildes, separadores de miles, unidades, tablas, gráficos, leyendas y pie se ven bien. La revisión encontró dos defectos, ya corregidos:
+- el título de un gráfico quedaba solo al pie de la página 1;
+- las notas de verificación aparecían dentro de «Limitaciones señaladas por la IA».

@@ -74,8 +74,10 @@ class FakeProvider:
 
     implemented = True
 
-    def __init__(self, reply=None, *, input_tokens=1200, output_tokens=400, error=None, problem=None):
+    def __init__(self, reply=None, *, input_tokens=1200, output_tokens=400, error=None, problem=None, interpretation=None):
         self.received = []
+        self.interpreted = []
+        self.interpretation = interpretation
         self.reply = reply
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
@@ -91,6 +93,17 @@ class FakeProvider:
             return ProviderResult(None, self.input_tokens, self.output_tokens, self.problem)
         reply = self.reply(payload) if callable(self.reply) else (self.reply or reply_for(payload))
         return ProviderResult(reply, self.input_tokens, self.output_tokens)
+
+    def interpret(self, context, settings):
+        """Interpretación falsa (Fase 4C): registra el contexto agregado y responde sin red."""
+        from app.schemas.interpretation import AIInterpretation
+
+        payload = context.model_dump(mode="json")
+        self.interpreted.append(payload)
+        if self.error is not None:
+            raise self.error
+        data = self.interpretation(payload) if callable(self.interpretation) else self.interpretation
+        return ProviderResult(AIInterpretation.model_validate(data), self.input_tokens, self.output_tokens)
 
 
 def make_client(

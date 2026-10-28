@@ -1,0 +1,517 @@
+{
+ "engine": "pandas",
+ "executed_at": "2026-10-27T21:00:00+00:00",
+ "sources": [
+  {
+   "alias": "A",
+   "rows": 72,
+   "columns": 4
+  }
+ ],
+ "results": [
+  {
+   "plan_id": "plan-ventas",
+   "source_alias": "A",
+   "title": "Ventas por rubro y canal",
+   "status": "partial",
+   "operations": [
+    {
+     "operation": "sum",
+     "description": "Total vendido",
+     "columns": [
+      "monto_ars"
+     ],
+     "group_by": [],
+     "status": "ok",
+     "dimensions": [],
+     "measures": [
+      {
+       "column": "monto_ars",
+       "aggregate": "sum",
+       "unit": "ARS"
+      }
+     ],
+     "rows": [
+      {
+       "keys": [],
+       "values": [
+        69060.0
+       ]
+      }
+     ],
+     "period": null,
+     "temporal_dimension": null,
+     "split_dimensions": [],
+     "rows_used": 72,
+     "stats": null,
+     "warnings": [],
+     "error": null
+    },
+    {
+     "operation": "time_series",
+     "description": "Evolución por rubro",
+     "columns": [
+      "fecha",
+      "monto_ars"
+     ],
+     "group_by": [
+      "rubro"
+     ],
+     "status": "ok",
+     "dimensions": [
+      "fecha",
+      "rubro"
+     ],
+     "measures": [
+      {
+       "column": "monto_ars",
+       "aggregate": "sum",
+       "unit": "ARS"
+      }
+     ],
+     "rows": [
+      {
+       "keys": [
+        "2025-01",
+        "Alimentos"
+       ],
+       "values": [
+        5080.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-01",
+        "Bebidas"
+       ],
+       "values": [
+        3560.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-01",
+        "Limpieza"
+       ],
+       "values": [
+        2120.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-02",
+        "Alimentos"
+       ],
+       "values": [
+        5180.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-02",
+        "Bebidas"
+       ],
+       "values": [
+        3660.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-02",
+        "Limpieza"
+       ],
+       "values": [
+        2220.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-03",
+        "Alimentos"
+       ],
+       "values": [
+        5280.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-03",
+        "Bebidas"
+       ],
+       "values": [
+        3760.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-03",
+        "Limpieza"
+       ],
+       "values": [
+        2320.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-04",
+        "Alimentos"
+       ],
+       "values": [
+        5380.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-04",
+        "Bebidas"
+       ],
+       "values": [
+        3860.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-04",
+        "Limpieza"
+       ],
+       "values": [
+        2420.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-05",
+        "Alimentos"
+       ],
+       "values": [
+        5480.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-05",
+        "Bebidas"
+       ],
+       "values": [
+        3960.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-05",
+        "Limpieza"
+       ],
+       "values": [
+        2520.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-06",
+        "Alimentos"
+       ],
+       "values": [
+        5580.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-06",
+        "Bebidas"
+       ],
+       "values": [
+        4060.0
+       ]
+      },
+      {
+       "keys": [
+        "2025-06",
+        "Limpieza"
+       ],
+       "values": [
+        2620.0
+       ]
+      }
+     ],
+     "period": "month",
+     "temporal_dimension": "fecha",
+     "split_dimensions": [],
+     "rows_used": 72,
+     "stats": null,
+     "warnings": [],
+     "error": null
+    },
+    {
+     "operation": "compare_groups",
+     "description": "Comparación por canal",
+     "columns": [
+      "monto_ars"
+     ],
+     "group_by": [
+      "canal"
+     ],
+     "status": "ok",
+     "dimensions": [
+      "canal"
+     ],
+     "measures": [
+      {
+       "column": "monto_ars",
+       "aggregate": "sum",
+       "unit": "ARS"
+      },
+      {
+       "column": "monto_ars",
+       "aggregate": "share_pct",
+       "unit": "%"
+      }
+     ],
+     "rows": [
+      {
+       "keys": [
+        "Local"
+       ],
+       "values": [
+        54840.0,
+        79.4092
+       ]
+      },
+      {
+       "keys": [
+        "Online"
+       ],
+       "values": [
+        14220.0,
+        20.5908
+       ]
+      }
+     ],
+     "period": null,
+     "temporal_dimension": null,
+     "split_dimensions": [],
+     "rows_used": 72,
+     "stats": null,
+     "warnings": [],
+     "error": null
+    },
+    {
+     "operation": "histogram",
+     "description": "Distribución",
+     "columns": [
+      "monto_ars"
+     ],
+     "group_by": [],
+     "status": "ok",
+     "dimensions": [
+      "monto_ars"
+     ],
+     "measures": [
+      {
+       "column": "monto_ars",
+       "aggregate": "count",
+       "unit": null
+      }
+     ],
+     "rows": [
+      {
+       "keys": [
+        "[494, 611.125)"
+       ],
+       "values": [
+        14.0
+       ]
+      },
+      {
+       "keys": [
+        "[611.125, 728.25)"
+       ],
+       "values": [
+        10.0
+       ]
+      },
+      {
+       "keys": [
+        "[728.25, 845.375)"
+       ],
+       "values": [
+        0.0
+       ]
+      },
+      {
+       "keys": [
+        "[845.375, 962.5)"
+       ],
+       "values": [
+        14.0
+       ]
+      },
+      {
+       "keys": [
+        "[962.5, 1079.62)"
+       ],
+       "values": [
+        10.0
+       ]
+      },
+      {
+       "keys": [
+        "[1079.62, 1196.75)"
+       ],
+       "values": [
+        0.0
+       ]
+      },
+      {
+       "keys": [
+        "[1196.75, 1313.88)"
+       ],
+       "values": [
+        10.0
+       ]
+      },
+      {
+       "keys": [
+        "[1313.88, 1431]"
+       ],
+       "values": [
+        14.0
+       ]
+      }
+     ],
+     "period": null,
+     "temporal_dimension": null,
+     "split_dimensions": [],
+     "rows_used": 72,
+     "stats": {
+      "bins": 8,
+      "bin_width": 117.125,
+      "min": 494.0,
+      "max": 1431.0,
+      "rule": "Sturges"
+     },
+     "warnings": [],
+     "error": null
+    },
+    {
+     "operation": "sum",
+     "description": "Suma inválida",
+     "columns": [
+      "rubro"
+     ],
+     "group_by": [],
+     "status": "error",
+     "dimensions": [],
+     "measures": [],
+     "rows": [],
+     "period": null,
+     "temporal_dimension": null,
+     "split_dimensions": [],
+     "rows_used": null,
+     "stats": null,
+     "warnings": [],
+     "error": "«rubro» es una columna categórica: la operación requiere una columna cuantitativa."
+    }
+   ],
+   "charts": [
+    {
+     "type": "line",
+     "x": "fecha",
+     "y": "monto_ars",
+     "title": "Evolución mensual"
+    }
+   ],
+   "warnings": [
+    "Datos sintéticos."
+   ]
+  }
+ ],
+ "notes": [
+  "Calculado con Pandas en el backend local, sobre una copia en memoria de cada archivo.",
+  "La IA no participó del cálculo ni recibió los datos.",
+  "Cada plan usa una sola fuente: las fuentes no se unieron ni relacionaron."
+ ],
+ "summary": {
+  "generated_by": "pandas",
+  "status": "partial",
+  "executive": [
+   "Se calcularon 4 de 5 operaciones con Pandas.",
+   "Suma de monto_ars: 69.060 ARS.",
+   "Suma de monto_ars (rubro = Alimentos): pasó de 5.080 ARS en 2025-01 a 5.580 ARS en 2025-06; variación de +500 ARS (+9,8 %). Máximo: 5.580 ARS en 2025-06; mínimo: 5.080 ARS en 2025-01.",
+   "Suma de monto_ars en 2 grupos. Mayor: canal = Local con 54.840 ARS (79,41 % del total); menor: canal = Online con 14.220 ARS.",
+   "72 valores de monto_ars distribuidos en 8 intervalos, de [494, 611.125) a [1313.88, 1431]. Intervalo con más registros: [494, 611.125) (14 registros).",
+   "Sin resultados: P1.O5 (ver limitaciones)."
+  ],
+  "items": [
+   {
+    "ref": "P1.O1",
+    "plan_title": "Ventas por rubro y canal",
+    "source_alias": "A",
+    "title": "Total vendido",
+    "operation": "sum",
+    "status": "ok",
+    "facts": [
+     "Suma de monto_ars: 69.060 ARS."
+    ],
+    "warnings": [],
+    "error": null
+   },
+   {
+    "ref": "P1.O2",
+    "plan_title": "Ventas por rubro y canal",
+    "source_alias": "A",
+    "title": "Evolución por rubro",
+    "operation": "time_series",
+    "status": "ok",
+    "facts": [
+     "Suma de monto_ars (rubro = Alimentos): pasó de 5.080 ARS en 2025-01 a 5.580 ARS en 2025-06; variación de +500 ARS (+9,8 %). Máximo: 5.580 ARS en 2025-06; mínimo: 5.080 ARS en 2025-01.",
+     "Suma de monto_ars (rubro = Bebidas): pasó de 3.560 ARS en 2025-01 a 4.060 ARS en 2025-06; variación de +500 ARS (+14 %). Máximo: 4.060 ARS en 2025-06; mínimo: 3.560 ARS en 2025-01.",
+     "Suma de monto_ars (rubro = Limpieza): pasó de 2.120 ARS en 2025-01 a 2.620 ARS en 2025-06; variación de +500 ARS (+23,6 %). Máximo: 2.620 ARS en 2025-06; mínimo: 2.120 ARS en 2025-01."
+    ],
+    "warnings": [],
+    "error": null
+   },
+   {
+    "ref": "P1.O3",
+    "plan_title": "Ventas por rubro y canal",
+    "source_alias": "A",
+    "title": "Comparación por canal",
+    "operation": "compare_groups",
+    "status": "ok",
+    "facts": [
+     "Suma de monto_ars en 2 grupos. Mayor: canal = Local con 54.840 ARS (79,41 % del total); menor: canal = Online con 14.220 ARS."
+    ],
+    "warnings": [],
+    "error": null
+   },
+   {
+    "ref": "P1.O4",
+    "plan_title": "Ventas por rubro y canal",
+    "source_alias": "A",
+    "title": "Distribución",
+    "operation": "histogram",
+    "status": "ok",
+    "facts": [
+     "72 valores de monto_ars distribuidos en 8 intervalos, de [494, 611.125) a [1313.88, 1431]. Intervalo con más registros: [494, 611.125) (14 registros)."
+    ],
+    "warnings": [],
+    "error": null
+   },
+   {
+    "ref": "P1.O5",
+    "plan_title": "Ventas por rubro y canal",
+    "source_alias": "A",
+    "title": "Suma inválida",
+    "operation": "sum",
+    "status": "error",
+    "facts": [],
+    "warnings": [],
+    "error": "«rubro» es una columna categórica: la operación requiere una columna cuantitativa."
+   }
+  ],
+  "notes": [
+   "Resumen generado automáticamente a partir de los resultados de Pandas, sin intervención de la IA.",
+   "1 de 5 operaciones no se pudieron calcular: se informan como limitaciones y no se extraen conclusiones de ellas."
+  ]
+ },
+ "execution_id": "exec-ventas-1"
+}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AlertTriangle, BarChart3, CheckCircle2, FilePlus2, PencilLine, RotateCcw, XCircle } from 'lucide-react'
 import { AnalysisResults } from '@/components/analysis/AnalysisResults'
+import { ReportSection } from '@/components/report/ReportSection'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -125,6 +126,8 @@ export function ResultsPage() {
       </Card>
 
       <AnalysisResults run={run} fileNames={fileNames} />
+
+      <ReportSection run={run} fileNames={fileNames} />
     </div>
   )
 }

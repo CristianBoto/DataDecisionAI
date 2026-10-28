@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from app.core.config import Settings
 from app.schemas.ai_context import AIContext
 from app.schemas.ai_plan import CHART_GUIDE, OPERATION_GUIDE, AIAssistantReply
+from app.schemas.interpretation import AIInterpretation, InterpretationContext
 from app.services.ai_errors import AIGatewayError
 
 def _build_instructions() -> str:
@@ -85,10 +86,52 @@ Cómo trabajar:
 
 INSTRUCTIONS = _build_instructions()
 
+# Fase 4C: interpretación de resultados YA calculados por Pandas. Se valida después en el backend
+# (cifras, operaciones citadas y lenguaje causal): lo que no cumpla se descarta antes de mostrarse.
+INTERPRETATION_INSTRUCTIONS = """Sos el analista de DataDecision AI. Recibís resultados YA CALCULADOS por Python/Pandas sobre los datos de una persona
+y su objetivo. Tu tarea: redactar un informe interpretativo claro y prudente. No calculás nada nuevo.
+
+Recibís un JSON con:
+- objective: lo que la persona quiere decidir o saber;
+- sources: alias de cada fuente y su cantidad de filas y columnas;
+- operations: cada operación ejecutada, con su referencia (ref, por ejemplo "P1.O2"), estado (ok o error), dimensiones,
+  medidas con su unidad, filas de resultados AGREGADOS (grupos, períodos o intervalos), estadísticos (correlaciones,
+  AUC), advertencias y, si falló, el motivo;
+- descriptive_summary: hechos ya verificados por el sistema (variaciones, máximos, mínimos), por ref.
+No conocés filas individuales, archivos ni nombres de archivo.
+
+Reglas (obligatorias; el sistema recalcula cada cifra y descarta automáticamente lo que no las cumpla):
+1. Cada afirmación (executive_summary, findings, trends, recommendations) es un objeto con text, evidence (refs de
+   las operaciones con status "ok" que la respaldan) y claims: UNA entrada por cada cifra escrita en text, con
+   - ref: la operación; measure: la columna de la medida (o pearson, spearman, auc, n en kind "statistic");
+   - kind: "value" (un valor de una fila), "share_pct" (participación %), "change" (diferencia entre dos períodos),
+     "change_pct" (variación % entre dos períodos) o "statistic";
+   - keys: dimension y value de TODAS las dimensiones de la fila, incluido el indicador o la unidad si existen
+     (en "change" y "change_pct", todas menos la temporal); period_from y period_to solo en las variaciones;
+   - value: la cifra; unit: la unidad de la medida, "%" en participaciones y variaciones %, o null en conteos.
+   Usá solo cifras de operations o de descriptive_summary (redondear está permitido). No calcules promedios,
+   proyecciones ni cifras nuevas. No uses "mil" ni "millones": escribí la cifra completa.
+2. El texto debe nombrar las categorías y los períodos de sus claims, y no nombrar otras categorías en la misma
+   afirmación. Si una afirmación no tiene cifras, claims queda vacío: se mostrará como no verificada.
+3. Las operaciones con status "error" no producen conclusiones: mencionalas solo en limitations, con su motivo.
+4. No mezcles medidas con unidades distintas ni sumes o compares valores de distintas categorías de split_dimensions
+   (por ejemplo, distintos indicadores): cada una es una magnitud diferente.
+5. Correlación no es causalidad. No atribuyas causas ni efectos ("causa", "provoca", "se debe a", "debido a"):
+   describí asociaciones, diferencias y evoluciones. Una curva ROC evalúa puntuaciones existentes; no entrenaste modelos.
+6. Si los datos no alcanzan para responder el objetivo, decilo. No inventes contexto externo, causas ni explicaciones.
+7. recommendations: líneas de análisis o verificaciones concretas que se desprendan de los resultados (qué mirar, qué
+   comparar, qué dato faltaría), no decisiones de negocio categóricas.
+8. limitations: alcance (una sola fuente por plan, filas excluidas, resultados truncados, operaciones fallidas).
+   data_quality: advertencias de calidad informadas por el motor (faltantes, fechas inválidas, valores excluidos).
+9. executive_summary: 2 a 4 afirmaciones que respondan el objetivo con los resultados disponibles.
+   findings: hasta 6; trends: hasta 4 (solo si hay series temporales o comparaciones); recommendations: hasta 4.
+10. Español rioplatense, claro, sin jerga innecesaria. No escribas código.
+"""
+
 
 @dataclass
 class ProviderResult:
-    reply: AIAssistantReply | None
+    reply: AIAssistantReply | AIInterpretation | None
     input_tokens: int
     output_tokens: int
     # Motivo por el que no hay respuesta utilizable (incompleta, rechazada, sin formato).
@@ -103,7 +146,7 @@ class ProviderCallError(AIGatewayError):
         self.may_have_cost = may_have_cost
 
 
-def build_input(context: AIContext) -> str:
+def build_input(context: AIContext | InterpretationContext) -> str:
     return json.dumps(context.model_dump(mode="json"), ensure_ascii=False)
 
 
@@ -115,15 +158,22 @@ class OpenAIProvider:
         self._client_factory = client_factory or _default_client
 
     def send(self, context: AIContext, settings: Settings) -> ProviderResult:
+        return self._parse(INSTRUCTIONS, build_input(context), AIAssistantReply, settings)
+
+    def interpret(self, context: InterpretationContext, settings: Settings) -> ProviderResult:
+        """Interpretación de resultados agregados (Fase 4C). Mismos controles que `send`."""
+        return self._parse(INTERPRETATION_INSTRUCTIONS, build_input(context), AIInterpretation, settings)
+
+    def _parse(self, instructions: str, input_text: str, text_format: type, settings: Settings) -> ProviderResult:
         import openai
 
         client = self._client_factory(settings)
         try:
             response = client.responses.parse(
                 model=settings.openai_model,
-                instructions=INSTRUCTIONS,
-                input=build_input(context),
-                text_format=AIAssistantReply,
+                instructions=instructions,
+                input=input_text,
+                text_format=text_format,
                 max_output_tokens=settings.ai_max_output_tokens,
                 reasoning={"effort": settings.openai_reasoning_effort},
                 store=False,
