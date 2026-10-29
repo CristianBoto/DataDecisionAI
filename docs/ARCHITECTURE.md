@@ -792,3 +792,59 @@ Todo lo de esta sección se calcula **en el navegador**, a partir de datos que y
 - «Una persona específica»: el motor todavía **no filtra por un valor**. La interfaz no lo promete: la cobertura lo informa y sugiere agrupar por esa columna y buscar a la persona en la tabla o el gráfico del resultado (o en los filtros, si el resultado tiene varias dimensiones). La IA no conoce los valores y debe preguntar cuál es.
 - **Suma neta:** la marca es por columna. Una categoría con valores de un solo signo (por ejemplo, solo gastos) también se rotula «suma neta». Es correcto (es la suma con su signo), pero puede ser más prudente de lo necesario. El catálogo no puede separar gastos de ingresos.
 - **Modalidad como categoría:** la verificación de la IA exige que cada cifra coincida con su dimensión y valor reales («modalidad = Tarjeta»), pero no puede impedir que el texto la **llame** «categoría». Si la afirmación no tiene cifras, se muestra como no verificada.
+
+## Personalización y calidad del PDF (Fase 4E)
+
+La personalización es una **capa de presentación** del PDF. Cambia la portada y el aspecto del documento que se descarga; no cambia ningún resultado.
+
+### Qué puede personalizar la persona
+
+Dentro de «Revisar el informe», la sección **«Personalizar PDF»** (`components/report/PdfCustomizer.tsx`) ofrece:
+
+| Opción | Detalle |
+|--------|---------|
+| Título del informe | Predeterminado: «Informe de análisis · {proyecto}» (`defaultReportTitle`). Si se deja vacío, vuelve al predeterminado. No reemplaza el objetivo original |
+| Autor o responsable | Opcional. Se imprime en la portada como «Responsable: …». No toca la identidad ni la sesión de acceso |
+| Empresa o institución | Opcional, en la portada |
+| Logo | Opcional. PNG o JPG de hasta 1 MB, con vista previa, «Reemplazar logo» y «Quitar logo». Se dibuja en la portada dentro de una caja de 60 × 28 mm, con su proporción original |
+| Fecha | Muestra u oculta las fechas de elaboración y de cálculo en la portada (y en el nombre del archivo). Las fechas de los datos y los gráficos no cambian |
+| Marca DataDecision AI | Muestra u oculta la marca visual (franja, nombre en la portada y en el pie). La metodología conserva siempre «Origen de los cálculos: DataDecision AI» y el metadato `creator` del PDF |
+
+Todo es opcional: el PDF se puede descargar sin tocar nada. «Restablecer» vuelve a los valores predeterminados.
+
+### Separación entre cálculos y presentación
+
+| Pieza | Dónde | Qué hace |
+|-------|-------|----------|
+| Estado de la personalización | `ReportSection` (`useState`) | Vive solo en la pantalla del informe. No está en la sesión, no se guarda (ni `localStorage` ni SQLite) y se pierde al salir |
+| Presentación | `lib/pdfCustomization.ts` (`presentation`, `cleanField`) | Convierte el formulario en lo que se imprime: texto de una línea, sin caracteres de control ni marcas de dirección, con longitud máxima (título 120, autor 80, institución 100) |
+| Modelo del informe | `lib/report.ts` (`buildReport`) | **No recibe la personalización.** El `ReportDocument` (objetivo, resultados, cobertura) es el mismo con cualquier portada |
+| Vista previa y PDF | `ReportPreview` (`presentation`), `createReportPdf` (`{ presentation }`) | Reciben el modelo y la presentación por separado. Los cambios se ven al instante, sin recalcular ni consultar a la IA |
+
+**Por qué así.** Si la personalización entrara al modelo del informe, un título o un nombre podrían terminar en el contexto de la IA o mezclarse con los resultados. Al mantenerla aparte, se cumple por construcción que no modifica cálculos, dashboard ni envíos: no hay ningún camino de código desde la personalización hasta el backend o la IA.
+
+### Privacidad y seguridad del logo
+
+`readLogo` (`lib/pdfCustomization.ts`) valida en este orden: archivo vacío; tamaño (máximo 1 MB); **tipo real** según los primeros bytes (`sniffImage`: firma PNG o JPEG; SVG, GIF y archivos renombrados se rechazan aunque digan `image/png`); decodificación; y dimensiones (16 a 6000 px por lado). La imagen se decodifica con una URL temporal que se libera siempre (`URL.revokeObjectURL`) y se vuelve a dibujar en un lienzo (reducida a 800 px como máximo, que luego se vacía). Así el PDF recibe una imagen limpia, sin metadatos. El logo nunca se envía a FastAPI, Render ni OpenAI y no se guarda. Los campos de texto se muestran como texto de React y de jsPDF: nunca se interpretan como HTML.
+
+### Correcciones del contenido del PDF
+
+| Problema | Corrección | Dónde |
+|----------|------------|-------|
+| «Análisis completo» con partes del objetivo pendientes | Sección **«Alcance real y estado de cobertura»** (`reportScope`): operaciones aprobadas y ejecutadas, resultados calculados, pendientes y lo que no se puede concluir. Usa la **misma** comprobación `planCoverage` que «Resultados» (`ReportSection` le pasa la cobertura ya calculada). La redacción es prudente («la revisión automática no detectó…») y aclara que no es una garantía | `lib/report.ts` |
+| Símbolos Markdown en el objetivo | `parseObjective` (Markdown limitado): encabezados (`#` o línea entera en negrita), párrafos, listas con y sin número (dos niveles), enlaces como «texto (dirección)». Quita las marcas de énfasis sin perder palabras (respeta `monto_ars`). No interpreta HTML: una etiqueta se muestra como texto | `lib/objectiveMarkdown.ts` |
+| Advertencia contradictoria sobre la variación | `derivedIndicators` toma del resumen descriptivo las variaciones entre el primer y el último período (calculadas por Pandas) y las muestra como **«Indicadores derivados»**, una sola vez: en «Hallazgos calculados» la operación remite a esa sección (`findingFacts`). `clarifyWarnings` conserva la advertencia original y le agrega una aclaración solo si habla de una variación «no disponible» y no trata de causas, pronósticos o rentabilidad | `lib/report.ts` |
+
+### Estructura del PDF
+
+Portada (una página) → 1. Objetivo original → 2. Alcance real y estado de cobertura → 3. Resumen ejecutivo descriptivo → 4. Fuentes de datos y metodología → 5. Indicadores y resultados calculados (con indicadores derivados y hallazgos) → 6. Gráficos → 7. Tablas con valores exactos → 8. Interpretación con IA (**solo si existe y fue autorizada**) → Cuestiones pendientes, advertencias y limitaciones.
+
+Paginación (`Writer` en `lib/reportPdf.ts`): cada título reserva lugar para lo que le sigue; el encabezado de una tabla se dibuja junto con su primera fila y se repite en cada página; título, descripción, imagen y leyenda de un gráfico van juntos; los gráficos tienen un ancho máximo de 150 mm para que sus textos sean legibles; el pie de la portada usa posiciones fijas; las páginas se numeran desde la 2 (la portada no lleva pie).
+
+### Limitaciones
+
+- La cobertura sigue siendo por palabras clave (ver «Experiencia para personas sin conocimientos técnicos»): el informe lo dice explícitamente.
+- Las aclaraciones de variaciones reconocen advertencias escritas con palabras habituales («no está disponible», «no se calcula»). Una redacción muy distinta queda sin aclarar (la advertencia original se muestra igual).
+- El Markdown es limitado: no hay tablas, citas ni negrita dentro de una línea (las marcas se quitan y el texto queda normal).
+- Las fuentes estándar del PDF cubren Latin-1: los emojis y algunos símbolos se reemplazan o se omiten, también en el título y los campos de la portada.
+- El logo se guarda a 800 px como máximo en su lado mayor: un logo muy detallado puede perder definición al imprimirse grande.

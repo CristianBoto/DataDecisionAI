@@ -1134,3 +1134,43 @@ Objetivo: «Quiero saber cuántas transacciones hice, cuánto gasté, en qué ca
 **Navegador** (backend real con IA simulada, CSV sintético generado en la página):
 - **Confirmar:** el plan simulado (serie por categoría, total e histograma) recibió los avisos de cantidad de registros, persona (con «contraparte» y «el plan agrupa por «categoria»») y suma neta.
 - **Resultados:** indicador «Saldo neto de importe» y resumen descriptivo con «Saldo neto de importe…» (desde la revisión final se llaman «Suma neta de importe»). Pendientes y «no se puede concluir» separados.
+
+## 34. Personalización y calidad del PDF (✅ verificada, 29/10/2026)
+
+Datos: la respuesta real del backend para el dataset **sintético** de ventas (`fixtures/salesReportResponse.json`). La frontera de IA es falsa y `fetch` está espiado: no hubo red ni consumo de OpenAI.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Frontend | **247 de 247** (21 nuevas en `src/test/pdfCustomization.test.tsx`; 2 actualizadas en `report.test.tsx` por los nuevos títulos de sección) |
+| Backend | **310 de 310** (sin cambios) |
+| Lint, typecheck y build | Sin errores |
+
+| # | Caso | Resultado |
+|---|------|-----------|
+| 1 | PDF sin personalizar | ✅ Título predeterminado, marca y fecha visibles; nombre `informe-ventas-AAAA-MM-DD.pdf` |
+| 2 | Título personalizado | ✅ En la portada, el pie y los metadatos; el objetivo original no cambia |
+| 3 | Autor e institución | ✅ Aparecen solo si se completan |
+| 4 | Logo PNG | ✅ Aceptado por su firma; incrustado con su tamaño real (40 × 20) y proporción 2:1 |
+| 5 | Logo JPG | ✅ Aceptado; incrustado como JPEG (`/DCTDecode`), proporción vertical 1:2 |
+| 6 | Archivo inválido | ✅ Rechazados: SVG, SVG renombrado a `.png`, texto renombrado a `.jpg`, GIF, vacío y más de 1 MB. Ninguno llega a decodificarse |
+| 7 | Imagen dañada | ✅ «La imagen está dañada o no se puede abrir»; también medidas fuera de rango |
+| 8 | Quitar y reemplazar | ✅ La vista previa cambia de PNG a JPG y luego sin logo; un archivo inválido muestra el error y conserva el logo anterior |
+| 9 | Fecha | ✅ Oculta: sin fechas de elaboración ni cálculo; los períodos 2025-01 a 2025-06 siguen en tablas y resumen |
+| 10 | Marca | ✅ Oculta: sin franja ni «Elaborado con DataDecision AI»; se conserva «Origen de los cálculos: DataDecision AI». La portada ocupa una página con y sin marca |
+| 11 | Objetivo con Markdown | ✅ Encabezados, párrafos, listas de dos niveles, «¿», «¡», ñ y tildes; sin `**` ni `##`; `<script>` se muestra como texto; `monto_ars` intacto |
+| 12 | Análisis parcialmente cubierto | ✅ «Se completaron las 4 operaciones del plan aprobado. Sin embargo, quedaron pendientes otras partes del objetivo original, como cantidad de registros, relación entre dos variables y promedios.» Nunca «Análisis completo» |
+| 13 | Sin pendientes detectados | ✅ «La revisión automática no detectó otras partes del objetivo sin calcular», con la aclaración de que no es una garantía. Sin objetivo: no se afirma cobertura |
+| 14 | Variación como indicador derivado | ✅ La advertencia «no está disponible» se conserva con una aclaración que remite a P1.O2 («+500 ARS (+9,8 %)»). «No se pueden pronosticar variaciones futuras» y «La correlación no implica causalidad» quedan sin aclaración. Cada variación figura una sola vez: los hallazgos de P1.O2 remiten a «Indicadores derivados» |
+| 15 | Con y sin IA | ✅ «8. Interpretación con IA» solo con una interpretación autorizada; sin ella, la metodología dice que no se incluyó |
+| 16 | Tablas extensas y gráficos | ✅ 200 filas y todos los gráficos con imagen: varias páginas, «Se listan 25 de 200 filas», numeración «Página n de n» |
+| 17 | Valores exactos | ✅ Cada indicador y cada celda de las tablas (hasta 25 filas) aparece en el PDF con el mismo formato que el dashboard |
+| 18 | Dashboard y resultados intactos | ✅ Los resultados no cambian (`toEqual` con una copia previa), el informe no contiene la personalización y el estado del análisis y el resumen descriptivo se ven igual |
+| 19 | Nada sale del navegador | ✅ `fetch` no se llamó al personalizar ni al descargar |
+| 20 | Sin llamadas automáticas a la IA | ✅ Ni `prepareInterpretation` ni `authorizeInterpretation` (ni la conversación) se llamaron |
+
+También se comprobaron: limpieza de campos (caracteres de control, marcas de dirección, espacios y longitud máxima), título vacío → predeterminado, y que el HTML en el título o el autor se muestra como texto.
+
+**Revisión visual** (PDF generados en el navegador con la vista previa real, sus gráficos de Recharts y un logo PNG sintético decodificado por el navegador; páginas rasterizadas con el lector de PDF integrado de Windows):
+- **Personalizado** (título, autor, institución ficticios, logo, sin fecha ni marca), 7 páginas: logo sin deformar, portada sin marca, objetivo con formato, alcance parcial en naranja, aclaración de la variación, gráficos con título, ejes y leyenda, tablas sin encabezados aislados.
+- **Sin personalizar**, 7 páginas: franja y marca DataDecision AI, título predeterminado, fechas visibles.
+- Errores encontrados y corregidos en esta revisión: hoja en blanco tras la portada, mensajes de error cortados en la metodología, gráficos demasiado grandes y puntuación doble en los pendientes.

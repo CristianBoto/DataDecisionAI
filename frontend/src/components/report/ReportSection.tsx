@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, Calculator, Download, Eye, EyeOff, FileText, ShieldCheck, Sparkles, XCircle } from 'lucide-react'
 import { AnalysisStatus } from '@/components/report/AnalysisStatus'
 import { InterpretationReview } from '@/components/report/InterpretationReview'
+import { PdfCustomizer } from '@/components/report/PdfCustomizer'
 import { ReportPreview } from '@/components/report/ReportPreview'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
@@ -12,7 +13,8 @@ import { useAIGateway } from '@/hooks/useService'
 import { conversationClarifications } from '@/lib/aiPlans'
 import { buildDatasetCatalog } from '@/lib/datasetCatalog'
 import { planCoverage, sharedColumns } from '@/lib/planCoverage'
-import { buildReport } from '@/lib/report'
+import { defaultCustomization, presentation as toPresentation, type PdfCustomization } from '@/lib/pdfCustomization'
+import { buildReport, defaultReportTitle } from '@/lib/report'
 import { downloadReportPdf } from '@/lib/reportPdf'
 import { getErrorMessage } from '@/services'
 import { isRealAIAvailable, type AIStatus, type PreparedInterpretation } from '@/services/aiGateway'
@@ -25,7 +27,8 @@ import type { ExecutionResponse } from '@/services/analysisEngine'
  * 2. «Interpretar resultados con IA» (opcional): el backend arma el contexto AGREGADO, se muestra
  *    exactamente y con su costo máximo, y solo se envía si la persona lo autoriza (uso único).
  *    La respuesta llega ya verificada contra los resultados.
- * 3. Vista previa y «Descargar PDF»: el mismo documento, generado en el navegador.
+ * 3. Vista previa y «Descargar PDF»: el mismo documento, generado en el navegador. «Personalizar PDF»
+ *    cambia solo su presentación (portada, título, logo), nunca los resultados.
  */
 export function ReportSection({ run, fileNames }: { run: ExecutionResponse; fileNames: Record<string, string> }) {
   const session = useAnalysisSession()
@@ -36,6 +39,8 @@ export function ReportSection({ run, fileNames }: { run: ExecutionResponse; file
   const [error, setError] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [pdfNotice, setPdfNotice] = useState<string | null>(null)
+  // Personalización del PDF: solo estado de esta pantalla (no se guarda ni se envía).
+  const [customization, setCustomization] = useState<PdfCustomization>(defaultCustomization)
   const previewRef = useRef<HTMLDivElement>(null)
   const preparedRef = useRef<PreparedInterpretation | null>(null)
   useEffect(() => {
@@ -76,9 +81,12 @@ export function ReportSection({ run, fileNames }: { run: ExecutionResponse; file
         projectName: session.projectName || 'Análisis de datos',
         fileNames,
         interpretation,
+        coverage,
       }),
-    [run, session.review?.objective, session.projectName, fileNames, interpretation],
+    [run, session.review?.objective, session.projectName, fileNames, interpretation, coverage],
   )
+  const defaultTitle = defaultReportTitle(report)
+  const pdfPresentation = useMemo(() => toPresentation(customization, defaultTitle), [customization, defaultTitle])
 
   async function prepare() {
     if (!gateway?.prepareInterpretation || !run.execution_id) return
@@ -120,7 +128,7 @@ export function ReportSection({ run, fileNames }: { run: ExecutionResponse; file
     setBusy('pdf')
     setPdfNotice(null)
     try {
-      const { missingCharts } = await downloadReportPdf(report, previewRef.current)
+      const { missingCharts } = await downloadReportPdf(report, previewRef.current, pdfPresentation)
       setPdfNotice(
         missingCharts
           ? `PDF generado. ${missingCharts} gráfico(s) no se pudieron convertir en imagen: sus valores están en las tablas del informe.`
@@ -268,7 +276,8 @@ export function ReportSection({ run, fileNames }: { run: ExecutionResponse; file
         </div>
         {!previewOpen && <p className="text-xs text-slate-500">Revisá el informe completo antes de descargarlo en PDF.</p>}
         {pdfNotice && <p className="text-xs text-slate-600" role="status">{pdfNotice}</p>}
-        {previewOpen && <ReportPreview ref={previewRef} report={report} />}
+        {previewOpen && <PdfCustomizer value={customization} defaultTitle={defaultTitle} onChange={setCustomization} />}
+        {previewOpen && <ReportPreview ref={previewRef} report={report} presentation={pdfPresentation} />}
       </div>
     </Card>
   )

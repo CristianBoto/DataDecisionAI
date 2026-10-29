@@ -153,7 +153,8 @@ describe('Informe de análisis e interpretación', () => {
     const unverified = within(preview).getByText('No verificadas automáticamente (sin cifras)').parentElement!
     expect(within(unverified).getByText(/Hallazgo: Alimentos es el rubro de mayor venta./)).toBeInTheDocument()
     expect(within(preview).getByText('Hallazgos principales').parentElement).not.toHaveTextContent('Alimentos es el rubro de mayor venta')
-    expect(within(preview).getByText('Resumen ejecutivo (descriptivo, calculado sin IA)')).toBeInTheDocument()
+    expect(within(preview).getByText('3. Resumen ejecutivo (descriptivo, calculado sin IA)')).toBeInTheDocument()
+    expect(within(preview).getByText('8. Interpretación con IA')).toBeInTheDocument()
   })
 
   it('cancelar no envía nada', async () => {
@@ -209,7 +210,8 @@ describe('PDF', () => {
     const text = doc.output()
     // jsPDF escapa los paréntesis del texto: se comparan sin ellos.
     const has = (s: string) => expect(text.replace(/\\([()])/g, '$1')).toContain(s)
-    has('Objetivo del análisis')
+    has('1. Objetivo original del análisis')
+    has('2. Alcance real y estado de cobertura')
     has('Quiero ver la evolución de las ventas por rubro')
     has('Resumen ejecutivo (descriptivo, calculado sin IA)')
     has('Se calcularon 4 de 5 operaciones con Pandas.')
@@ -222,8 +224,10 @@ describe('PDF', () => {
     has('Hallazgos respaldados por los cálculos')
     has('El canal Local concentra el 79,41 % del total. [P1.O3]')
     has('No verificadas automáticamente (sin cifras)')
-    has('Advertencias y limitaciones')
-    has('Página 1 de')
+    has('Cuestiones pendientes, advertencias y limitaciones')
+    // La portada no lleva pie; la numeración empieza a verse en la página 2.
+    has('Página 2 de')
+    expect(text).not.toContain('Página 1 de')
     expect(doc.getNumberOfPages()).toBeGreaterThanOrEqual(3)
   })
 

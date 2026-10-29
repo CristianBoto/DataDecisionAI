@@ -778,6 +778,27 @@ La revisión visual del PDF detectó y corrigió dos problemas de maquetación. 
 
 Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 33.
 
+## 6z. Personalización y calidad del PDF (Fase 4E, sin confirmar)
+
+**Problema.** El PDF no se podía adaptar a una entrega académica o empresarial (título, autor, institución, logo). Además, al revisar un informe real aparecieron tres errores de contenido: decía «Análisis completo» aunque el objetivo tenía partes sin responder, mostraba el objetivo con símbolos Markdown (`**1. Análisis general**`) y una advertencia decía que la variación entre el primer y el último mes no estaba disponible, cuando el resumen ya la había calculado (+1.500, +13,9 %).
+
+**Decisiones.**
+- **La personalización es solo presentación.** Vive en el estado de la pantalla del informe y llega a la vista previa y al PDF por separado del modelo del informe. Así no hay ningún camino hacia los cálculos, el dashboard, el backend o la IA.
+- **El logo se procesa en el navegador:** se valida por su contenido (no por la extensión), se decodifica, se vuelve a dibujar sin metadatos y no se guarda. Se rechazan SVG y otros formatos.
+- **Alcance real con la cobertura existente:** el PDF reutiliza `planCoverage`, la misma comprobación de «Resultados», en lugar de una lógica nueva. La redacción es prudente porque la comprobación es por palabras clave.
+- **Advertencias:** no se ocultan. Si el resumen calculó la variación, se agrega una aclaración que distingue «operación del catálogo» de «indicador derivado». Las limitaciones reales (causas, pronósticos, rentabilidad) no se tocan.
+- **Markdown limitado** solo para mostrar el objetivo: el texto original no cambia.
+- Se descartaron un editor de plantillas y la generación del PDF en el servidor: agregan complejidad y harían viajar el logo.
+
+**Problemas.**
+- La portada desbordaba a una hoja en blanco cuando el estado ocupaba dos líneas: el pie se escribía con el flujo normal del documento. Se pasó a posiciones fijas y una prueba compara la cantidad de páginas con y sin marca.
+- Las celdas de la tabla de metodología cortaban los mensajes de error a tres líneas. Ahora admiten ocho.
+- Las variaciones se repetían en «Indicadores derivados» y en los hallazgos de su operación. Ahora figuran una vez, y los hallazgos remiten a esa sección.
+- Los gráficos ocupaban todo el ancho y sus textos se veían enormes. Se limitó su ancho a 150 mm.
+- La herramienta de escritura convirtió `\u2028` en un separador de línea real dentro de una expresión regular y rompió la compilación. Se reescribió con escapes generados.
+
+**Verificación.** Frontend 247 de 247 (21 pruebas nuevas en `src/test/pdfCustomization.test.tsx`) y backend 310 de 310; lint, typecheck y build sin errores. Se revisaron visualmente dos PDF generados en el navegador (uno completamente personalizado y otro sin personalizar). Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 34.
+
 ## 7. Demo pública en Cloudflare Pages (commit `492b9f9`)
 
 - Configuración documentada en [DEPLOYMENT.md](DEPLOYMENT.md): carpeta `frontend`, `npm run build`, salida `dist`, `VITE_DEMO_MODE=true`.
