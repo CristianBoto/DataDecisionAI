@@ -111,6 +111,9 @@ class OperationResult(BaseModel):
     # Estadísticos de la operación (correlaciones, AUC, cantidad de intervalos…), si corresponde.
     stats: dict[str, float | int | str | bool | None] | None = None
     warnings: list[str] = []
+    # Medidas sumadas que tienen valores positivos Y negativos: la suma es neta (no es el saldo de una cuenta ni un total de
+    # gastos ni de ingresos; el catálogo no filtra por signo).
+    signed_measures: list[str] = []
     error: str | None = None
 
 

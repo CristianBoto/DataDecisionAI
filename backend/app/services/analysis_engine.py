@@ -583,6 +583,32 @@ OPERATIONS: dict[str, Callable[[PreparedSource, AIOperation, list[str]], Operati
 }
 
 
+def _flag_net_sums(src: PreparedSource, result: OperationResult) -> OperationResult:
+    """Marca las sumas de medidas con valores positivos y negativos (por ejemplo, ingresos y egresos).
+
+    La suma de esa columna es NETA: no es el saldo de una cuenta, el total gastado ni el cobrado, y el catálogo no
+    filtra por signo. Se avisa en el resultado (y llega así al informe y a la IA). Regla general: solo
+    mira los signos de los valores ya convertidos, nunca el nombre de la columna.
+    """
+    if result.status != "ok":
+        return result
+    for measure in result.measures:
+        if measure.aggregate != "sum" or measure.column in result.signed_measures:
+            continue
+        cached = src._cache.get(("numbers", measure.column))
+        if cached is None:
+            continue
+        numbers = cached[0]
+        if (numbers > 0).any() and (numbers < 0).any():
+            result.signed_measures.append(measure.column)
+            result.warnings.append(
+                f"«{measure.column}» tiene valores positivos y negativos: la suma es neta. No es el saldo de una cuenta "
+                "ni un total de gastos o de ingresos, y sin saber qué significa el signo en tus datos no se pueden "
+                "distinguir ingresos de egresos automáticamente."
+            )
+    return result
+
+
 def run_operation(src: PreparedSource, op: AIOperation) -> OperationResult:
     warnings: list[str] = []
     runner = OPERATIONS.get(op.operation)
@@ -595,7 +621,7 @@ def run_operation(src: PreparedSource, op: AIOperation) -> OperationResult:
         problem = operation_problem(op.operation, op.columns, op.group_by, src.meta(op.columns + op.group_by))
         if problem:
             raise OperationError(problem[0].upper() + problem[1:] + ".")
-        return runner(src, op, warnings)
+        return _flag_net_sums(src, runner(src, op, warnings))
     except OperationError as exc:
         return OperationResult(
             operation=op.operation, description=op.description, columns=op.columns, group_by=op.group_by,

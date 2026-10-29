@@ -750,6 +750,34 @@ La revisión visual del PDF detectó y corrigió dos problemas de maquetación. 
 
 **Verificación.** Backend 308 de 308 y frontend 205 de 205; lint, typecheck y build sin errores. Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 31, y [AUDITORIA_SEGURIDAD.md](AUDITORIA_SEGURIDAD.md), sección 7.
 
+## 6y. Experiencia para personas sin conocimientos técnicos (sin confirmar)
+
+**Problema.** La autorización para interpretar mostraba un JSON técnico, y el plan podía dejar afuera partes del pedido sin avisarlo.
+
+**Decisiones.**
+- **Resumen local:** un resumen en lenguaje natural calculado en el navegador a partir del **mismo contenido que se autoriza**. Lista todas las categorías que viajan y avisa que no se anonimizan, para no dar una falsa impresión de privacidad. El JSON queda en «Ver detalles técnicos».
+- **Cobertura conservadora:** una comprobación de palabras clave y nombres de columna, sin IA, antes de confirmar y otra vez en Resultados (sobre lo efectivamente calculado). Solo advierte, nunca bloquea, y ofrece volver al asistente con un mensaje sugerido que se puede editar y no se envía solo.
+- **Estado en tres grupos:** «Resultados» separa lo calculado, lo pendiente y lo que todavía no se puede concluir (causas, pronósticos, cruces de archivos).
+- Se descartó pedirle a la IA que explique la pantalla: sumaría envíos y costos, y la explicación necesaria ya está en los resultados.
+
+**Problemas.**
+- Un componente llamaba a `useNavigate` antes de devolver `null` y rompía las pruebas que montan el informe sin router. Se separaron las acciones en un componente propio.
+- En Resultados, los pendientes se repetían en dos lugares. Se dejó una sola lista con los botones de ajuste.
+
+**Verificación.** Frontend 216 de 216 y backend 308 de 308; lint, typecheck y build sin errores. Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 32.
+
+**Escenario de movimientos financieros.**
+- **Antes:** con un dataset sintético de importes positivos y negativos, el detector no advertía la falta de un conteo, no advertía que faltaba separar a una persona ni que no había columnas adecuadas, y la suma se mostraba como «Suma de importe».
+- **Cambios, con reglas generales** (signos de los valores y vocabulario de nombres de columna, nunca un nombre propio ni este dataset):
+  - el motor marca las sumas netas («Suma neta de X», no «saldo») y el perfil informa el signo de cada medida;
+  - la verificación descarta una suma neta presentada como gasto, ingreso o saldo;
+  - la cobertura reconoce conteos, personas, categorías y la falta de columnas;
+  - el panel de autorización destaca los posibles nombres de personas.
+- **Problema:** el entorno de comandos volvió a convertir `\b` en un carácter de control dentro de una expresión regular. La prueba de la expresión lo mostró y se corrigió.
+- **Pendiente:** que el texto de la IA llame «categoría» a una modalidad de pago no se puede detectar de forma determinística. Quedó documentado.
+
+Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 33.
+
 ## 7. Demo pública en Cloudflare Pages (commit `492b9f9`)
 
 - Configuración documentada en [DEPLOYMENT.md](DEPLOYMENT.md): carpeta `frontend`, `npm run build`, salida `dist`, `VITE_DEMO_MODE=true`.

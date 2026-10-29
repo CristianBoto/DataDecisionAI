@@ -1078,3 +1078,59 @@ Cambios sin confirmar. **Sin pruebas contra producción, sin créditos y sin inv
 **Memoria combinada** (sección 7.3b de AUDITORIA_SEGURIDAD.md): perfilado +60 MB, ejecución de 2 fuentes +60 MB y las dos a la vez +120 MB (pico de 309 MB). Margen insuficiente sobre 512 MB: una tarea pesada a la vez en producción.
 
 **Mediciones** (sección 7.1 de AUDITORIA_SEGURIDAD.md): memoria base de 164 MB y +70–90 MB por perfilado de 1 M de celdas. El perfilado bajó de 23,4 s a 5,2 s. Los resultados guardados pasaron de ~15 MB a menos de 5 KB por ejecución.
+
+## 32. Experiencia para personas sin conocimientos técnicos (✅ verificada, 29/10/2026)
+
+Cambios sin confirmar. **Sin llamadas a OpenAI.** Todo se calcula en el navegador.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Frontend | **216 de 216**: 205 anteriores y 11 en `src/test/planCoverage.test.tsx` |
+| Backend | 308 de 308 (sin cambios) |
+| Lint, typecheck y build | Sin errores |
+
+| Prueba | Qué demuestra |
+|--------|---------------|
+| Cobertura: faltantes | Un pedido con evolución, distribución, relación y una columna no usada: se detectan los 4 faltantes |
+| Cobertura: cubierto y general | Sin advertencias cuando el plan cubre el pedido o el pedido es general |
+| Tildes y plurales | «Evolución mensual de los rubros»: se reconoce «rubro». La agrupación por fecha cuenta como evolución |
+| Lo que no se puede concluir | Causas, pronósticos y cruces de archivos |
+| Mensaje sugerido | Texto simple, sin JSON |
+| Resumen del envío | Las 15 categorías que viajan aparecen todas. Dispersión: «solo estadísticos». Agrupación retenida y operación fallida explicadas |
+| Pantalla de autorización | Resumen primero (qué se calculó, cifras, objetivo, valores enviados, aviso de no anonimización y costo). El JSON exacto, idéntico al preparado, queda plegado en «Ver detalles técnicos». No se envía nada sin autorizar |
+| Estado en Resultados | Calculados, pendientes (la operación fallida) y lo que no se puede concluir |
+| Flujo hasta «Confirmar» | Con un plan que no cubre evolución ni distribución: aviso, confirmación todavía posible y regreso al asistente con el mensaje precargado, sin envío |
+| Flujo cubierto y con causas | Sin aviso cuando el plan responde. Una pregunta de causas muestra «Lo que estos cálculos no pueden responder» |
+
+**Navegador** (backend real con IA simulada, dataset sintético de ventas, objetivo «… comparar el promedio por canal»):
+- **Confirmar:** advirtió sobre la columna «canal» y los promedios. El regreso al asistente precargó «Quisiera ajustar el plan: también necesito la columna «canal», promedios.» sin enviarlo.
+- **Resultados:** los mismos pendientes aparecen una sola vez. La primera versión los repetía y se corrigió.
+- **Autorización:** lista los 6 períodos, los 3 rubros y los 8 intervalos que viajan, con el JSON plegado. Se canceló sin enviar nada. Sin errores en la consola.
+
+## 33. Escenario: movimientos financieros (✅ verificada, 29/10/2026)
+
+Dataset **sintético** con fecha, categoría, modalidad de pago, contraparte con nombres ficticios e importes positivos y negativos.
+
+Objetivo: «Quiero saber cuántas transacciones hice, cuánto gasté, en qué categorías gasté y cuánto corresponde a una persona específica por separado».
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend | **310 de 310** (2 nuevas en `tests/test_report.py`) |
+| Frontend | **226 de 226** (10 nuevas en `src/test/planCoverage.test.tsx`, incluidas la del filtrado por persona y la de que ninguna pantalla envía datos a la IA por sí sola) |
+| Lint, typecheck y build | Sin errores |
+
+| Caso | ¿Se detecta? | Cómo |
+|------|--------------|------|
+| 1. Solo una suma neta | ✅ | La suma se presenta como «Suma neta de importe», con aviso: no es el saldo de una cuenta ni un gasto total, y sin conocer el significado del signo no se distinguen ingresos de egresos. «Confirmar» y «Resultados» informan que no se pueden separar gastos de ingresos. Una afirmación de la IA que la llama «gasto» o «saldo» se descarta |
+| 2. Modalidad de pago usada como categorías | ✅ con una columna de categorías existente | Aviso «Separar por categoría» o de la columna «categoria» sin usar, indicando que el plan agrupa por «modalidad». Sin columna de categorías: «Falta información». 🟡 El texto de la IA que llama «categoría» a la modalidad no se detecta (ver limitaciones) |
+| 3. Una persona sin separar | ✅ | «Separar por persona o entidad: hay columnas que podrían servir («contraparte»), pero ningún plan las usa» |
+| 4. Sin columnas adecuadas | ✅ | «Falta información: separar por persona o entidad / por categoría / fecha o período», sin inventar columnas |
+| 5. Corregir sin JSON | ✅ | El mensaje sugerido para el asistente se puede editar y no se envía solo |
+| 6. Nombres de personas en el envío | ✅ | Recuadro «Posibles nombres de personas o entidades» con todos los valores que viajarían, con la recomendación de no autorizar sin consentimiento |
+| Conteo de transacciones | ✅ | «Cantidad de registros» si ningún plan cuenta |
+| Medida solo positiva | ✅ sin falsa alarma | No se rotula «suma neta» |
+| Una persona en particular | ✅ sin prometer de más | «Filtrar una persona o entidad en particular»: el motor no filtra por un valor; se sugiere agrupar por la columna y buscar a la persona en el resultado |
+
+**Navegador** (backend real con IA simulada, CSV sintético generado en la página):
+- **Confirmar:** el plan simulado (serie por categoría, total e histograma) recibió los avisos de cantidad de registros, persona (con «contraparte» y «el plan agrupa por «categoria»») y suma neta.
+- **Resultados:** indicador «Saldo neto de importe» y resumen descriptivo con «Saldo neto de importe…» (desde la revisión final se llaman «Suma neta de importe»). Pendientes y «no se puede concluir» separados.

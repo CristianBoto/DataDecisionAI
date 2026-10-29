@@ -496,3 +496,54 @@ def test_numbers_in_limitations_must_come_from_the_results():
     assert verified["limitations"] == ["Hay 72 filas."]
     assert verified["executive_summary"][0]["status"] == "verified"
     assert "cita cifras que no figuran" in " ".join(notes) and "atribuye causas" in " ".join(notes)
+
+
+# --- Movimientos financieros: suma neta, modalidad de pago y contrapartes (datos ficticios) --------
+
+FINANCE = "fecha,categoria,modalidad,contraparte,importe,cuotas\n" + "".join(
+    f"2025-{1 + i % 6:02d}-{1 + i % 27:02d},{('Supermercado', 'Transporte', 'Sueldo', 'Servicios')[i % 4]},"
+    f"{('Tarjeta', 'Efectivo', 'Transferencia')[i % 3]},{('Ana Ficticia', 'Comercio Ejemplo', 'Beto Inventado')[i % 3]},"
+    f"{(-1200 - i, -300 - i, 250000, -8000 - i)[i % 4]},{1 + i % 3}\n"
+    for i in range(48)
+)
+
+
+def finance_columns():
+    return mappings(FINANCE, contraparte={"semantic_type": "categorical"}, importe={"unit": "ARS"})
+
+
+def test_mixed_sign_measures_are_reported_as_net_balances():
+    prof = profile_dataset(FINANCE.encode(), "movimientos.csv")
+    signs = {c["name"]: c["value_sign"] for c in prof["columns"]}
+    assert signs["importe"] == "mixed" and signs["cuotas"] == "positive" and signs["categoria"] is None
+
+    client, app = make_client()
+    result = run(client, app, FINANCE, [
+        op("sum", ["importe"]), op("group_by", ["importe"], ["categoria"]), op("mean", ["importe"]), op("sum", ["cuotas"]),
+    ], finance_columns(), objective="Cuánto gasté")
+    total, by_category, mean, cuotas = result["results"][0]["operations"]
+    assert total["signed_measures"] == ["importe"] and by_category["signed_measures"] == ["importe"]
+    assert any("la suma es neta" in w and "no se pueden distinguir ingresos de egresos" in w for w in total["warnings"])
+    assert mean["signed_measures"] == [] and cuotas["signed_measures"] == []  # promedio y medida solo positiva: sin aviso
+    facts = " ".join(facts_ for i in result["summary"]["items"][:1] for facts_ in i["facts"])
+    assert facts.startswith("Suma neta de importe:") and "no es el saldo de una cuenta" in facts
+    assert "Saldo" not in facts
+    payload = prepare(client, result["execution_id"]).json()["payload"]
+    assert payload["operations"][0]["signed_measures"] == ["importe"]
+
+
+def test_a_net_balance_cannot_be_presented_as_spending():
+    client, app = make_client()
+    result = run(client, app, FINANCE, [op("sum", ["importe"])], finance_columns(), objective="Cuánto gasté")
+    context = InterpretationContext.model_validate(prepare(client, result["execution_id"]).json()["payload"])
+    net = result["results"][0]["operations"][0]["rows"][0]["values"][0]
+    written = f"{net:,.0f}".replace(",", ".")
+    total = claim("P1.O1", "importe", value=net, unit="ARS")
+    found, notes = verify(
+        context,
+        item(f"Gastaste {written} ARS en total.", total),
+        item(f"El saldo de la cuenta es {written} ARS.", total),
+        item(f"La suma neta de los movimientos es {written} ARS.", total),
+    )
+    assert [f["text"] for f in found] == [f"La suma neta de los movimientos es {written} ARS."]
+    assert notes.count("presenta una suma neta") == 2

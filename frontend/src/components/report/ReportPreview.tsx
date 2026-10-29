@@ -144,7 +144,7 @@ export const ReportPreview = forwardRef<HTMLDivElement, { report: ReportDocument
                   <table className="w-full text-left text-xs">
                     <thead className="bg-slate-50 text-slate-500">
                       <tr>
-                        {[...op.dimensions, ...op.measures.map(measureHeader)].map((h) => (
+                        {[...op.dimensions, ...op.measures.map((m) => measureHeader(m, op))].map((h) => (
                           <th key={h} scope="col" className="px-2 py-1 font-medium">{h}</th>
                         ))}
                       </tr>

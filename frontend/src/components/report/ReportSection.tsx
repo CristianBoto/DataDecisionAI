@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, Calculator, Download, Eye, EyeOff, FileText, ShieldCheck, Sparkles, XCircle } from 'lucide-react'
+import { AnalysisStatus } from '@/components/report/AnalysisStatus'
+import { InterpretationReview } from '@/components/report/InterpretationReview'
 import { ReportPreview } from '@/components/report/ReportPreview'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
@@ -7,6 +9,9 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useAIGateway } from '@/hooks/useService'
+import { conversationClarifications } from '@/lib/aiPlans'
+import { buildDatasetCatalog } from '@/lib/datasetCatalog'
+import { planCoverage, sharedColumns } from '@/lib/planCoverage'
 import { buildReport } from '@/lib/report'
 import { downloadReportPdf } from '@/lib/reportPdf'
 import { getErrorMessage } from '@/services'
@@ -39,6 +44,13 @@ export function ReportSection({ run, fileNames }: { run: ExecutionResponse; file
 
   const interpretation = session.analysisInterpretation
   const summary = run.summary ?? null
+  // Partes del pedido sin resultados: misma comprobación local que en «Confirmar», sobre lo calculado.
+  const coverage = useMemo(() => {
+    const objective = session.review?.objective.trim() ?? ''
+    const calculated = run.results.flatMap((r) => r.operations.filter((o) => o.status === 'ok'))
+    const columns = sharedColumns(session.review?.sources ?? [], buildDatasetCatalog(session.sources))
+    return planCoverage([objective, ...conversationClarifications(session.aiChat, objective)], columns, calculated)
+  }, [run, session.review, session.aiChat, session.sources])
   const canInterpret = Boolean(gateway?.prepareInterpretation && run.execution_id)
   const aiAvailable = isRealAIAvailable(status)
 
@@ -128,6 +140,9 @@ export function ReportSection({ run, fileNames }: { run: ExecutionResponse; file
         <h2 className="text-lg font-semibold text-slate-900">Informe de análisis e interpretación</h2>
       </div>
 
+      {/* 0. Qué está calculado, qué falta y qué no se puede concluir (local, sin IA) */}
+      <AnalysisStatus summary={summary} coverage={coverage} />
+
       {/* 1. Resumen descriptivo, sin IA */}
       <div className="space-y-2" role="region" aria-label="Resumen descriptivo">
         <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-800">
@@ -193,26 +208,9 @@ export function ReportSection({ run, fileNames }: { run: ExecutionResponse; file
         {prepared && (
           <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50/60 p-4" role="region" aria-label="Autorizar interpretación con IA">
             <p className="flex items-center gap-1.5 text-sm font-semibold text-amber-950">
-              <ShieldCheck className="size-4" aria-hidden /> Revisá qué se enviaría a OpenAI
+              <ShieldCheck className="size-4" aria-hidden /> Antes de enviar a OpenAI, revisá este resumen
             </p>
-            <ul className="list-disc space-y-0.5 pl-5 text-xs text-amber-950">
-              <li>
-                Se envían: tu objetivo, la cantidad de filas y columnas de cada fuente y los resultados <strong>agregados</strong>{' '}
-                de Pandas (totales por grupo o período, intervalos, correlaciones, AUC) con sus advertencias. Estos resultados
-                incluyen nombres de categorías de tus datos (por ejemplo, rubros o regiones).
-              </li>
-              <li>Nunca se envían: los archivos, las filas originales, los nombres de archivo ni los puntos de una dispersión o curva ROC.</li>
-              <li>
-                Costo máximo estimado: {prepared.estimated_max_cost_usd != null ? `USD ${prepared.estimated_max_cost_usd.toFixed(4)}` : 'sin estimar'} ·
-                ~{prepared.estimated_input_tokens ?? '?'} tokens de entrada. La autorización vale para un solo envío.
-              </li>
-            </ul>
-            <details className="rounded-lg border border-amber-200 bg-white" open>
-              <summary className="cursor-pointer px-3 py-1.5 text-xs font-medium text-slate-700">Contenido exacto que se enviaría</summary>
-              <pre className="scrollbar-thin max-h-72 overflow-auto px-3 pb-3 text-[11px] text-slate-700" aria-label="Contenido exacto de la interpretación">
-                {JSON.stringify(prepared.payload, null, 2)}
-              </pre>
-            </details>
+            <InterpretationReview prepared={prepared} executive={summary?.executive ?? []} />
             <div className="flex flex-wrap gap-2">
               <Button size="sm" onClick={authorize} loading={busy === 'send'}>
                 Autorizar y enviar

@@ -58,6 +58,8 @@ export interface OperationResult {
   /** Estadísticos de la operación: correlaciones (dispersión), AUC (ROC), intervalos (histograma). */
   stats?: Record<string, number | string | boolean | null> | null
   warnings: string[]
+  /** Medidas sumadas con valores positivos y negativos: la suma es neta (no es un saldo ni un total de gastos). */
+  signed_measures?: string[]
   error: string | null
 }
 

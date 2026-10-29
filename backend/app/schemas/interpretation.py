@@ -54,6 +54,8 @@ class ContextOperation(_Strict):
     rows_used: int | None = None
     stats: dict[str, float | int | str | bool | None] | None = None
     warnings: list[str] = []
+    # Medidas sumadas con valores positivos y negativos: sus sumas son netas.
+    signed_measures: list[str] = []
     error: str | None = None
 
 

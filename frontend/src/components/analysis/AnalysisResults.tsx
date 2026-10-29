@@ -36,7 +36,7 @@ function OperationTable({ op }: { op: OperationResult }) {
               ))}
               {op.measures.map((m, i) => (
                 <th key={i} scope="col" className="py-1 pr-3 text-right font-medium">
-                  {measureLabel(m)}
+                  {measureLabel(m, op)}
                   {m.unit && m.aggregate !== 'share_pct' ? ` (${m.unit})` : ''}
                 </th>
               ))}

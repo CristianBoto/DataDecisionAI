@@ -83,8 +83,8 @@ export function formatMeasure(value: number | null, m: OperationResult['measures
   return m.unit && m.aggregate !== 'count' && m.aggregate !== 'distinct_count' ? `${formatted} ${m.unit}` : formatted
 }
 
-export function measureHeader(m: OperationResult['measures'][number]): string {
-  return `${measureLabel(m)}${m.unit && m.aggregate !== 'share_pct' ? ` (${m.unit})` : ''}`
+export function measureHeader(m: OperationResult['measures'][number], op?: Pick<OperationResult, 'signed_measures'>): string {
+  return `${measureLabel(m, op)}${m.unit && m.aggregate !== 'share_pct' ? ` (${m.unit})` : ''}`
 }
 
 export function buildReport(input: {

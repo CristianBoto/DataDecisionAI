@@ -254,7 +254,7 @@ export async function createReportPdf(
         w.text('Los puntos individuales se muestran en el gráfico; no se listan en el informe.', { size: 8, color: MUTED })
         continue
       }
-      const header = [...op.dimensions, ...op.measures.map(measureHeader)]
+      const header = [...op.dimensions, ...op.measures.map((m) => measureHeader(m, op))]
       const rows = op.rows.slice(0, MAX_TABLE_ROWS).map((r) => [...r.keys, ...r.values.map((v, i) => formatMeasure(v, op.measures[i]))])
       w.table(header, rows)
       if (op.rows.length > MAX_TABLE_ROWS) {

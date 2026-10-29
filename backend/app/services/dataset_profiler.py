@@ -273,6 +273,7 @@ def profile_dataset(content: bytes, filename: str, *, max_bytes: int | None = No
             "split_by_suggestion": h.split_by if h else [],
             "split_reason": h.split_reason if h else None,
             "missing_value_suggestions": h.missing_values if h else [],
+            "value_sign": h.value_sign if h else None,
         })
         if h and h.split_by:
             warnings.append(f"La columna '{column['name']}': {h.split_reason}")

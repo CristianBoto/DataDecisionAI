@@ -64,6 +64,8 @@ export interface ColumnProfile {
   additivityReason?: string | null
   /** Columnas que definen qué mide cada valor (formato largo: indicador, unidad). */
   splitBySuggestion?: string[]
+  /** Signo de los valores de una medida: con «mixed», una suma es neta. */
+  valueSign?: 'positive' | 'negative' | 'mixed' | null
   splitReason?: string | null
   /** Valores numéricos que podrían ser marcadores de ausencia (por ejemplo, -99). */
   missingValueSuggestions?: string[]

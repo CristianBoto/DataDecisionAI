@@ -302,6 +302,13 @@ def _refs(result: dict):
             yield f"P{p}.O{o}", plan, op
 
 
+def _net_labels(facts: list[str], op: dict) -> list[str]:
+    """Una suma de valores positivos y negativos se nombra «suma neta» (no es un saldo de cuenta ni un total de gastos o ingresos)."""
+    for column in op.get("signed_measures") or []:
+        facts = [f.replace(f"Suma de {column}", f"Suma neta de {column}") for f in facts]
+    return facts
+
+
 def descriptive_summary(result: dict) -> dict:
     """Resumen verificable de los resultados de Pandas. No usa IA ni calcula nada que el motor no haya devuelto."""
     items = []
@@ -314,7 +321,11 @@ def descriptive_summary(result: dict) -> dict:
             "title": operation_title(op),
             "operation": op["operation"],
             "status": op["status"],
-            "facts": operation_facts(op),
+            "facts": _net_labels(operation_facts(op), op) + [
+                f"«{column}» tiene valores positivos y negativos: su suma es neta (no es el saldo de una cuenta ni un total de "
+                "gastos o de ingresos). Sin saber qué significa el signo en los datos, no se distinguen ingresos de egresos."
+                for column in op.get("signed_measures") or []
+            ],
             "warnings": list(op.get("warnings") or []),
             "error": error,
         })
@@ -375,7 +386,7 @@ def build_context(entry: dict) -> InterpretationContext:
             split_dimensions=op.get("split_dimensions") or [], temporal_dimension=op.get("temporal_dimension"),
             period=op.get("period"), measures=[ContextMeasure(**m) for m in op.get("measures") or []],
             rows=[ContextRow(keys=r["keys"], values=r["values"]) for r in rows], rows_total=len(op.get("rows") or []),
-            rows_withheld=withheld, rows_used=op.get("rows_used"), stats=stats, warnings=list(op.get("warnings") or []), error=op.get("error"),
+            rows_withheld=withheld, rows_used=op.get("rows_used"), signed_measures=list(op.get("signed_measures") or []), stats=stats, warnings=list(op.get("warnings") or []), error=op.get("error"),
         ))
     return InterpretationContext(
         objective=entry.get("objective"),
@@ -414,6 +425,9 @@ RISE_RE = re.compile(r"\b(crec\w*|aument\w*|sub(?:e|en|ió|ieron|a|ida)|alza|inc
 FALL_RE = re.compile(r"\b(cae|caen|cay[óo]|cayeron|caída|baj(?:a|ó|aron)|disminu\w*|descen\w*|reduj\w*|reducción|retroce\w*)\b",
                      re.IGNORECASE)
 SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+# Palabras que presentan una cifra como flujo de un solo sentido (gasto, ingreso, cobro, pago) o como saldo de una cuenta.
+FLOW_RE = re.compile(r"\b(gast\w*|egres\w*|ingres\w*|cobr\w*|pagu[eé]|pagaste|pagó|pagaron|desembols\w*|ganancia\w*|gan[oó]|saldo\w*)\b",
+                     re.IGNORECASE)
 # Números chicos sin unidad («dos series», «3 rubros») que no son cifras de los resultados.
 FREE_INTEGERS = set(range(0, 13))
 STATISTICS = ("pearson", "spearman", "auc", "n", "positives", "negatives")
@@ -607,6 +621,10 @@ def _check_text(text: str, checked: list[_Checked], ops: list[ContextOperation])
         )
         if not bound:
             return f"la cifra «{match.group()}{f' {unit}' if unit else ''}» no corresponde a ninguna cifra verificada"
+    # Una suma neta (de positivos y negativos) no es un gasto, un ingreso ni un saldo: no se la presenta así.
+    signed = {(op.ref, m) for op in ops for m in op.signed_measures}
+    if FLOW_RE.search(bare) and any((c.claim.ref, c.claim.measure) in signed for c in checked):
+        return "presenta una suma neta (valores positivos y negativos) como si fuera un gasto, un ingreso o un saldo"
     changes = [c for c in checked if c.claim.kind in ("change", "change_pct")]
     if changes and RISE_RE.search(bare) and all(c.actual < 0 for c in changes):
         return "describe como aumento una variación negativa"

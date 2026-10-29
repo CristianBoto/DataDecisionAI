@@ -125,7 +125,12 @@ export function operationTitle(op: OperationResult): string {
   return `${OPERATION_LABELS[op.operation] ?? op.operation}${op.description ? ` · ${op.description}` : ''}`
 }
 
-export function measureLabel(m: ResultMeasure): string {
+/**
+ * Nombre de una medida. Con `op`, una suma de valores positivos y negativos se llama «suma neta»:
+ * no es el saldo de una cuenta ni un total de gastos o ingresos (el motor lo marca en `signed_measures`).
+ */
+export function measureLabel(m: ResultMeasure, op?: Pick<OperationResult, 'signed_measures'>): string {
+  if (m.aggregate === 'sum' && op?.signed_measures?.includes(m.column)) return `Suma neta de ${m.column}`
   if (m.aggregate === 'count') return 'Registros'
   if (m.aggregate === 'value' || m.aggregate === 'fpr' || m.aggregate === 'tpr') return m.column
   return `${AGGREGATE_LABELS[m.aggregate] ?? m.aggregate} ${m.column}`
@@ -374,11 +379,11 @@ export function operationCharts(op: OperationResult, type: ChartType, title?: st
       id: `c${(chartSeq += 1)}`,
       type: 'pie',
       title: title ?? operationTitle(op),
-      description: `${measureLabel(m)} por ${dimensionLabel(op, 0)}`,
+      description: `${measureLabel(m, op)} por ${dimensionLabel(op, 0)}`,
       xKey: 'x',
       animated: false,
       xLabel: dimensionLabel(op, 0),
-      series: [{ key: 's0', label: measureLabel(m), unit: m.unit ?? undefined }],
+      series: [{ key: 's0', label: measureLabel(m, op), unit: m.unit ?? undefined }],
       data: op.rows.map((r) => ({ x: r.keys[0], s0: r.values[0] })),
     })
     return { charts, notice: null }
@@ -393,12 +398,12 @@ export function operationCharts(op: OperationResult, type: ChartType, title?: st
         id: `c${(chartSeq += 1)}`,
         type,
         title: title ?? operationTitle(op),
-        description: `${group.indexes.map((i) => measureLabel(op.measures[i])).join(', ')} por ${dimensionLabel(op, 0)}`,
+        description: `${group.indexes.map((i) => measureLabel(op.measures[i], op)).join(', ')} por ${dimensionLabel(op, 0)}`,
         xKey: 'x',
       animated: false,
         xLabel: dimensionLabel(op, 0),
         yLabel: group.unit ?? undefined,
-        series: group.indexes.map((i) => ({ key: `s${i}`, label: measureLabel(op.measures[i]), unit: op.measures[i].unit ?? undefined })),
+        series: group.indexes.map((i) => ({ key: `s${i}`, label: measureLabel(op.measures[i], op), unit: op.measures[i].unit ?? undefined })),
         data: op.rows.map((r) => Object.fromEntries([['x', r.keys[0]], ...group.indexes.map((i) => [`s${i}`, r.values[i]])])),
       })
       continue
@@ -422,7 +427,7 @@ export function operationCharts(op: OperationResult, type: ChartType, title?: st
       id: `c${(chartSeq += 1)}`,
       type,
       title: title ?? operationTitle(op),
-      description: `${measureLabel(op.measures[measure])} por ${dimensionLabel(op, 0)} y ${op.dimensions[1]}`,
+      description: `${measureLabel(op.measures[measure], op)} por ${dimensionLabel(op, 0)} y ${op.dimensions[1]}`,
       xKey: 'x',
       animated: false,
       xLabel: dimensionLabel(op, 0),
@@ -446,7 +451,7 @@ function splitOnlyKpis(op: OperationResult): DashboardKpi[] {
     op.measures.flatMap((m, i) => {
       const value = row.values[i]
       if (value === null || m.aggregate === 'share_pct') return []
-      return [{ id: `${op.operation}-${r}-${i}`, label: `${measureLabel(m)} · ${row.keys.join(' · ')}`, value, unit: m.unit, description: operationTitle(op) }]
+      return [{ id: `${op.operation}-${r}-${i}`, label: `${measureLabel(m, op)} · ${row.keys.join(' · ')}`, value, unit: m.unit, description: operationTitle(op) }]
     }),
   )
 }
@@ -464,7 +469,7 @@ function kpisFor(op: OperationResult): DashboardKpi[] {
   if (op.rows.length === 0) return []
   return op.measures.flatMap((m, i) => {
     const value = op.rows[0].values[i]
-    return value === null ? [] : [{ id: `${op.operation}-${i}-${m.column}`, label: measureLabel(m), value, unit: m.unit, description: operationTitle(op) }]
+    return value === null ? [] : [{ id: `${op.operation}-${i}-${m.column}`, label: measureLabel(m, op), value, unit: m.unit, description: operationTitle(op) }]
   })
 }
 

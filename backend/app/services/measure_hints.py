@@ -63,6 +63,8 @@ class MeasureHints:
     split_by: list[str] = field(default_factory=list)
     split_reason: str | None = None
     missing_values: list[str] = field(default_factory=list)
+    # Signo de los valores: positive | negative | mixed (con mixed, una suma es neta).
+    value_sign: str | None = None
 
 
 def _unit_from_values(values: pd.Series) -> str | None:
@@ -144,6 +146,13 @@ def measure_hints(df: pd.DataFrame, semantics: dict[str, str]) -> dict[str, Meas
         h = MeasureHints()
         values = texts[q].dropna()
         numbers = _numbers(texts[q])
+        valid = numbers.dropna()
+        if (valid > 0).any() and (valid < 0).any():
+            h.value_sign = "mixed"
+        elif (valid < 0).any():
+            h.value_sign = "negative"
+        elif len(valid):
+            h.value_sign = "positive"
 
         # Unidad: de las celdas, del encabezado o de una columna de unidad con un solo valor.
         if unit := _unit_from_values(values):

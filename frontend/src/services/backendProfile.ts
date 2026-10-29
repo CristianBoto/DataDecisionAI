@@ -29,6 +29,7 @@ export interface BackendColumnProfile {
   additivity_suggestion?: Additivity | null
   additivity_reason?: string | null
   split_by_suggestion?: string[]
+  value_sign?: 'positive' | 'negative' | 'mixed' | null
   split_reason?: string | null
   missing_value_suggestions?: string[]
 }
@@ -104,6 +105,7 @@ export function adaptBackendProfile(response: BackendProfileResponse, datasetId:
       additivitySuggestion: column.additivity_suggestion ?? null,
       additivityReason: column.additivity_reason ?? null,
       splitBySuggestion: column.split_by_suggestion ?? [],
+      valueSign: column.value_sign ?? null,
       splitReason: column.split_reason ?? null,
       missingValueSuggestions: column.missing_value_suggestions ?? [],
     })),

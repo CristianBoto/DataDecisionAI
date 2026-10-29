@@ -20,11 +20,13 @@ import { FeasibilityBadge } from '@/components/ui/FeasibilityBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AnalysisExecution } from '@/components/analysis/AnalysisExecution'
 import { AIPlanDetails } from '@/components/chat/AIReplyCard'
+import { MissingCoverageNotice, NotObtainableNotice } from '@/components/analysis/CoverageNotice'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useAsync } from '@/hooks/useAsync'
 import { useAIGateway, useService } from '@/hooks/useService'
 import { approvedAIPlans, collectAIPlans, conversationClarifications } from '@/lib/aiPlans'
 import { buildDatasetCatalog } from '@/lib/datasetCatalog'
+import { planCoverage, sharedColumns } from '@/lib/planCoverage'
 import { getErrorMessage } from '@/services'
 
 const CHART_TYPE_LABEL = { bar: 'Barras', line: 'Líneas', area: 'Áreas', histogram: 'Distribución', pie: 'Torta', scatter: 'Dispersión', roc: 'Curva ROC' }
@@ -82,6 +84,12 @@ function AIPlanConfirmation() {
   }
 
   const warnings = [...new Set(approved.flatMap((p) => p.reply.warnings))]
+  // Comprobación local (sin IA): ¿los planes aprobados cubren lo que la persona pidió?
+  const coverage = planCoverage(
+    [objective, ...clarifications],
+    sharedColumns(review?.sources ?? [], buildDatasetCatalog(sources)),
+    approved.flatMap((p) => p.plan.operations),
+  )
 
   return (
     <div className="space-y-6">
@@ -143,6 +151,9 @@ function AIPlanConfirmation() {
           )}
         </Section>
       </div>
+
+      <MissingCoverageNotice missing={coverage.missing} title="Puede que el plan no cubra todo lo que pediste" />
+      <NotObtainableNotice items={coverage.notObtainable} />
 
       <Alert tone="info" title="Todavía no se ejecuta ningún cálculo">
         Aprobar un plan y confirmarlo acá no consulta a la IA ni procesa tus datos. El cálculo con Pandas ocurre solo

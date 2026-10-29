@@ -40,6 +40,7 @@ export interface CatalogColumn {
   unitSuggestion?: string | null
   additivitySuggestion?: Additivity | null
   splitBySuggestion?: string[]
+  valueSign?: 'positive' | 'negative' | 'mixed' | null
 }
 
 export interface CatalogSource {
@@ -118,6 +119,7 @@ export function buildDatasetCatalog(sources: AnalysisSource[]): DatasetCatalog {
       unitSuggestion: column.unitSuggestion ?? null,
       additivitySuggestion: column.additivitySuggestion ?? null,
       splitBySuggestion: column.splitBySuggestion ?? [],
+      valueSign: column.valueSign ?? null,
     })),
   }))
 

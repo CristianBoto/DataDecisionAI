@@ -128,14 +128,17 @@ export function AssistantPage() {
     endRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'end' })
   }, [messages.length, sending, aiChat.length, aiSending, justApproved])
 
-  // Si se vuelve desde la confirmación con "Modificar", se prepara el mensaje.
-  const wantsModify = (location.state as { modify?: boolean } | null)?.modify === true
+  // Si se vuelve desde la confirmación con "Modificar" o con un ajuste sugerido, se prepara el mensaje
+  // (editable: nunca se envía solo, sigue necesitando la autorización de siempre).
+  const navState = location.state as { modify?: boolean; draft?: string } | null
+  const wantsModify = navState?.modify === true
+  const suggestedDraft = typeof navState?.draft === 'string' ? navState.draft.slice(0, MAX_OBJECTIVE_CHARS) : null
   useEffect(() => {
-    if (wantsModify) {
-      setDraft(MODIFY_PREFIX)
+    if (wantsModify || suggestedDraft) {
+      setDraft(suggestedDraft ?? MODIFY_PREFIX)
       composerRef.current?.focus()
     }
-  }, [wantsModify])
+  }, [wantsModify, suggestedDraft])
 
   const history = useMemo<AIHistoryTurn[]>(
     () =>

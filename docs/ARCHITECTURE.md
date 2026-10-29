@@ -762,3 +762,33 @@ Completa el paso 5 con la sección **«Informe de análisis e interpretación»*
 - **Lenguaje causal:** el filtro usa una lista de expresiones. Puede dejar pasar causalidad expresada de otra forma o descartar una frase prudente.
 - **PDF:** las fuentes estándar del PDF cubren Latin-1 (los acentos y la ñ sí; los emojis y algunos símbolos se reemplazan). Si un gráfico no se puede convertir en imagen, el PDF lo indica y conserva su tabla. Los gráficos se capturan con la vista por defecto, no con los filtros elegidos en el dashboard, y el documento lo aclara en cada uno.
 - **Recortes:** la IA recibe hasta 40 filas agregadas por operación (120 en series temporales). En el PDF, hasta 25 filas por tabla.
+
+## Experiencia para personas sin conocimientos técnicos
+
+Todo lo de esta sección se calcula **en el navegador**, a partir de datos que ya existen. No se consulta a la IA y no cambian el consentimiento, el presupuesto, la verificación de afirmaciones ni el aislamiento.
+
+| Pieza | Dónde | Qué hace |
+|-------|-------|----------|
+| Resumen del envío a la IA | `lib/interpretationSummary.ts`, `components/report/InterpretationReview.tsx` | Antes de autorizar la interpretación muestra, en lenguaje natural: qué se calculó y qué no, las principales cifras (del resumen descriptivo de Pandas), qué se envía (objetivo, tamaño de las fuentes y, por operación, cuántas filas agregadas, solo estadísticos o el motivo de una falla) y el costo máximo. Se arma con el **mismo contenido que se autoriza** y lista **todos** los valores de categorías y períodos que viajan, con el aviso de que no se anonimizan. El JSON exacto queda en «Ver detalles técnicos» |
+| Cobertura del pedido | `lib/planCoverage.ts` | Comprobación conservadora: columnas que la persona nombró y ningún plan usa, y análisis pedidos con palabras claras («evolución», «distribución», «relación entre», «promedio», «comparar», «ROC») sin una operación que los calcule. También lo que el catálogo no puede responder: causas, pronósticos y cruces de archivos. Ante la duda no advierte, y nunca bloquea |
+| Aviso en «Confirmar» | `components/analysis/CoverageNotice.tsx`, `pages/ConfirmPage.tsx` | Lista lo que falta y ofrece «Volver al asistente para ajustar el plan» (con un mensaje sugerido que se puede editar y **no se envía solo**) o «Cambiar el objetivo». Nunca pide editar JSON |
+| Estado del análisis en «Resultados» | `components/report/AnalysisStatus.tsx` | Tres grupos: resultados calculados, cuestiones pendientes (operaciones sin resultado y partes del pedido sin cubrir, evaluadas sobre lo efectivamente calculado) y lo que todavía no se puede concluir |
+
+### Reglas generales agregadas (escenario de movimientos financieros)
+
+| Regla | Dónde | Cómo funciona |
+|-------|-------|---------------|
+| **Suma neta** | `analysis_engine._flag_net_sums`, `measure_hints` (`value_sign`), `report.py`, `dashboard.measureLabel` | El motor marca en `signed_measures` las sumas de una medida con valores positivos **y** negativos. Mira solo los signos, nunca el nombre. Esas sumas se presentan como «Suma neta de X» en indicadores, gráficos, tablas, resumen y PDF, con un aviso: no es el saldo de una cuenta ni un total de gastos, y sin conocer qué significa el signo no se distinguen ingresos de egresos. El perfil informa el signo de cada medida, para avisar desde «Confirmar» |
+| **Suma neta presentada como gasto o saldo** | `report._check_text` (`FLOW_RE`) | Una afirmación de la IA que usa «gasto», «ingreso», «cobro» o «pago» o «saldo» sobre una suma marcada se descarta: es una suma neta |
+| **Conteos** | `planCoverage` (`COUNT_REQUEST`) | «Cuántas transacciones», «número de…»: exige una operación de conteo |
+| **Personas o entidades / categorías** | `planCoverage` (`ENTITY_INTENTS`) | Si el pedido las menciona, busca columnas cuyo **nombre** pertenezca a un vocabulario general (persona, nombre, cliente, contraparte…; categoría, rubro, concepto…). Si hay y el plan no las usa: aviso, con lo que agrupa el plan. Si no hay ninguna: «Falta información». «Tipo» y «grupo» no se toman como categorías, para no confundir «tipo de pago» con categorías de gasto |
+| **Falta de fecha** | `planCoverage` | Pedir una evolución sin ninguna columna temporal compartida: «Falta información: fecha o período» |
+| **Nombres de personas en el envío** | `interpretationSummary.personDimensions`, `InterpretationReview` | Si una dimensión que viaja a la IA parece identificar personas (mismo vocabulario), se destacan sus valores. Se recomienda no autorizar sin consentimiento y se indica cómo quitar la columna |
+
+**Limitaciones:**
+- La cobertura reconoce palabras y nombres **literales**, no el sentido completo del pedido: puede no detectar un pedido formulado de otra manera.
+- Una columna mencionada con otro nombre (por ejemplo, «ventas» para `monto_ars`) no se reconoce.
+- Las personas y categorías se reconocen por el **nombre de la columna**. Una columna de personas llamada, por ejemplo, «destino» no se detecta, y una llamada «nombre» que no tenga personas se toma como tal.
+- «Una persona específica»: el motor todavía **no filtra por un valor**. La interfaz no lo promete: la cobertura lo informa y sugiere agrupar por esa columna y buscar a la persona en la tabla o el gráfico del resultado (o en los filtros, si el resultado tiene varias dimensiones). La IA no conoce los valores y debe preguntar cuál es.
+- **Suma neta:** la marca es por columna. Una categoría con valores de un solo signo (por ejemplo, solo gastos) también se rotula «suma neta». Es correcto (es la suma con su signo), pero puede ser más prudente de lo necesario. El catálogo no puede separar gastos de ingresos.
+- **Modalidad como categoría:** la verificación de la IA exige que cada cifra coincida con su dimensión y valor reales («modalidad = Tarjeta»), pero no puede impedir que el texto la **llame** «categoría». Si la afirmación no tiene cifras, se muestra como no verificada.
