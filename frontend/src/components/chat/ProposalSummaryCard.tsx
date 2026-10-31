@@ -43,10 +43,10 @@ export function ProposalSummaryCard({ proposal, onReview, onRequestChanges }: Pr
         </div>
         <div className="flex flex-col gap-2 pt-1 sm:flex-row">
           <Button onClick={onReview} icon={<ClipboardCheck className="size-4" />}>
-            Revisar y aprobar
+            Confirmar análisis
           </Button>
           <Button variant="outline" onClick={onRequestChanges} icon={<PencilLine className="size-4" />}>
-            Solicitar modificaciones
+            Modificar propuesta
           </Button>
         </div>
       </div>

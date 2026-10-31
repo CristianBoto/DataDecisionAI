@@ -104,6 +104,9 @@ class AIContext(_Strict):
     sources: list[SourceContext] = Field(min_length=1, max_length=MAX_SOURCES)
     # Turnos previos con la IA real: forman parte del contenido revisado y aprobado.
     history: list[HistoryTurn] = Field(default_factory=list, max_length=MAX_HISTORY_TURNS)
+    # La persona pidió explícitamente cerrar la conversación con una propuesta (botón «Generar propuesta»
+    # o una aceptación como «sí» a lo que la IA sugirió): la IA debe proponer lo viable en vez de seguir preguntando.
+    request_proposal: bool = False
 
     @model_validator(mode="after")
     def unique_aliases(self) -> AIContext:

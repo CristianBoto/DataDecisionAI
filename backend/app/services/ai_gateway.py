@@ -191,8 +191,8 @@ def estimate_request(context: AIContext, settings: Settings) -> tuple[int, float
 
 
 def boundary_hash(context: AIContext) -> str:
-    """Huella de la frontera de privacidad: objetivo y metadatos autorizados (sin mensaje ni historial)."""
-    boundary = {k: v for k, v in context.model_dump(mode="json").items() if k not in ("message", "history")}
+    """Huella de la frontera de privacidad: objetivo y metadatos autorizados (sin mensaje, historial ni pedido de propuesta)."""
+    boundary = {k: v for k, v in context.model_dump(mode="json").items() if k not in ("message", "history", "request_proposal")}
     canonical = json.dumps(boundary, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 

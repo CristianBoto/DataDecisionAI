@@ -7,6 +7,7 @@ import type {
   MessageKind,
   Project,
 } from '@/types/domain'
+import { isAffirmative } from '@/lib/conversationFlow'
 import { createId } from '@/lib/ids'
 import { profileCsvFile } from '@/lib/csv'
 import { validateDatasetFile } from '@/lib/fileValidation'
@@ -21,6 +22,7 @@ import {
   createInitialState,
   replyAfterApproval,
   replyToClarification,
+  replyToAcceptance,
   replyToModification,
   replyToObjective,
   type DemoConversationState,
@@ -229,6 +231,11 @@ export function createDemoService(options: DemoServiceOptions = {}): DataDecisio
           state.stage = 'proposal_ready'
           break
         case 'proposal_ready':
+          // Una aceptación («sí», «correcto») no es un pedido de cambio: no genera otra versión.
+          if (isAffirmative(text)) {
+            reply = replyToAcceptance()
+            break
+          }
           state.requestedChanges.push(text)
           reply = replyToModification(text, state.proposalVersion + 1)
           break
@@ -254,7 +261,8 @@ export function createDemoService(options: DemoServiceOptions = {}): DataDecisio
 
       const assistantMessage = message('assistant', reply.content, reply.kind, {
         suggestions: reply.suggestions,
-        proposalId: reply.producesProposal ? record.proposal?.id : undefined,
+        // La aceptación vuelve a mostrar la propuesta vigente, con sus botones, al pie del chat.
+        proposalId: reply.kind === 'proposal' ? record.proposal?.id : undefined,
       })
       record.messages.push(userMessage, assistantMessage)
       return wait({ messages: [userMessage, assistantMessage], proposal: record.proposal }, delayMs * 2)

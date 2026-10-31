@@ -20,11 +20,14 @@ import { useConversation } from '@/hooks/useConversation'
 import { useAIGateway, useService } from '@/hooks/useService'
 import { buildAIContext, MAX_HISTORY_TURNS, MAX_OBJECTIVE_CHARS, type AIHistoryTurn } from '@/lib/aiContext'
 import { collectAIPlans } from '@/lib/aiPlans'
+import { aiConversationStage, routeMessage } from '@/lib/conversationFlow'
 import { buildDatasetCatalog } from '@/lib/datasetCatalog'
 import { ApiError, getErrorMessage } from '@/services'
 import { isRealAIAvailable, type AIAuthorizeResult, type AIStatus } from '@/services/aiGateway'
 
 const MODIFY_PREFIX = 'Quisiera modificar: '
+/** Mensaje del botón «Generar propuesta»: va con `request_proposal`, que obliga a la IA a proponer lo viable. */
+const PROPOSAL_REQUEST = 'Armá la propuesta de análisis con lo que ya conversamos.'
 
 /**
  * Lo que la IA ya dijo, en texto, para darle continuidad a la conversación: su mensaje,
@@ -83,16 +86,21 @@ export function AssistantPage() {
   const [statusError, setStatusError] = useState<string | null>(null)
   const [statusAttempt, setStatusAttempt] = useState(0)
   // Mensaje que espera la autorización del usuario para ir a OpenAI.
-  const [outgoing, setOutgoing] = useState<{ text: string; fromComposer: boolean } | null>(null)
+  const [outgoing, setOutgoing] = useState<{ text: string; fromComposer: boolean; requestProposal: boolean } | null>(null)
   // Envío directo dentro de una conversación autorizada.
   const [aiSending, setAISending] = useState(false)
   const [aiError, setAIError] = useState<string | null>(null)
   const [grantNotice, setGrantNotice] = useState<string | null>(null)
   const [justApproved, setJustApproved] = useState(false)
+  // La persona aceptó por escrito («sí») una propuesta completa: se resalta la confirmación formal.
+  const [accepted, setAccepted] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [confirmError, setConfirmError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const catalog = useMemo(() => buildDatasetCatalog(sources), [sources])
+  const stage = useMemo(() => aiConversationStage(aiChat, approvedPlanIds), [aiChat, approvedPlanIds])
 
   // Mientras hay un permiso, se revisa su vencimiento para mostrar el estado correcto.
   useEffect(() => {
@@ -126,7 +134,7 @@ export function AssistantPage() {
 
   useEffect(() => {
     endRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'end' })
-  }, [messages.length, sending, aiChat.length, aiSending, justApproved])
+  }, [messages.length, sending, aiChat.length, aiSending, justApproved, accepted])
 
   // Si se vuelve desde la confirmación con "Modificar" o con un ajuste sugerido, se prepara el mensaje
   // (editable: nunca se envía solo, sigue necesitando la autorización de siempre).
@@ -192,28 +200,62 @@ export function AssistantPage() {
   // Al enviar se mira el reloj en ese momento (el estado visual se refresca cada 15 s).
   const grantLive = () => Boolean(grant && grant.expiresAt > Date.now() && aiGateway?.sendInConversation)
 
-  function requestAuthorization(text: string, fromComposer: boolean) {
+  function requestAuthorization(text: string, fromComposer: boolean, requestProposal = false) {
     if (grant && !grantLive()) {
       session.setAIConversationGrant(null)
       setGrantNotice('La autorización de la conversación venció. Autorizá de nuevo para seguir.')
     }
-    setOutgoing({ text, fromComposer })
+    setOutgoing({ text, fromComposer, requestProposal })
+  }
+
+  /** Cada envío nace de una acción explícita del usuario: con permiso, va directo; sin él, se pide autorización. */
+  function dispatch(text: string, fromComposer: boolean, requestProposal = false) {
+    if (grantLive()) void sendInConversation(text, fromComposer, requestProposal)
+    else requestAuthorization(text, fromComposer, requestProposal)
   }
 
   function startConversation() {
     // El objetivo se escribió una sola vez, en la revisión: no hace falta copiarlo.
     if (!realMode) return void send(objective) // solo en la demo pública
     if (!aiReady) return // sin IA disponible no hay respuestas: ni reales ni simuladas
-    if (grantLive()) void sendInConversation(objective, false)
-    else requestAuthorization(objective, false)
+    dispatch(objective, false)
   }
 
   function handleComposerSend(text: string) {
     if (!realMode) return void send(text) // solo en la demo pública
     if (!aiReady) return
-    // Cada envío nace de una acción explícita del usuario: con permiso, va directo; sin él, se pide autorización.
-    if (grantLive()) void sendInConversation(text, true)
-    else requestAuthorization(text, true)
+    const route = routeMessage(stage, text)
+    // «Sí» a una propuesta completa: no hace falta volver a consultar a la IA (ni gastar presupuesto).
+    // Se pasa a la confirmación formal, que es la que cambia el estado.
+    if (route.action === 'accept') {
+      setAccepted(true)
+      return
+    }
+    // «Sí» a lo que la IA preguntó o sugirió: se le pide explícitamente que cierre con una propuesta.
+    dispatch(text, true, route.requestProposal)
+  }
+
+  function requestProposal() {
+    if (!aiReady) return
+    dispatch(PROPOSAL_REQUEST, false, true)
+  }
+
+  /** «Confirmar análisis»: aprueba en el backend los planes de la propuesta vigente y pasa a Confirmar. */
+  async function confirmProposal(planIds: string[]) {
+    if (!aiGateway?.approvePlan) return
+    setConfirming(true)
+    setConfirmError(null)
+    try {
+      for (const id of planIds) {
+        await aiGateway.approvePlan(id) // registro local en el backend: no consulta a OpenAI ni calcula nada
+        session.markPlanApproved(id)
+      }
+      navigate('/analisis/confirmar')
+    } catch (err) {
+      setConfirmError(getErrorMessage(err))
+    } finally {
+      setConfirming(false)
+    }
   }
 
   function appendTurns(text: string, result: AIAuthorizeResult) {
@@ -222,22 +264,23 @@ export function AssistantPage() {
       { id: turnId(), role: 'assistant', content: result.reply.message, result },
     ]
     session.appendAIChat(turns)
+    setAccepted(false)
     void aiGateway?.status().then(setAIStatus, () => undefined)
   }
 
-  async function sendInConversation(text: string, fromComposer: boolean) {
+  async function sendInConversation(text: string, fromComposer: boolean, requestProposal = false) {
     if (!grant || !review || !aiGateway?.sendInConversation) return
     setAISending(true)
     setAIError(null)
     try {
-      const payload = buildAIContext(catalog, review.objective, review.sources, text, history)
+      const payload = buildAIContext(catalog, review.objective, review.sources, text, history, { requestProposal })
       appendTurns(text, await aiGateway.sendInConversation(grant.id, payload))
     } catch (err) {
       if (invalidatesGrant(err)) {
         // El backend rechazó el permiso: se descarta y se pide autorizar este mensaje de nuevo.
         session.setAIConversationGrant(null)
         setGrantNotice(getErrorMessage(err))
-        setOutgoing({ text, fromComposer })
+        setOutgoing({ text, fromComposer, requestProposal })
       } else {
         // Presupuesto, límites, conexión o validación: se informa y el texto vuelve al chat. Sin reintentos.
         setAIError(getErrorMessage(err))
@@ -475,6 +518,50 @@ export function AssistantPage() {
                   </div>
                 </section>
               )}
+              {realMode && stage.kind === 'proposal' && !aiSending && !outgoing && (
+                <section aria-label="Propuesta lista" className="rounded-2xl border border-blue-200 bg-blue-50/70 p-4 text-sm">
+                  <p className="flex items-center gap-1.5 font-semibold text-navy-900">
+                    <CheckCircle2 className="size-4 text-blue-600" aria-hidden />
+                    {accepted ? 'Entendido: aceptás la propuesta.' : 'La propuesta de análisis está lista.'}
+                  </p>
+                  <p className="mt-1 text-slate-700">
+                    {stage.planIds.length === 1 ? 'Incluye 1 plan' : `Incluye ${stage.planIds.length} planes`}, con sus operaciones
+                    y limitaciones arriba. «Confirmar análisis» {stage.planIds.length === 1 ? 'lo aprueba' : 'los aprueba'} y te
+                    lleva al paso Confirmar; lo que no se puede calcular queda indicado como limitación.
+                  </p>
+                  {confirmError && (
+                    <Alert tone="error" className="mt-2">
+                      {confirmError}
+                    </Alert>
+                  )}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      size="sm"
+                      icon={<CheckCircle2 className="size-3.5" />}
+                      loading={confirming}
+                      disabled={!aiGateway?.approvePlan}
+                      onClick={() => void confirmProposal(stage.planIds)}
+                    >
+                      Confirmar análisis
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={requestChanges} disabled={confirming}>
+                      Modificar propuesta
+                    </Button>
+                  </div>
+                </section>
+              )}
+              {realMode && aiReady && stage.kind === 'questions' && !aiSending && !outgoing && (
+                <section aria-label="Generar propuesta" className="rounded-2xl border border-slate-200 bg-white p-4 text-sm">
+                  <p className="text-slate-700">
+                    {stage.rounds >= 2
+                      ? 'El asistente ya hizo varias preguntas. Si respondiste lo necesario, pedile que arme la propuesta con lo viable.'
+                      : 'Respondé las preguntas o, si ya está todo dicho, pedile al asistente que arme la propuesta.'}
+                  </p>
+                  <Button size="sm" variant={stage.rounds >= 2 ? 'primary' : 'outline'} className="mt-2" onClick={requestProposal}>
+                    Generar propuesta
+                  </Button>
+                </section>
+              )}
               {(sending || aiSending) && <TypingIndicator />}
               <div ref={endRef} />
             </div>
@@ -572,6 +659,7 @@ export function AssistantPage() {
               review={review}
               message={outgoing.text}
               history={history}
+              requestProposal={outgoing.requestProposal}
               gateway={aiGateway}
               onSent={handleSent}
               onCancel={handleCancelSend}

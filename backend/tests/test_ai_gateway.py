@@ -78,7 +78,9 @@ def test_prepared_payload_is_exactly_the_whitelisted_content():
     client, _ = make_client()
     prepared = prepare(client, context(source("A"), source("B"))).json()
     payload = prepared["payload"]
-    assert set(payload) == {"version", "objective", "message", "sources", "history"}
+    # request_proposal: un indicador sí/no (la persona pidió la propuesta), sin datos.
+    assert set(payload) == {"version", "objective", "message", "sources", "history", "request_proposal"}
+    assert payload["request_proposal"] is False
     assert payload["message"] is None  # solo presente en la autorización de un mensaje
     assert set(payload["sources"][0]) == {"alias", "columns", "size_range"}
     assert set(payload["sources"][0]["columns"][0]) == {

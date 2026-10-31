@@ -15,6 +15,8 @@ interface AuthorizedSendProps {
   /** Mensaje que el usuario quiere enviar (el objetivo, al comenzar). */
   message: string
   history: AIHistoryTurn[]
+  /** Pide a la IA que cierre con una propuesta (se ve en el contenido exacto que se autoriza). */
+  requestProposal?: boolean
   gateway: AIGatewayClient
   onSent: (result: AIAuthorizeResult) => void
   onCancel: () => void
@@ -28,11 +30,11 @@ interface AuthorizedSendProps {
  * costo máximo estimado. Solo una autorización explícita (este mensaje o esta
  * conversación) llega a OpenAI.
  */
-export function AuthorizedSend({ sources, review, message, history, gateway, onSent, onCancel, notice }: AuthorizedSendProps) {
+export function AuthorizedSend({ sources, review, message, history, requestProposal = false, gateway, onSent, onCancel, notice }: AuthorizedSendProps) {
   const catalog = useMemo(() => buildDatasetCatalog(sources), [sources])
   const payload = useMemo(
-    () => buildAIContext(catalog, review.objective, review.sources, message, history),
-    [catalog, review, message, history],
+    () => buildAIContext(catalog, review.objective, review.sources, message, history, { requestProposal }),
+    [catalog, review, message, history, requestProposal],
   )
   const { status, prepared, busy, result, prepare, authorize, cancel } = useAIAuthorization(gateway, payload)
   const key = JSON.stringify(payload)

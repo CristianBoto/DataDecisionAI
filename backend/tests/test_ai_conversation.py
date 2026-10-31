@@ -95,6 +95,29 @@ def test_new_messages_and_history_do_not_invalidate_the_permission():
         assert send(client, cid, {**context(), "message": f"Pregunta {i}", "history": history}).status_code == 200
 
 
+def test_requesting_a_proposal_reaches_the_ai_without_invalidating_the_permission():
+    """«Generar propuesta» o un «sí» a lo que sugirió la IA: el pedido explícito llega al proveedor
+    y no cambia la frontera de privacidad (el permiso de la conversación sigue valiendo)."""
+    provider = FakeProvider()
+    client, _ = make_client(ai_enabled=True, provider=provider)
+    cid = start_conversation(client)["conversation_id"]
+    history = [{"role": "assistant", "content": "¿Querés que analice las ventas por sector?"}]
+    response = send(client, cid, {**context(), "message": "sí", "history": history, "request_proposal": True})
+    assert response.status_code == 200, response.text
+    assert provider.received[-1]["request_proposal"] is True
+    assert provider.received[0]["request_proposal"] is False
+    assert boundary_hash(AIContext(**{**context(), "request_proposal": True})) == boundary_hash(AIContext(**context()))
+
+
+def test_the_instructions_close_the_conversation_with_a_proposal():
+    from app.services.openai_provider import INSTRUCTIONS
+
+    assert "request_proposal" in INSTRUCTIONS
+    assert "Nunca repitas una pregunta" in INSTRUCTIONS
+    assert "No hagas preguntas de confirmación" in INSTRUCTIONS
+    assert "proponé ya la parte viable" in INSTRUCTIONS
+
+
 def test_revocation_blocks_new_calls():
     provider = FakeProvider()
     client, _ = make_client(ai_enabled=True, provider=provider)

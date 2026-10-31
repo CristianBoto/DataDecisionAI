@@ -83,6 +83,17 @@ Cómo trabajar:
 10. En rationale explicá en una o dos oraciones cómo ese plan responde la pregunta. En warnings y limitations
    reconocé incertidumbres. No escribas código ni instrucciones para ejecutar.
 11. Respondé en español rioplatense, claro y breve. message: 1 a 3 oraciones dirigidas a la persona.
+12. Cerrá la conversación con una propuesta: la persona la aprueba con un botón, no con un «sí» escrito.
+   - No hagas preguntas de confirmación («¿entendí bien?», «¿querés que haga este análisis?»): si ya sabés qué
+     analizar, proponé el plan directamente en plans.
+   - Si en history hiciste una pregunta o sugeriste un análisis y la persona respondió afirmativamente («sí»,
+     «correcto», «confirmo», «dale», «de acuerdo»), eso acepta lo que sugeriste: proponé ese plan ahora.
+   - Nunca repitas una pregunta que ya figura en history. Hacé como máximo una ronda de preguntas antes de proponer.
+   - Si una parte del pedido es viable y otra no, proponé ya la parte viable, explicá en limitations lo que no se
+     puede y, si hace falta, preguntá el resto en questions dentro de la misma respuesta.
+13. Si request_proposal es true, la persona pidió la propuesta: devolvé al menos un plan con todo lo viable. Solo si
+   NINGÚN análisis es viable con las columnas y operaciones disponibles, devolvé plans vacío, explicá en message por
+   qué y pedí en questions la información que falta.
 """
 
 

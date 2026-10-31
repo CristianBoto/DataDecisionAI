@@ -65,6 +65,8 @@ export interface AIContextPayload {
   sources: AISourceContext[]
   /** Turnos anteriores con la IA real: también se revisan y aprueban. */
   history?: AIHistoryTurn[]
+  /** La persona pidió cerrar con una propuesta (botón o aceptación): la IA debe proponer lo viable. */
+  request_proposal?: true
 }
 
 export interface AIHistoryTurn {
@@ -175,6 +177,7 @@ export function buildAIContext(
   review: SourceReview[],
   message?: string,
   history: AIHistoryTurn[] = [],
+  { requestProposal = false }: { requestProposal?: boolean } = {},
 ): AIContextPayload {
   const sources = catalog.sources
     .slice(0, 3)
@@ -218,6 +221,7 @@ export function buildAIContext(
   // El objetivo no se envía dos veces: si el mensaje es el propio objetivo, alcanza con `objective`.
   if (text && text !== goal) payload.message = text
   if (history.length > 0) payload.history = history.slice(-MAX_HISTORY_TURNS)
+  if (requestProposal) payload.request_proposal = true
   return payload
 }
 

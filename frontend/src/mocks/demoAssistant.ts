@@ -258,6 +258,15 @@ export function replyToClarification(text: string, intent: DemoIntent, isDemoDat
   }
 }
 
+/** «Sí» a una propuesta completa: se reconoce la aceptación sin crear otra versión. */
+export function replyToAcceptance(): ScriptedReply {
+  return {
+    kind: 'proposal',
+    producesProposal: false,
+    content: 'Perfecto, tomo la propuesta como aceptada. Usá «Confirmar análisis» para pasar a la confirmación formal.',
+  }
+}
+
 export function replyToModification(text: string, version: number): ScriptedReply {
   return {
     kind: 'proposal',
