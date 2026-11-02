@@ -25,6 +25,8 @@ interface AIContextReviewProps {
   objectiveLabel?: string
   /** Integrado en una página: sin botón de cerrar ni "Cancelar". */
   embedded?: boolean
+  /** El objetivo puede quedar vacío (se define en la conversación). */
+  objectiveOptional?: boolean
 }
 
 /**
@@ -44,6 +46,7 @@ export function AIContextReview({
   onReviewChange,
   objectiveLabel = 'Objetivo que se compartiría',
   embedded = false,
+  objectiveOptional = false,
 }: AIContextReviewProps) {
   const catalog = useMemo(() => buildDatasetCatalog(sources), [sources])
   const [ownObjective, setOwnObjective] = useState(initialObjective)
@@ -57,7 +60,8 @@ export function AIContextReview({
     else setOwnReview(next)
   }
   const payload = useMemo(() => buildAIContext(catalog, objective, review), [catalog, objective, review])
-  const problem = contextProblem(payload)
+  // En la revisión el objetivo es opcional: si queda vacío, se define conversando con el asistente.
+  const problem = objectiveOptional && !objective.trim() ? null : contextProblem(payload)
   // Cualquier cambio del contenido invalida lo validado (lo resuelve el hook).
   const { status, prepared, busy, result, prepare, authorize, cancel } = useAIAuthorization(gateway, payload)
 
@@ -123,6 +127,7 @@ export function AIContextReview({
               className="mt-1.5 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-100 focus:outline-none"
             />
             <p className="mt-1 text-xs text-slate-400">
+              {objectiveOptional && 'Opcional: si lo dejás vacío, el asistente te lo pregunta a partir de tus datos. '}
               Escribilo con tus palabras, una sola vez: no hace falta explicar cálculos, gráficos ni reportes. Quitá
               nombres, cifras u otros datos que no quieras compartir.
             </p>

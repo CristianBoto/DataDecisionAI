@@ -1,4 +1,4 @@
-import { measureLabel, planDashboard, runSummary, selectionCaption, viewCharts, type DashboardKpi } from '@/lib/dashboard'
+import { measureLabel, PERCENT_AGGREGATES, planDashboard, runSummary, selectionCaption, viewCharts, type DashboardKpi } from '@/lib/dashboard'
 import type { AIInterpretation, AIInterpretationResult, InterpretationItem } from '@/services/aiGateway'
 import type { DescriptiveSummary, ExecutionResponse, OperationResult } from '@/services/analysisEngine'
 import type { PlanCoverage } from '@/lib/planCoverage'
@@ -28,8 +28,8 @@ export interface ReportPlan {
   sourceAlias: string
   status: 'ok' | 'partial' | 'error'
   kpis: DashboardKpi[]
-  /** Gráficos del dashboard con la vista por defecto; `note` explica filtros y recortes. */
-  charts: { chart: Chart; note: string | null }[]
+  /** Gráficos del dashboard con la vista por defecto; `note` explica filtros y recortes; `ref`, la operación que lo respalda. */
+  charts: { chart: Chart; note: string | null; ref: string }[]
   tables: { ref: string; op: OperationResult }[]
   errors: { title: string; message: string }[]
 }
@@ -84,6 +84,27 @@ export interface ReportDocument {
   derived: DerivedIndicator[]
   /** Advertencias y notas del motor, con sus aclaraciones (lo que muestra el PDF). */
   warningNotes: ReportWarning[]
+  proposal: ReportProposal | null
+}
+
+/** Lo que la persona aprobó en la propuesta: el objetivo interpretado (más breve que el pedido original). */
+export interface ReportProposal {
+  interpretedObjective: string
+  decisions: string[]
+  missingData: string[]
+  feasibility: string | null
+}
+
+/** Propuesta del informe a partir de los planes aprobados de la sesión. */
+export function reportProposal(plans: { reply?: { interpreted_objective: string; decisions?: string[]; missing_data?: string[]; feasibility?: string } }[]): ReportProposal | null {
+  const replies = plans.map((p) => p.reply).filter((r): r is NonNullable<typeof r> => Boolean(r))
+  if (!replies.length) return null
+  return {
+    interpretedObjective: [...new Set(replies.map((r) => r.interpreted_objective.trim()).filter(Boolean))].join(' '),
+    decisions: [...new Set(replies.flatMap((r) => r.decisions ?? []))],
+    missingData: [...new Set(replies.flatMap((r) => r.missing_data ?? []))],
+    feasibility: replies[replies.length - 1].feasibility ?? null,
+  }
 }
 
 export const OPERATION_NAMES: Record<string, string> = {
@@ -93,9 +114,13 @@ export const OPERATION_NAMES: Record<string, string> = {
   median: 'Mediana',
   min: 'Mínimo',
   max: 'Máximo',
+  std: 'Desvío estándar',
   group_by: 'Agrupación',
   compare_groups: 'Comparación entre grupos',
+  pareto: 'Ranking (Pareto)',
   time_series: 'Serie temporal',
+  variation: 'Variación entre períodos',
+  ratio: 'Cociente',
   frequency: 'Frecuencias',
   distinct_count: 'Valores distintos',
   histogram: 'Histograma',
@@ -115,12 +140,12 @@ const number = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 })
 export function formatMeasure(value: number | null, m: OperationResult['measures'][number]): string {
   if (value === null) return '—'
   const formatted = number.format(value)
-  if (m.aggregate === 'share_pct') return `${formatted} %`
+  if (PERCENT_AGGREGATES.includes(m.aggregate)) return `${formatted} %`
   return m.unit && m.aggregate !== 'count' && m.aggregate !== 'distinct_count' ? `${formatted} ${m.unit}` : formatted
 }
 
 export function measureHeader(m: OperationResult['measures'][number], op?: Pick<OperationResult, 'signed_measures'>): string {
-  return `${measureLabel(m, op)}${m.unit && m.aggregate !== 'share_pct' ? ` (${m.unit})` : ''}`
+  return `${measureLabel(m, op)}${m.unit && !PERCENT_AGGREGATES.includes(m.aggregate) ? ` (${m.unit})` : ''}`
 }
 
 /** Título predeterminado del PDF: se deriva del análisis y la persona lo puede cambiar. */
@@ -235,6 +260,8 @@ export function buildReport(input: {
   interpretation: AIInterpretationResult | null
   /** Cobertura del objetivo calculada en «Resultados» (la misma comprobación local, sin IA). */
   coverage?: PlanCoverage | null
+  /** Propuesta aprobada: objetivo interpretado, decisiones y viabilidad (Fase 5). */
+  proposal?: ReportProposal | null
   now?: Date
 }): ReportDocument {
   const { run } = input
@@ -270,7 +297,7 @@ export function buildReport(input: {
           .filter(Boolean)
           .join(' ')
         // Sin animación: el PDF captura el gráfico ya dibujado.
-        return built.charts.map((chart) => ({ chart: { ...chart, animated: false }, note: note || null }))
+        return built.charts.map((chart) => ({ chart: { ...chart, animated: false }, note: note || null, ref: refs.get(view.op) ?? '' }))
       }),
       tables: dashboard.tables.map((op) => ({ ref: refs.get(op) ?? '', op })),
       errors: dashboard.errors,
@@ -301,6 +328,7 @@ export function buildReport(input: {
     scope: reportScope({ objective, methodology, plans: run.results.length, coverage: input.coverage ?? null }),
     derived,
     warningNotes: clarifyWarnings([...new Set([...uniqueWarnings, ...run.notes])], derived),
+    proposal: input.proposal ?? null,
   }
 }
 
@@ -323,4 +351,61 @@ export function unverifiedItems(interpretation: AIInterpretation): { section: st
   return (Object.keys(names) as Section[]).flatMap((section) =>
     splitVerified(interpretation, section).unverified.map((item) => ({ section: names[section], item })),
   )
+}
+
+// --- Esquema del informe ejecutivo (Fase 5): lo comparten la vista previa y el PDF -------------
+
+/** Origen de cada contenido del informe, siempre visible: Pandas calcula, la IA interpreta. */
+export type Provenance = 'pandas' | 'ai-verified' | 'ai-interpretation' | 'ai-hypothesis'
+
+export const PROVENANCE_LABELS: Record<Provenance, string> = {
+  pandas: 'Calculado por Pandas',
+  'ai-verified': 'Interpretado por IA · verificado automáticamente',
+  'ai-interpretation': 'Interpretado por IA · sin cifras, no verificable con los datos',
+  'ai-hypothesis': 'Hipótesis de la IA · a comprobar con otros datos',
+}
+
+export interface OutlineItem {
+  text: string
+  provenance: Provenance
+  refs: string[]
+}
+
+type AISection = 'executive_summary' | 'findings' | 'trends' | 'implications' | 'recommendations' | 'hypotheses'
+
+/** Afirmaciones de una sección de la IA con su origen: verificadas primero, luego las interpretaciones sin cifras. */
+export function aiItems(ai: AIInterpretation, section: AISection): OutlineItem[] {
+  const items = ai[section] ?? []
+  const provenance = (i: InterpretationItem): Provenance =>
+    section === 'hypotheses' ? 'ai-hypothesis' : i.status === 'verified' ? 'ai-verified' : 'ai-interpretation'
+  return [...items.filter((i) => i.status === 'verified'), ...items.filter((i) => i.status !== 'verified')].map((i) => ({
+    text: i.text,
+    provenance: provenance(i),
+    refs: i.evidence,
+  }))
+}
+
+/** Resumen ejecutivo BREVE: el alcance real y, con IA, su resumen; sin IA, los hechos principales calculados. */
+export function executiveSummary(report: ReportDocument, max = 4): OutlineItem[] {
+  const scope: OutlineItem = { text: report.scope.headline, provenance: 'pandas', refs: [] }
+  const ai = report.interpretation?.interpretation
+  if (ai && ai.executive_summary.length) return [...aiItems(ai, 'executive_summary').slice(0, max - 1), scope]
+  // Sin IA: el primer hecho de cada operación (sin la línea «Se calcularon N de M», que ya dice el alcance).
+  const facts = (report.summary?.items ?? []).filter((i) => i.status === 'ok' && i.facts.length).map((i) => ({ text: i.facts[0], provenance: 'pandas' as const, refs: [i.ref] }))
+  return [...facts.slice(0, max - 1), scope]
+}
+
+/** Hechos calculados de una operación (para mostrarlos junto a su gráfico), sin repetir los indicadores derivados. */
+export function operationFindings(report: ReportDocument, ref: string): string[] {
+  const item = report.summary?.items.find((i) => i.ref === ref && i.status === 'ok')
+  return item ? findingFacts(item, report.derived).filter((f) => !f.startsWith('Sin hechos destacados')) : []
+}
+
+/** Operaciones calculadas que no tienen gráfico: sus hallazgos se listan aparte. */
+export function findingsWithoutChart(report: ReportDocument): { ref: string; title: string; facts: string[] }[] {
+  const charted = new Set(report.plans.flatMap((p) => p.charts.map((c) => c.ref)))
+  return (report.summary?.items ?? [])
+    .filter((i) => i.status === 'ok' && !charted.has(i.ref))
+    .map((i) => ({ ref: i.ref, title: i.title, facts: operationFindings(report, i.ref) }))
+    .filter((i) => i.facts.length > 0)
 }

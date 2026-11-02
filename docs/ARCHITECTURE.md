@@ -735,7 +735,7 @@ Completa el paso 5 con la sección **«Informe de análisis e interpretación»*
 |-------|-------|-----------|----------|
 | 1. Guardar los resultados | `backend/app/services/report.py` | `ExecutionStore.save` / `get` | Al ejecutar, `/api/analysis/execute` guarda el resultado en memoria, con dueño (visitante) y vencimiento de 6 h (5 por visitante, 300 en total). Devuelve `execution_id`. Otro visitante recibe 404 |
 | 2. Resumen descriptivo (sin IA) | `report.py` | `descriptive_summary`, `operation_facts` y `_scalar/_temporal/_grouped/_histogram/_scatter/_roc_facts` | Resumen ejecutivo descriptivo (`executive`: un hecho por operación calculada) y hechos verificables por operación (referencia `P1.O2` = plan 1, operación 2): totales, primer y último período con su variación, máximo y mínimo, grupo mayor y menor con su participación, intervalo modal, correlaciones y AUC. Se describe **dentro** de cada combinación de las columnas que definen la medida (`split_dimensions`): nunca se suman indicadores ni unidades distintas. Una operación fallida no produce hechos: se informa su motivo |
-| 3. Contexto para la IA | `report.py` | `build_context` | Lo arma el **backend** desde la ejecución guardada (el navegador no puede alterarlo): objetivo, filas y columnas por fuente, resultados agregados (hasta 40 filas por operación, 120 en series temporales), estadísticos y advertencias. Dispersión y ROC viajan **sin puntos**, solo con sus estadísticos. Si una agrupación tiene tantos grupos como registros (cada grupo sería un registro), sus filas no se envían (`rows_withheld`) |
+| 3. Contexto para la IA | `report.py` | `build_context` | Lo arma el **backend** desde la ejecución guardada (el navegador no puede alterarlo): objetivo, filas y columnas por fuente, resultados agregados completos (sin recorte), estadísticos y advertencias. Ese contexto completo **no se envía**: se usa para verificar; lo que viaja es el contexto compacto (ver «Contexto compacto para interpretar»). Dispersión y ROC viajan **sin puntos**, solo con sus estadísticos. Si una agrupación tiene tantos grupos como registros (cada grupo sería un registro), sus filas no se envían (`rows_withheld`) |
 | 4. Preparar y autorizar | `report.py` + `api/routes/ai.py` | `prepare_interpretation`, `authorize_interpretation` | `POST /api/ai/interpretations` devuelve el contenido exacto, su huella SHA-256 y el costo máximo; no envía nada. `POST /api/ai/interpretations/{id}/authorize` consume la autorización (uso único) y envía. Las solicitudes viven en un almacén **separado** del de planes (`interpretation_requests`) |
 | 5. Llamada medida | `services/ai_gateway.py` | `check_sendable`, `metered_call` | Las mismas comprobaciones y el mismo presupuesto que la conversación: reserva del costo máximo, cuota por visitante, tope diario y registro del consumo real en SQLite. Se extrajeron de `_send` para reutilizarlas sin duplicar |
 | 6. Proveedor | `services/openai_provider.py` | `OpenAIProvider.interpret`, `_parse`, `INTERPRETATION_INSTRUCTIONS` | Responses API con salida estructurada `AIInterpretation` (resumen ejecutivo, hallazgos, tendencias, recomendaciones, limitaciones y calidad de datos). Cada afirmación trae sus refs y **un `Claim` por cifra**: operación, medida, categorías de todas las dimensiones (incluidos indicador y unidad), período inicial y final si es una variación, tipo (`value`, `share_pct`, `change`, `change_pct`, `statistic`), valor y unidad. Sin reintentos y con `store=False`, igual que `send` |
@@ -848,3 +848,73 @@ Paginación (`Writer` en `lib/reportPdf.ts`): cada título reserva lugar para lo
 - El Markdown es limitado: no hay tablas, citas ni negrita dentro de una línea (las marcas se quitan y el texto queda normal).
 - Las fuentes estándar del PDF cubren Latin-1: los emojis y algunos símbolos se reemplazan o se omiten, también en el título y los campos de la portada.
 - El logo se guarda a 800 px como máximo en su lado mayor: un logo muy detallado puede perder definición al imprimirse grande.
+
+## Ciencia de datos, decisiones y flujo simplificado (Fase 5)
+
+Objetivo: que DataDecision AI comprenda el objetivo, evalúe la calidad de los datos, determine qué es viable, calcule resultados verificables, explique sus implicaciones y entregue un informe ejecutivo. Sin reconstruir nada: cada pieza se agregó dentro de la arquitectura existente.
+
+### Ciencia de datos (backend)
+
+| Pieza | Dónde | Qué hace |
+|-------|-------|----------|
+| Diagnóstico de calidad | `services/data_quality.py` (lo llama `dataset_profiler`) | Estadísticas (n, media, desvío, cuartiles), errores de conversión, atípicos con IQR (Tukey), categorías que solo difieren en mayúsculas, tildes o espacios, fechas inválidas o ambiguas (día/mes), duplicados exactos y lógicos. También diagnostica columnas **mayormente** numéricas o de fechas que no se interpretaron así por sus errores. Cada problema trae severidad e impacto. **Nada se corrige**: no se eliminan duplicados, no se unifican categorías, no se imputan faltantes ni se reemplazan por cero |
+| Nuevas operaciones | `analysis_engine.py`, reglas en `operation_rules.py`, guía de la IA en `ai_plan.py` | `std` (desvío estándar); `pareto` (ranking con participación y participación acumulada, y cuántas categorías llegan al 80 %); `variation` (cambio absoluto y % entre períodos consecutivos, dentro de cada serie); `ratio` (cociente de **sumas**, por ejemplo gasto por alumno, con denominador 0 → «sin dato», nunca infinito). `compare_groups` con dos columnas calcula la participación de la segunda **dentro** de cada categoría de la primera |
+| Reglas | `operation_rules.py` | Las mismas para validar los planes de la IA y como última barrera del motor: no se suman medidas no aditivas, un identificador nunca es una magnitud, un cociente no usa tasas ni medidas que dependen de otra columna, un Pareto no admite valores negativos ni medidas en formato largo |
+| Viabilidad | `AIAssistantReply.feasibility`, `missing_data`, `decisions`; `prune_reply` | La IA declara si el objetivo es viable, parcialmente viable, no viable o si falta información, con los datos que faltan y las decisiones que los planes ayudan a evaluar. El backend la corrige si contradice lo validado (sin planes no es viable; con operaciones descartadas es parcial) |
+| Plan descriptivo sin IA | `services/descriptive_plan.py`, `POST /api/ai/plans/descriptive` | Reglas sobre los metadatos revisados (nunca nombres ni valores). Misma validación, aprobación y ejecución que un plan de la IA |
+| Proveedor de IA | `AI_PROVIDER` (`config.py`), `create_provider` y `LocalModelPlaceholder` (`ai_gateway.py`) | OpenAI integrado; Ollama preparado como punto de extensión, sin envíos (ver [PRIVACIDAD.md](PRIVACIDAD.md)) |
+
+### Interpretación orientada a decisiones
+
+- **Secciones nuevas** de `AIInterpretation`: `implications`, `hypotheses`, `information_needed` y `not_supported`, además de resumen, hallazgos (3 a 5), tendencias, recomendaciones condicionadas, limitaciones y calidad. Las instrucciones piden aportar algo nuevo respecto del resumen descriptivo, con un ejemplo de lo esperado.
+- **Origen visible** de cada afirmación (`PROVENANCE_LABELS` en `lib/report.ts`): calculado por Pandas, interpretado por IA y verificado, interpretación sin cifras (no verificable) o hipótesis a comprobar.
+- **Verificación revisada** (`report.py`). Se revisaron los rechazos innecesarios sin debilitar la verificación:
+  - un **año** de los períodos analizados («durante 2025») ya no se toma como cifra sin respaldo; un año que no figura en los resultados, sí;
+  - nombrar **otra categoría para comparar** se acepta si en esa cláusula no hay cifras; si dice «más que» o «menos que», la dirección se **verifica** contra el valor real de esa categoría (`_comparison_ok`);
+  - las hipótesis con lenguaje causal afirmativo («se debe a») se descartan; las conclusiones no permitidas pueden nombrar causas (para negarlas), pero no inventar cifras.
+- **Contexto sin redundancia**: la ejecución envía como objetivo el **interpretado y aprobado** con sus decisiones (`approvedObjective` en `lib/analysisRequest.ts`), no todo el pedido original, que queda en la sesión y en un anexo del informe.
+
+### Flujo y privacidad (frontend)
+
+- **Cuatro pasos visibles** (`VISUAL_STEPS` en `lib/wizardSteps.ts`): Cargar y explorar, Conversar, Confirmar propuesta, Resultados. Las cinco pantallas y sus requisitos internos no cambian.
+- **Objetivo una sola vez**: opcional en la revisión. Si queda vacío, el asistente saluda con la estructura real de los datos (`lib/dataGreeting.ts`, sin IA) y el primer mensaje pasa a ser el objetivo (`setObjective`, que no reinicia la revisión).
+- **Consentimiento** (`components/ai/ConsentSummary.tsx`): qué se envía, qué nunca, qué podría ser confidencial, para qué y qué queda disponible si no se autoriza. La carga distingue la **versión pública** (aviso contra datos confidenciales) de una **instalación local** (`isLocalBackend`).
+
+### Dashboard e informe ejecutivo
+
+- Dashboard: la variación grafica el cambio de cada período (barras); el cociente, solo el cociente; el Pareto, el ranking; la torta solo acepta sumas y conteos. Cada gráfico indica su fuente y que lo calculó Pandas.
+- PDF y vista previa (mismo esquema, `executiveSummary`, `operationFindings`, `findingsWithoutChart`): portada con identidad; 1. Resumen ejecutivo breve; 2. Objetivo interpretado y alcance; 3. Indicadores principales; 4. Gráficos y hallazgos (cada gráfico con los hechos de su operación); 5. Interpretación orientada a decisiones; 6. Recomendaciones y limitaciones; 7. Metodología, fuentes y detalles técnicos; anexos con el pedido original, las tablas exactas y la auditoría de la verificación. Solo se agregan los anexos que tienen contenido.
+- Editor de identidad (`PdfCustomizer`): identidad (logo con arrastrar y soltar, organización, marca) e información (título, autor, fecha). La personalización sigue sin tocar los cálculos.
+
+### Limitaciones
+
+- La viabilidad la declara la IA; el backend solo garantiza que no contradiga los planes validados.
+- Las variantes de categorías se detectan por forma (mayúsculas, tildes, espacios), no por significado («CABA» y «Capital» no se agrupan).
+- La ambigüedad día/mes se informa cuando ningún valor tiene un día mayor que 12; no se corrige.
+- El plan descriptivo sin IA no interpreta el objetivo ni elige las comparaciones más útiles.
+- Ollama no está integrado.
+
+## Contexto compacto para interpretar (Fase 5.1)
+
+**Problema.** Con el ejemplo de ventas (72 filas) y 17 operaciones, la interpretación fallaba con «Los resultados superan el tamaño máximo permitido para la IA». No era el tamaño de los datos: el contexto (17.645 caracteres) más las instrucciones (5.582) y la reserva del esquema de salida sumaban ~8.543 tokens estimados, por encima del límite de 8.000 (`ai_max_input_tokens`). El exceso venía de la estructura: claves JSON repetidas en cada fila y en cada operación, el título del plan repetido en cada operación, el resumen descriptivo duplicando cifras de las filas y medidas idénticas en varias operaciones (la variación repite la serie temporal; el Pareto, la comparación por grupo).
+
+**Diseño.** Dos contextos, con funciones distintas:
+
+| Contexto | Dónde vive | Para qué |
+|----------|-----------|----------|
+| Completo (`InterpretationContext`, `build_context`) | Solo en el servidor, adjunto a la solicitud | Verificar cada cifra que escriba la IA contra **todas** las filas de Pandas |
+| Compacto (`CompactInterpretationContext`, versión 2, `services/interpretation_context.py`) | Es lo que se muestra, se firma con SHA-256 y se envía | Darle a la IA lo necesario para interpretar dentro del presupuesto |
+
+El contexto compacto:
+- agrupa las operaciones por plan (el título viaja una vez) y envía las filas como arreglos `[claves…, valores…]`, con las medidas declaradas una sola vez;
+- **deduplica**: una operación idéntica a otra se envía como `same_as`; una medida idéntica a la de otra operación, como referencia en `repeated`; las advertencias repetidas se envían una vez con todas sus operaciones;
+- incluye hechos (`facts`) solo en operaciones derivadas (variación, Pareto, cociente, distribuciones) o reducidas, para no repetir cifras que ya están en las filas;
+- declara su `coverage`: cuántas operaciones van completas, resumidas o solo con hechos, y qué planes quedaron afuera.
+
+**Presupuesto.** `context_char_budget` = (límite × 0,85 − instrucciones − reserva del esquema) × 3 caracteres por token. El límite de seguridad no se cambió. Si el contexto no entra, `compact_context` reduce **de a una operación, siempre la más grande**, en tres niveles: completa → resumen con filas representativas (en series: primero, último, máximo y mínimo de las 6 series principales; en grupos: los 5 mayores y los 2 menores) → solo hechos. Ninguna operación desaparece y cada reducción se avisa en `omitted` y en `coverage.note`. Si ni siquiera el nivel de hechos entra, se responde 413 con la indicación de elegir menos planes.
+
+**Interpretar por partes.** `POST /api/ai/interpretations` acepta `plans` (índices de plan). El paso de resultados muestra «Planes a interpretar» cuando hay más de un plan.
+
+**Verificación sin cambios.** La respuesta de la IA se verifica contra el contexto completo, así que una cifra correcta de una fila que no viajó se acepta, y una inventada se descarta igual que antes. Si el envío fue parcial, la interpretación lo aclara en sus limitaciones.
+
+**Privacidad.** Las operaciones cuyas filas serían registros individuales no envían filas **ni hechos** (antes se enviaban sus hechos, que podían nombrar a la persona). Dispersión y ROC siguen viajando solo con estadísticos.

@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { ShieldCheck } from 'lucide-react'
 import type { AnalysisReviewState } from '@/context/sessionContext'
+import { ConsentSummary } from '@/components/ai/ConsentSummary'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
@@ -59,6 +60,7 @@ export function AuthorizedSend({ sources, review, message, history, requestPropo
   }
 
   const cost = prepared?.estimated_max_cost_usd
+  const columnNames = payload.sources.flatMap((s) => s.columns.map((c) => c.name))
   return (
     <section
       aria-label="Autorizar envío a OpenAI"
@@ -72,6 +74,18 @@ export function AuthorizedSend({ sources, review, message, history, requestPropo
         <span className="font-medium">Mensaje:</span> {payload.message ?? payload.objective}
         {!payload.message && <span className="text-slate-500"> (tu objetivo confirmado)</span>}
       </p>
+      <ConsentSummary
+        sends={[
+          payload.message ? 'Tu mensaje y el objetivo' : 'Tu objetivo',
+          `${columnNames.length} nombres de columnas, con su tipo, unidad y cantidad aproximada de valores distintos`,
+          ...(payload.history?.length ? [`Los últimos ${payload.history.length} turnos de la conversación`] : []),
+          ...(payload.request_proposal ? ['El pedido de que arme la propuesta con lo conversado'] : []),
+        ]}
+        neverSends={['Los archivos, sus filas y los valores de las celdas', 'Los nombres de los archivos', 'Ejemplos de valores']}
+        sensitive={columnNames.length ? [`Nombres de columnas: ${columnNames.slice(0, 8).join(', ')}${columnNames.length > 8 ? '…' : ''}. Si alguno revela información interna, renombralo u ocultalo en «Modificar configuración de datos».`] : []}
+        purpose="que la IA entienda tu objetivo y proponga un plan con operaciones del catálogo. No calcula ni ve tus datos."
+        withoutConsent="no se envía nada. Podés usar «Análisis descriptivo sin IA»: los cálculos con Pandas no requieren la IA."
+      />
       {prepared && (
         <p className="text-slate-600">
           Costo máximo estimado: <strong>USD {cost != null ? cost.toFixed(4) : '—'}</strong>

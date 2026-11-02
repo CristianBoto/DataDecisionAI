@@ -23,6 +23,27 @@ export const WIZARD_STEPS: WizardStep[] = [
   { key: 'resultados', path: '/analisis/resultados', label: 'Resultados' },
 ]
 
+/**
+ * Recorrido VISUAL en cuatro pasos (Fase 5). Internamente siguen existiendo las cinco pantallas y sus
+ * requisitos; «Cargar y explorar» agrupa la carga y la revisión de los datos.
+ */
+export interface VisualStep {
+  label: string
+  keys: StepKey[]
+}
+
+export const VISUAL_STEPS: VisualStep[] = [
+  { label: 'Cargar y explorar', keys: ['cargar', 'revisar'] },
+  { label: 'Conversar', keys: ['asistente'] },
+  { label: 'Confirmar propuesta', keys: ['confirmar'] },
+  { label: 'Resultados', keys: ['resultados'] },
+]
+
+export function visualStepIndex(pathname: string): number {
+  const key = WIZARD_STEPS.find((s) => pathname.startsWith(s.path))?.key ?? 'cargar'
+  return Math.max(0, VISUAL_STEPS.findIndex((v) => v.keys.includes(key)))
+}
+
 export interface StepAccess {
   available: boolean
   /** Por qué el paso está bloqueado (se muestra al usuario). */

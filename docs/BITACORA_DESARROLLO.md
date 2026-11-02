@@ -799,6 +799,53 @@ Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 33.
 
 **Verificación.** Frontend 247 de 247 (21 pruebas nuevas en `src/test/pdfCustomization.test.tsx`) y backend 310 de 310; lint, typecheck y build sin errores. Se revisaron visualmente dos PDF generados en el navegador (uno completamente personalizado y otro sin personalizar). Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 34.
 
+## 6aa. Ciencia de datos, decisiones y flujo simplificado (Fase 5, sin confirmar)
+
+**Problema.** Una evaluación funcional marcó cuatro áreas débiles:
+- **Motor:** la prueba avanzada solo produjo tres agrupaciones.
+- **Interpretación:** repetía las cifras de Pandas.
+- **Informe:** era largo, con el pedido original completo y estadísticas repetidas.
+- **Flujo:** pedía el objetivo dos veces (en la revisión y en el chat).
+
+**Decisiones.**
+- **Ampliar el catálogo, no abrirlo.** Se agregaron cuatro operaciones (desvío, Pareto, variación entre períodos y cociente de sumas) dentro del mismo esquema: reglas compartidas entre la validación de la IA y el motor, y ninguna ejecución de código generado.
+- **Diagnosticar sin corregir.** La calidad se informa con su impacto. Unificar, imputar o eliminar exigiría la aprobación de la persona, y quedó como trabajo futuro.
+- **Cociente de totales, no promedio de cocientes:** el gasto por alumno de un nivel pondera cada institución por su matrícula.
+- **Viabilidad declarada por la IA, corregida por el backend** si contradice lo que superó la validación.
+- **Origen visible** en todo el informe. Se descartó pedir a la IA que marque sus propias afirmaciones como «verificadas»: lo decide el backend.
+- **Revisar los rechazos** sin debilitar la verificación: los años de los períodos y las comparaciones verdaderas se aceptan; las comparaciones se verifican contra el valor real.
+- **Cuatro pasos visibles con las mismas cinco pantallas:** se evitó reescribir rutas y requisitos que ya estaban probados.
+- **Plan descriptivo sin IA en el backend** (no en el navegador), para que pase por la misma validación y aprobación.
+- **Ollama solo como punto de extensión:** integrarlo de verdad exige medir su calidad con las mismas pruebas.
+
+**Problemas.**
+- `itertools.groupby` convertido en lista perdía las filas de cada grupo: el resumen de variaciones quedaba vacío. Lo mostró la prueba del resumen.
+- El criterio IQR marcaba como «atípicos» los montos de toda una categoría (Alimentos). Con más del 10 % fuera de rango, ahora se informa como distribución asimétrica o grupos de magnitudes distintas.
+- Las columnas con errores no se interpretaban como números ni como fechas, y por eso no se diagnosticaban. Ahora se analizan las que lo son **mayormente**.
+- Relajar las menciones de otras categorías habría aceptado «menos que Bebidas» aunque fuera falso. Por eso las comparaciones se verifican.
+- El entorno de comandos volvió a quitar barras invertidas (`\d`) de una expresión regular. Se corrigió con la herramienta de edición.
+
+**Verificación.** Backend 339 de 339, frontend 262 de 262, lint, typecheck y build sin errores. Recorrido completo en el navegador con IA simulada y PDF revisado página por página. Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 35.
+
+## 6ab. Contexto compacto para interpretar (Fase 5.1, sin confirmar)
+
+**Problema.** Con el ejemplo de ventas y 17 operaciones, la interpretación se bloqueaba: «Los resultados superan el tamaño máximo permitido para la IA». La medición mostró ~8.543 tokens estimados contra un límite de 8.000. El volumen no venía de los datos sino de la forma: claves repetidas en cada fila, títulos repetidos, el resumen descriptivo que duplicaba cifras y medidas iguales en varias operaciones.
+
+**Decisiones.**
+- **No subir el límite:** protege el costo y la privacidad. Se redujo lo que se envía.
+- **Separar lo que se envía de lo que se verifica:** la IA recibe un contexto compacto; la verificación usa el contexto completo del servidor, así ninguna cifra queda sin control.
+- **Reducir de a una operación, la más grande primero, sin eliminar ninguna:** completa → filas representativas → solo hechos, siempre avisado.
+- **Interpretar por partes** como alternativa explícita cuando ni el mínimo entra, en lugar de truncar en silencio.
+
+**Problemas.**
+- `build_context` recortaba a 40 filas: la verificación no podía comprobar cifras de los grupos recortados. Se quitó el recorte (el contexto completo ya no se envía).
+- Las operaciones con registros individuales ocultaban sus filas pero enviaban sus hechos, que podían nombrar a una persona. Ahora no envían ninguno de los dos.
+- Con 24 operaciones ni el nivel de hechos entraba: se agregó `same_as` para operaciones idénticas y el caso extremo pasa a la selección de planes.
+- En la prueba real, el backend local respondió 413 con código anterior: `uvicorn --reload` había dejado de recargar. Aprendizaje: antes de una prueba con costo, comprobar en el esquema publicado que el servidor tenga el cambio.
+- La IA propuso un plan con más de 10 operaciones y se descartó: las instrucciones no declaraban los límites de la validación. Ahora los declaran.
+
+**Verificación.** Backend 348 de 348, frontend 265 de 265, lint, typecheck y build sin errores. Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 36.
+
 ## 7. Demo pública en Cloudflare Pages (commit `492b9f9`)
 
 - Configuración documentada en [DEPLOYMENT.md](DEPLOYMENT.md): carpeta `frontend`, `npm run build`, salida `dist`, `VITE_DEMO_MODE=true`.

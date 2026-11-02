@@ -31,11 +31,21 @@ OPERATION_GUIDE: dict[str, str] = {
     "median": "mediana de columnas cuantitativas; con group_by, por grupo.",
     "min": "mínimo de columnas cuantitativas; con group_by, por grupo.",
     "max": "máximo de columnas cuantitativas; con group_by, por grupo.",
+    "std": "desvío estándar (dispersión alrededor del promedio) de columnas cuantitativas; con group_by, por grupo.",
     "frequency": "cantidad de registros por cada valor de una columna categórica (o combinación de columnas).",
-    "group_by": "suma de las columnas cuantitativas de columns por cada categoría de group_by (conteo si no hay cuantitativas).",
-    "compare_groups": "total de una columna cuantitativa por grupo y la participación (%) de cada grupo sobre el total.",
+    "group_by": "suma de las columnas cuantitativas de columns por cada categoría de group_by (conteo si no hay cuantitativas). "
+    "Con dos columnas en group_by, cruza ambas dimensiones (por ejemplo, rubro × canal).",
+    "compare_groups": "total de una columna cuantitativa por grupo y su participación (%). Con una columna en group_by, la "
+    "participación es sobre el total; con dos (por ejemplo [rubro, canal]), es la de la segunda dentro de cada categoría de la "
+    "primera (qué parte de cada rubro aporta cada canal).",
+    "pareto": "ranking de las categorías de UNA columna de group_by, de mayor a menor, con participación y participación "
+    "acumulada (%) e indicación de cuántas concentran el 80 %. columns = [una medida aditiva] o vacío para contar registros.",
     "time_series": "suma de las columnas cuantitativas por período (mes, o año si abarca muchos años) de una columna temporal; "
     "puede desglosarse por una categoría agregándola en group_by.",
+    "variation": "variación entre períodos consecutivos (absoluta y %) de UNA medida: columns = [medida] (o vacío para "
+    "contar), group_by = [columna temporal] y, opcionalmente, una categoría para calcularla dentro de cada serie.",
+    "ratio": "cociente de sumas entre dos columnas cuantitativas aditivas: columns = [numerador, denominador] (por "
+    "ejemplo, gasto por alumno = gastos / matrícula); con group_by, por grupo. Si el denominador suma 0, no está definido.",
     "histogram": "distribución de UNA columna cuantitativa en intervalos (frecuencia de cada intervalo). "
     "columns = [columna]; group_by vacío.",
     "scatter": "relación entre DOS columnas cuantitativas: los puntos y la correlación (Pearson y Spearman). "
@@ -109,9 +119,18 @@ class AIQuestion(_Out):
     column: str | None
 
 
+Feasibility = Literal["viable", "partial", "not_viable", "needs_information"]
+
+
 class AIAssistantReply(_Out):
     message: str
     interpreted_objective: str
+    # Viabilidad del objetivo con estas columnas y este catálogo: todo, una parte, nada, o falta saber algo.
+    feasibility: Feasibility
+    # Datos que harían falta para lo que no se puede responder (por ejemplo, «costos» para la rentabilidad).
+    missing_data: list[str]
+    # Decisiones que los planes ayudan a evaluar (y en qué medida), en palabras de la persona.
+    decisions: list[str]
     source_relationship: SourceRelationship
     questions: list[AIQuestion]
     plans: list[AIPlan]
@@ -164,7 +183,13 @@ def prune_reply(reply: AIAssistantReply, context: AIContext) -> tuple[AIAssistan
     warnings = list(reply.warnings)
     if discarded:
         warnings.append(f"Se descartaron {discarded} plan(es) sin operaciones válidas para los datos revisados.")
-    return reply.model_copy(update={"plans": plans, "warnings": warnings}), notes
+    # La viabilidad declarada no puede contradecir lo que quedó: sin planes no es viable; con descartes, es parcial.
+    feasibility = reply.feasibility
+    if not plans and feasibility in ("viable", "partial"):
+        feasibility = "needs_information"
+    elif notes and feasibility == "viable":
+        feasibility = "partial"
+    return reply.model_copy(update={"plans": plans, "warnings": warnings, "feasibility": feasibility}), notes
 
 
 def validate_reply(reply: AIAssistantReply, context: AIContext) -> list[str]:

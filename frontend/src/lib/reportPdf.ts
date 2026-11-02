@@ -2,8 +2,19 @@ import type { jsPDF as JsPDF } from 'jspdf'
 import { seriesColor } from '@/lib/chartColors'
 import { parseObjective } from '@/lib/objectiveMarkdown'
 import { defaultPresentation, fitLogo, type PdfPresentation } from '@/lib/pdfCustomization'
-import { defaultReportTitle, findingFacts, formatMeasure, measureHeader, METHODOLOGY_TEXT, splitVerified, unverifiedItems, type ReportDocument } from '@/lib/report'
-import type { AIInterpretation } from '@/services/aiGateway'
+import {
+  aiItems,
+  defaultReportTitle,
+  executiveSummary,
+  findingsWithoutChart,
+  formatMeasure,
+  measureHeader,
+  METHODOLOGY_TEXT,
+  operationFindings,
+  PROVENANCE_LABELS,
+  type OutlineItem,
+  type ReportDocument,
+} from '@/lib/report'
 
 /**
  * PDF del informe (Fase 4C), generado en el navegador con jsPDF: sin servidor de
@@ -24,7 +35,7 @@ const BOTTOM = PAGE.height - PAGE.margin - 8
 const MAX_TABLE_ROWS = 25
 /** Líneas por celda: alcanza para los mensajes de error completos sin desbordar la página. */
 const MAX_CELL_LINES = 8
-const CHART_WIDTH = 150
+const CHART_WIDTH = 140
 const INK: [number, number, number] = [15, 23, 42]
 const MUTED: [number, number, number] = [100, 116, 139]
 const ACCENT: [number, number, number] = [29, 78, 216]
@@ -142,7 +153,7 @@ class Writer {
 
   static imageHeight(image: ChartImage) {
     // Ancho máximo menor que el de la página: los textos del gráfico quedan en un tamaño legible.
-    return Math.min(CHART_WIDTH * image.ratio, 100)
+    return Math.min(CHART_WIDTH * image.ratio, 78)
   }
 
   image(image: ChartImage) {
@@ -177,12 +188,14 @@ class Writer {
   }
 }
 
-/** Solo las afirmaciones con cifras recalculadas sobre los resultados. */
-function items(writer: Writer, title: string, interpretation: AIInterpretation, section: 'executive_summary' | 'findings' | 'trends' | 'recommendations') {
-  const values = splitVerified(interpretation, section).verified
-  if (!values.length) return
-  writer.heading(title, 3)
-  writer.bullets(values.map((v) => `${v.text} [${v.evidence.join(', ')}]`))
+/** Lista de afirmaciones con su origen (Pandas, IA verificada, interpretación o hipótesis) y sus operaciones. */
+function outline(w: Writer, list: OutlineItem[], opts: { tag?: boolean } = {}) {
+  for (const item of list) {
+    const refs = item.refs.length ? ` [${item.refs.join(', ')}]` : ''
+    w.text(`- ${item.text}${refs}`, { indent: 3, hanging: 2, gap: 0.4 })
+    if (opts.tag !== false) w.text(PROVENANCE_LABELS[item.provenance], { indent: 5, size: 7.5, color: item.provenance === 'pandas' ? MUTED : ACCENT, gap: 1 })
+  }
+  w.y += 1
 }
 
 /** Objetivo con formato (encabezados, párrafos y listas): el texto es el original, sin las marcas. */
@@ -201,42 +214,63 @@ function objective(w: Writer, text: string | null) {
   }
 }
 
-/** Portada: logo, título, institución, autor y fecha, según la personalización. */
+const dateOnly = new Intl.DateTimeFormat('es-AR', { dateStyle: 'long' })
+
+/** Portada: encabezado con logo e institución, título destacado, objetivo interpretado y datos de autoría. */
 function cover(doc: JsPDF, report: ReportDocument, p: PdfPresentation) {
   const w = new Writer(doc)
+  const accent = p.showBrand ? ACCENT : INK
   if (p.showBrand) {
     doc.setFillColor(...ACCENT)
     doc.rect(0, 0, PAGE.width, 4, 'F')
-    w.y = 14
-    w.text('DataDecision AI', { size: 10, bold: true, color: ACCENT })
   }
+  // Encabezado: logo a la izquierda y nombre de la organización alineado a su altura.
+  let headerBottom = 22
   if (p.logo) {
-    const size = fitLogo(p.logo, 60, 28)
-    doc.addImage(p.logo.dataUrl, p.logo.format, PAGE.margin, 30, size.width, size.height)
+    const size = fitLogo(p.logo, 55, 24)
+    doc.addImage(p.logo.dataUrl, p.logo.format, PAGE.margin, 16, size.width, size.height)
+    headerBottom = 16 + size.height
+    if (p.organization) {
+      w.y = 16 + size.height / 2 - 3
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(11)
+      doc.setTextColor(...INK)
+      const x = PAGE.margin + size.width + 6
+      const lines = (doc.splitTextToSize(pdfText(p.organization), PAGE.width - PAGE.margin - x) as string[]).slice(0, 2)
+      lines.forEach((line, i) => doc.text(line, x, w.y + 4 + i * 5))
+    }
+  } else if (p.organization) {
+    w.y = 16
+    w.text(p.organization, { size: 12, bold: true })
+    headerBottom = w.y
   }
-  w.y = 96
-  if (p.organization) w.text(p.organization, { size: 12, bold: true, color: MUTED, gap: 3 })
-  w.text(p.title, { size: 24, bold: true, gap: 3 })
-  doc.setDrawColor(...(p.showBrand ? ACCENT : INK))
-  doc.setLineWidth(0.6)
-  doc.line(PAGE.margin, w.y, PAGE.margin + 40, w.y)
+  doc.setDrawColor(226, 232, 240)
+  doc.line(PAGE.margin, headerBottom + 6, PAGE.margin + CONTENT, headerBottom + 6)
+
+  w.y = 92
+  w.text('INFORME DE ANÁLISIS DE DATOS', { size: 9, bold: true, color: accent, gap: 3 })
+  w.text(p.title, { size: 26, bold: true, gap: 4 })
+  doc.setDrawColor(...accent)
+  doc.setLineWidth(0.8)
+  doc.line(PAGE.margin, w.y, PAGE.margin + 36, w.y)
   doc.setLineWidth(0.2)
-  w.y += 6
-  w.text(`Proyecto: ${report.projectName}`, { size: 12, color: MUTED, gap: 2 })
-  if (p.author) w.text(`Responsable: ${p.author}`, { size: 11, gap: 2 })
-  if (p.showDate) {
-    w.y += 4
-    w.text(`Elaborado el ${dateTime.format(report.generatedAt)}`, { size: 9.5, color: MUTED, gap: 0.5 })
-    w.text(`Resultados calculados el ${dateTime.format(new Date(report.executedAt))}`, { size: 9.5, color: MUTED })
+  w.y += 7
+  if (report.proposal?.interpretedObjective) {
+    w.text(report.proposal.interpretedObjective, { size: 12, color: MUTED, gap: 3 })
   }
-  // Pie de la portada en posiciones fijas: nunca pasa a otra página.
+  w.text(`Proyecto: ${report.projectName}`, { size: 10, color: MUTED, gap: 1 })
+
+  // Autoría y fecha, en posiciones fijas al pie (nunca pasan a otra página).
+  const rows = [
+    p.author ? `Responsable: ${p.author}` : null,
+    p.showDate ? `Fecha: ${dateOnly.format(p.date ?? report.generatedAt)}` : null,
+    p.showDate ? `Resultados calculados el ${dateTime.format(new Date(report.executedAt))}` : null,
+  ].filter((r): r is string => Boolean(r))
   doc.setFont('helvetica', 'normal')
-  doc.setFontSize(9)
-  doc.setTextColor(...(report.scope.tone === 'ok' ? MUTED : WARN))
-  const headline = (doc.splitTextToSize(pdfText(report.scope.headline), CONTENT) as string[]).slice(0, 4)
-  const lineHeight = 9 * 0.3528 * 1.35
-  const bottom = PAGE.height - PAGE.margin - (p.showBrand ? 8 : 0)
-  headline.forEach((line, i) => doc.text(line, PAGE.margin, bottom - (headline.length - i) * lineHeight))
+  doc.setFontSize(10)
+  doc.setTextColor(...INK)
+  const bottom = PAGE.height - PAGE.margin - (p.showBrand ? 10 : 0)
+  rows.forEach((row, i) => doc.text(pdfText(row), PAGE.margin, bottom - (rows.length - i) * 5.5))
   if (p.showBrand) {
     doc.setFontSize(8)
     doc.setTextColor(...MUTED)
@@ -269,58 +303,155 @@ export async function createReportPdf(
     creator: 'DataDecision AI',
   })
 
-  // Portada
   cover(doc, report, p)
   doc.addPage()
   const w = new Writer(doc)
   let n = 0
-  const section = (title: string) => w.heading(`${(n += 1)}. ${title}`, 1)
-  const ai = report.interpretation
+  /** `keepWith`: alto de lo que sigue y debe quedar en la misma página que el título de la sección. */
+  const section = (title: string, keepWith = 0) => w.heading(`${(n += 1)}. ${title}`, 1, keepWith)
+  const ai = report.interpretation?.interpretation ?? null
   const scope = report.scope
+  const proposal = report.proposal
 
-  // 1. Objetivo original
-  section('Objetivo original del análisis')
-  objective(w, report.objective)
+  // 1. Resumen ejecutivo breve
+  section('Resumen ejecutivo')
+  outline(w, executiveSummary(report))
 
-  // 2. Alcance real y cobertura
-  section('Alcance real y estado de cobertura')
-  w.text(scope.headline, { bold: true, color: scope.tone === 'ok' ? INK : WARN, gap: 2 })
-  w.text(
-    `Operaciones aprobadas y ejecutadas: ${scope.operations.calculated} de ${scope.operations.total} calculadas` +
-      ` (${scope.operations.plans === 1 ? '1 plan' : `${scope.operations.plans} planes`}).`,
-    { size: 9.5 },
-  )
-  if (scope.calculated.length) {
-    w.heading('Resultados efectivamente calculados', 3)
-    w.bullets(scope.calculated)
+  // 2. Objetivo interpretado y alcance
+  section('Objetivo interpretado y alcance')
+  w.text(proposal?.interpretedObjective || (report.objective ? 'Ver el anexo «Pedido original».' : 'No se registró un objetivo.'), { bold: Boolean(proposal), gap: 2 })
+  if (proposal?.decisions.length) {
+    w.heading('Decisiones que ayuda a evaluar', 3)
+    w.bullets(proposal.decisions)
   }
   w.text(
-    scope.pending.length
-      ? `Cuestiones pendientes detectadas: ${scope.pending.length}. El detalle está en la sección «Cuestiones pendientes, advertencias y limitaciones».`
-      : 'No se detectaron cuestiones pendientes.',
-    { size: 9, color: scope.pending.length ? WARN : MUTED },
+    `Operaciones calculadas: ${scope.operations.calculated} de ${scope.operations.total}` +
+      `${proposal?.feasibility ? ` · Viabilidad declarada: ${FEASIBILITY_TEXT[proposal.feasibility] ?? proposal.feasibility}` : ''}.`,
+    { size: 9.5 },
   )
+  if (proposal?.missingData.length) {
+    w.heading('Datos que faltan para el resto del objetivo', 3)
+    w.bullets(proposal.missingData)
+  }
   w.text(scope.caveat, { size: 8, color: MUTED })
 
-  // 3. Resumen ejecutivo descriptivo (sin IA)
-  section('Resumen ejecutivo (descriptivo, calculado sin IA)')
-  if (report.summary?.executive.length) w.bullets(report.summary.executive)
-  else w.text('El backend no informó un resumen descriptivo para esta ejecución.', { color: MUTED })
+  // 3. Indicadores principales
+  const kpis = report.plans.flatMap((plan) => plan.kpis.map((k) => ({ ...k, plan: plan.title })))
+  if (kpis.length || report.derived.length) {
+    section('Indicadores principales')
+    if (kpis.length) {
+      w.table(['Indicador', 'Valor', 'Plan'], kpis.map((k) => [
+        k.label,
+        `${k.value.toLocaleString('es-AR', { maximumFractionDigits: 2 })}${k.unit ? ` ${k.unit}` : ''}`,
+        k.plan,
+      ]), [80, 45, CONTENT - 125])
+    }
+    if (report.derived.length) {
+      w.heading('Indicadores derivados (calculados a partir de los resultados de Pandas)', 3)
+      w.bullets(report.derived.map((d) => `${d.ref} · ${d.fact}`))
+    }
+  }
 
-  // 4. Fuentes y metodología
-  section('Fuentes de datos y metodología')
+  // 4. Gráficos y hallazgos: cada gráfico con los hechos calculados de su operación.
+  // El título de la sección va con su primer gráfico: nunca queda solo al pie de una página.
+  const firstChart = report.plans.flatMap((plan) => plan.charts)[0]
+  const firstImage = firstChart ? charts.get(firstChart.chart.id) : undefined
+  section('Gráficos y hallazgos', firstImage ? Writer.imageHeight(firstImage) + 24 : 0)
+  w.text(PROVENANCE_LABELS.pandas, { size: 7.5, color: MUTED, gap: 1.5 })
+  for (const plan of report.plans) {
+    for (const { chart, note, ref } of plan.charts) {
+      const image = charts.get(chart.id)
+      const facts = operationFindings(report, ref)
+      // Título, imagen y leyenda van juntos: nunca se corta un gráfico ni queda su título solo.
+      w.ensure((image ? Writer.imageHeight(image) + 6 : 10) + (chart.description ? 18 : 12))
+      w.heading(`${chart.title}${ref ? ` · ${ref}` : ''}`, 3)
+      if (chart.description) w.text(chart.description, { size: 8, color: MUTED, gap: 1 })
+      if (image) {
+        w.image(image)
+        w.legend(chart.series.map((s) => s.label))
+      } else {
+        w.text('No se pudo convertir este gráfico en imagen: sus valores están en el anexo «Tablas con valores exactos».', { size: 8, color: WARN })
+      }
+      if (note) w.text(note, { size: 7.5, color: MUTED })
+      if (facts.length) w.bullets(facts)
+    }
+  }
+  const others = findingsWithoutChart(report)
+  if (others.length) {
+    w.heading('Otros resultados calculados', 3)
+    for (const item of others) {
+      w.text(`${item.ref} · ${item.title}`, { size: 9.5, bold: true, gap: 0.5 })
+      w.bullets(item.facts)
+    }
+  }
+
+  // 5. Interpretación orientada a decisiones
+  section('Interpretación orientada a decisiones')
+  if (ai) {
+    w.text(
+      `Redactada por la IA (${report.interpretation!.usage.model}) con los resultados agregados que se autorizaron. Cada cifra se ` +
+        'recalculó sobre los resultados de Pandas; lo que no coincidía se descartó (ver el anexo «Auditoría de la verificación de la IA»).',
+      { size: 8, color: MUTED },
+    )
+    for (const [title, key] of [['Hallazgos principales', 'findings'], ['Tendencias y comparaciones', 'trends'], ['Implicaciones para el objetivo', 'implications'], ['Hipótesis a comprobar', 'hypotheses']] as const) {
+      const list = aiItems(ai, key)
+      if (!list.length) continue
+      w.heading(title, 3)
+      outline(w, list)
+    }
+    if (ai.not_supported?.length) {
+      w.heading('Lo que estos datos no permiten concluir', 3)
+      w.bullets(ai.not_supported)
+    }
+  } else {
+    w.text(
+      'No se incluyó una interpretación con IA: el informe se limita a los resultados calculados con Pandas, sin intervención de la IA.',
+      { color: MUTED },
+    )
+  }
+
+  // 6. Recomendaciones y limitaciones
+  section('Recomendaciones y limitaciones')
+  if (ai) {
+    const recommendations = aiItems(ai, 'recommendations')
+    if (recommendations.length) {
+      w.heading('Recomendaciones (condicionadas a los resultados)', 3)
+      outline(w, recommendations)
+    }
+    if (ai.information_needed?.length) {
+      w.heading('Información adicional que ayudaría a decidir', 3)
+      w.bullets(ai.information_needed)
+    }
+  }
+  if (scope.pending.length) {
+    w.heading('Cuestiones pendientes', 3)
+    w.bullets(scope.pending, { color: WARN })
+  }
+  w.heading('Lo que no se puede concluir', 3)
+  w.bullets(scope.notConcludable)
+  // Advertencias del cálculo (las notas generales del motor van a la metodología).
+  const technical = new Set(report.engineNotes)
+  const cautions = report.warningNotes.filter((note) => !technical.has(note.text))
+  if (cautions.length || ai?.limitations.length) {
+    w.heading('Limitaciones y advertencias del cálculo', 3)
+    for (const note of cautions) {
+      w.text(`- ${note.text}`, { indent: 3, hanging: 2, gap: 0.6, size: 9 })
+      if (note.clarification) w.text(note.clarification, { indent: 7, size: 8, color: ACCENT, gap: 0.6 })
+    }
+    if (ai?.limitations.length) w.bullets(ai.limitations)
+  }
+
+  // 7. Metodología, fuentes y detalles técnicos
+  section('Metodología, fuentes y detalles técnicos')
+  w.text('Origen de cada contenido:', { size: 9, bold: true, gap: 0.5 })
+  w.bullets(Object.values(PROVENANCE_LABELS))
   w.table(
     ['Fuente', 'Archivo', 'Registros', 'Columnas'],
     report.sources.map((s) => [s.alias, s.fileName ?? '—', s.rows.toLocaleString('es-AR'), String(s.columns)]),
     [20, CONTENT - 80, 30, 30],
   )
   w.text(`Origen de los cálculos: DataDecision AI. ${METHODOLOGY_TEXT}`, { size: 9 })
-  w.text(
-    ai
-      ? `Interpretación: incluye una interpretación redactada por la IA (${ai.usage.model}) que la persona autorizó; cada cifra se verificó contra los resultados.`
-      : 'No se incluyó una interpretación con IA: el informe contiene solo resultados calculados con Pandas, sin intervención de la IA.',
-    { size: 9, color: MUTED },
-  )
+  w.bullets(report.engineNotes, { color: MUTED })
   w.table(
     ['Ref.', 'Plan', 'Operación', 'Columnas', 'Filas', 'Estado'],
     report.methodology.map((m) => [
@@ -333,132 +464,43 @@ export async function createReportPdf(
     ]),
     [14, 32, 46, 40, 16, CONTENT - 148],
   )
-
-  // 5. Indicadores y resultados calculados
-  section('Indicadores y resultados calculados')
-  for (const plan of report.plans) {
-    if (!plan.kpis.length) continue
-    w.heading(`${plan.title} · fuente ${plan.sourceAlias}`, 2)
-    w.table(['Indicador', 'Valor', 'Operación'], plan.kpis.map((k) => [
-      k.label,
-      `${k.value.toLocaleString('es-AR', { maximumFractionDigits: 2 })}${k.unit ? ` ${k.unit}` : ''}`,
-      k.description,
-    ]))
-  }
-  if (report.derived.length) {
-    w.heading('Indicadores derivados (calculados a partir de los resultados de Pandas)', 2)
-    w.text('Variación entre el primer y el último período de cada serie. No es una operación aparte del catálogo: se obtiene de los valores ya calculados.', {
-      size: 8,
-      color: MUTED,
-    })
-    w.bullets(report.derived.map((d) => `${d.ref} · ${d.fact}`))
-  }
-  w.heading('Hallazgos calculados (resumen descriptivo con Pandas, sin IA)', 2)
-  if (report.summary) {
-    for (const item of report.summary.items) {
-      w.ensure(12)
-      w.text(`${item.ref} · ${item.title}`, { size: 9.5, bold: true, gap: 0.5 })
-      if (item.status === 'error') w.text(`No se pudo calcular: ${item.error ?? ''}`, { size: 9, color: WARN, indent: 3 })
-      else w.bullets(findingFacts(item, report.derived))
-    }
-    w.text(report.summary.notes.join(' '), { size: 8, color: MUTED })
-  } else {
-    w.text('El backend no informó un resumen descriptivo para esta ejecución.', { color: MUTED })
+  if (ai?.data_quality.length) {
+    w.heading('Calidad de los datos señalada en la interpretación', 3)
+    w.bullets(ai.data_quality)
   }
 
-  // 6. Gráficos
-  if (report.plans.some((plan) => plan.charts.length)) {
-    section('Gráficos')
-    for (const plan of report.plans) {
-      if (!plan.charts.length) continue
-      w.heading(`${plan.title} · fuente ${plan.sourceAlias}`, 2, 40)
-      for (const { chart, note } of plan.charts) {
-        const image = charts.get(chart.id)
-        // Título, descripción, imagen y leyenda van juntos: nunca se corta un gráfico ni queda su título solo.
-        w.ensure((image ? Writer.imageHeight(image) + 6 : 10) + (chart.description ? 18 : 12))
-        w.heading(chart.title, 3)
-        if (chart.description) w.text(chart.description, { size: 8, color: MUTED, gap: 1 })
-        if (image) {
-          w.image(image)
-          w.legend(chart.series.map((s) => s.label))
-        } else {
-          w.text('No se pudo convertir este gráfico en imagen: sus valores están en la tabla de la operación.', { size: 8, color: WARN })
+  // Anexos: el pedido original completo, las tablas exactas y la auditoría de la verificación.
+  const annexes: [string, () => void][] = []
+  if (report.objective && report.objective !== proposal?.interpretedObjective) {
+    annexes.push(['Pedido original', () => objective(w, report.objective)])
+  }
+  if (report.plans.some((plan) => plan.tables.length)) {
+    annexes.push(['Tablas con valores exactos', () => {
+      for (const plan of report.plans) {
+        for (const { ref, op } of plan.tables) {
+          w.heading(`${ref} · ${op.description && op.description !== '—' ? op.description : op.operation}`, 3, 14)
+          if (op.operation === 'scatter' || op.operation === 'roc_curve') {
+            const stats = Object.entries(op.stats ?? {}).filter(([k]) => ['pearson', 'spearman', 'n', 'auc', 'positives', 'negatives'].includes(k))
+            w.text(stats.map(([k, v]) => `${k}: ${typeof v === 'number' ? v.toLocaleString('es-AR', { maximumFractionDigits: 4 }) : String(v)}`).join(' · '), { size: 9 })
+            continue
+          }
+          const header = [...op.dimensions, ...op.measures.map((m) => measureHeader(m, op))]
+          const rows = op.rows.slice(0, MAX_TABLE_ROWS).map((r) => [...r.keys, ...r.values.map((v, i) => formatMeasure(v, op.measures[i]))])
+          w.table(header, rows)
+          if (op.rows.length > MAX_TABLE_ROWS) {
+            w.text(`Se listan ${MAX_TABLE_ROWS} de ${op.rows.length} filas; la tabla completa está en la aplicación.`, { size: 8, color: MUTED })
+          }
         }
-        if (note) w.text(note, { size: 8, color: MUTED })
       }
-    }
+    }])
   }
-
-  // 7. Tablas con valores exactos
-  section('Tablas con valores exactos')
-  for (const plan of report.plans) {
-    if (!plan.tables.length) continue
-    w.heading(`${plan.title} · fuente ${plan.sourceAlias}`, 2, 24)
-    for (const { ref, op } of plan.tables) {
-      w.heading(`${ref} · ${op.description && op.description !== '—' ? op.description : op.operation}`, 3, 14)
-      if (op.operation === 'scatter' || op.operation === 'roc_curve') {
-        const stats = Object.entries(op.stats ?? {}).filter(([k]) => ['pearson', 'spearman', 'n', 'auc', 'positives', 'negatives'].includes(k))
-        w.text(stats.map(([k, v]) => `${k}: ${typeof v === 'number' ? v.toLocaleString('es-AR', { maximumFractionDigits: 4 }) : String(v)}`).join(' · '), { size: 9 })
-        w.text('Los puntos individuales se muestran en el gráfico; no se listan en el informe.', { size: 8, color: MUTED })
-        continue
-      }
-      const header = [...op.dimensions, ...op.measures.map((m) => measureHeader(m, op))]
-      const rows = op.rows.slice(0, MAX_TABLE_ROWS).map((r) => [...r.keys, ...r.values.map((v, i) => formatMeasure(v, op.measures[i]))])
-      w.table(header, rows)
-      if (op.rows.length > MAX_TABLE_ROWS) {
-        w.text(`Se listan ${MAX_TABLE_ROWS} de ${op.rows.length} filas; la tabla completa está en la aplicación.`, { size: 8, color: MUTED })
-      }
-    }
+  if (report.interpretation?.notes.length) {
+    annexes.push(['Auditoría de la verificación de la IA', () => w.bullets(report.interpretation!.notes, { color: MUTED })])
   }
-
-  // 8. Interpretación con IA: solo si existe y fue autorizada
-  if (ai) {
-    section('Interpretación con IA')
-    w.text(
-      `Redactada por la IA (${ai.usage.model}) a partir de los resultados agregados que la persona autorizó. ` +
-        'Cada cifra se recalculó sobre los resultados de Pandas (operación, categoría, período y unidad); se descartaron las que no coincidían, ' +
-        'las atribuciones a otra categoría o período y las afirmaciones causales. Entre corchetes, las operaciones que respaldan cada afirmación.',
-      { size: 8, color: MUTED },
-    )
-    items(w, 'Resumen ejecutivo (verificado)', ai.interpretation, 'executive_summary')
-    items(w, 'Hallazgos respaldados por los cálculos', ai.interpretation, 'findings')
-    items(w, 'Tendencias y comparaciones', ai.interpretation, 'trends')
-    items(w, 'Recomendaciones y líneas de análisis', ai.interpretation, 'recommendations')
-    const unverified = unverifiedItems(ai.interpretation)
-    if (unverified.length) {
-      w.heading('No verificadas automáticamente (sin cifras)', 3)
-      w.bullets(unverified.map(({ section: s, item }) => `${s}: ${item.text} [${item.evidence.join(', ')}]`), { color: WARN })
-    }
-    if (ai.interpretation.data_quality.length) {
-      w.heading('Calidad de los datos', 3)
-      w.bullets(ai.interpretation.data_quality)
-    }
-    if (ai.interpretation.limitations.length) {
-      w.heading('Limitaciones señaladas por la IA', 3)
-      w.bullets(ai.interpretation.limitations)
-    }
-    if (ai.notes.length) {
-      w.heading('Verificación automática de la interpretación', 3)
-      w.bullets(ai.notes, { color: MUTED })
-    }
-  }
-
-  // 9. Pendientes, advertencias y limitaciones
-  section('Cuestiones pendientes, advertencias y limitaciones')
-  w.heading('Cuestiones pendientes detectadas', 3)
-  if (scope.pending.length) w.bullets(scope.pending, { color: WARN })
-  else w.text('No se detectaron partes del objetivo sin calcular.', { size: 9.5, color: MUTED })
-  w.heading('Lo que estos resultados no permiten concluir', 3)
-  w.bullets(scope.notConcludable)
-  if (report.warningNotes.length) {
-    w.heading('Advertencias del cálculo y limitaciones de los planes', 3)
-    for (const note of report.warningNotes) {
-      w.text(`- ${note.text}`, { indent: 3, hanging: 2, gap: 0.8 })
-      if (note.clarification) w.text(note.clarification, { indent: 7, size: 8.5, color: ACCENT, gap: 0.8 })
-    }
-    w.y += 1
-  }
-  w.text(scope.caveat, { size: 8, color: MUTED })
+  annexes.forEach(([title, render], i) => {
+    w.heading(`Anexo ${String.fromCharCode(65 + i)}. ${title}`, 1)
+    render()
+  })
 
   // Pie de página en todas las hojas, salvo la portada
   const pages = doc.getNumberOfPages()
@@ -472,6 +514,13 @@ export async function createReportPdf(
     doc.text(`Página ${i} de ${pages}`, PAGE.width - PAGE.margin, PAGE.height - 8, { align: 'right' })
   }
   return doc
+}
+
+const FEASIBILITY_TEXT: Record<string, string> = {
+  viable: 'viable',
+  partial: 'parcialmente viable',
+  not_viable: 'no viable con estos datos',
+  needs_information: 'falta información',
 }
 
 /** Convierte el SVG de un gráfico de Recharts en PNG (fondo blanco, doble resolución). */

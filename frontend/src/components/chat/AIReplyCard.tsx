@@ -4,6 +4,7 @@ import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { getErrorMessage } from '@/services'
+import { FEASIBILITY } from '@/lib/feasibility'
 import type { AIAuthorizeResult, AIOperationName, AIPlan, AIReply } from '@/services/aiGateway'
 
 const OPERATION_LABELS: Record<AIOperationName, string> = {
@@ -21,6 +22,39 @@ const OPERATION_LABELS: Record<AIOperationName, string> = {
   histogram: 'Histograma',
   scatter: 'Dispersión',
   roc_curve: 'Curva ROC',
+  std: 'Desvío estándar',
+  pareto: 'Ranking (Pareto)',
+  variation: 'Variación entre períodos',
+  ratio: 'Cociente',
+}
+
+/** Viabilidad, decisiones que ayuda a evaluar y datos faltantes (paso de propuesta). */
+export function FeasibilitySummary({ reply }: { reply: AIReply }) {
+  const decisions = reply.decisions ?? []
+  const missing = reply.missing_data ?? []
+  if (!reply.feasibility && !decisions.length && !missing.length) return null
+  return (
+    <section aria-label="Viabilidad del análisis" className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50/70 p-3 text-xs text-slate-700">
+      {reply.feasibility && (
+        <p className="flex flex-wrap items-center gap-1.5">
+          <span className="font-semibold text-slate-800">Viabilidad:</span>
+          <Badge tone={FEASIBILITY[reply.feasibility].tone}>{FEASIBILITY[reply.feasibility].label}</Badge>
+        </p>
+      )}
+      {decisions.length > 0 && (
+        <div>
+          <p className="font-semibold text-slate-800">Puede ayudarte a decidir</p>
+          <ul className="list-disc pl-4">{decisions.map((d) => <li key={d}>{d}</li>)}</ul>
+        </div>
+      )}
+      {missing.length > 0 && (
+        <div>
+          <p className="font-semibold text-slate-800">Datos que faltan para el resto</p>
+          <ul className="list-disc pl-4">{missing.map((d) => <li key={d}>{d}</li>)}</ul>
+        </div>
+      )}
+    </section>
+  )
 }
 
 const CHART_LABELS: Record<string, string> = {
@@ -159,6 +193,8 @@ export function AIReplyCard({ result, approvedPlanIds, onApprove }: Props) {
         )
       })}
 
+      <FeasibilitySummary reply={reply} />
+
       {reply.warnings.length > 0 && (
         <p className="flex items-start gap-1.5 text-xs text-amber-800">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden /> {reply.warnings.join(' ')}
@@ -166,8 +202,14 @@ export function AIReplyCard({ result, approvedPlanIds, onApprove }: Props) {
       )}
       {error && <Alert tone="error">{error}</Alert>}
       <p className="text-[11px] text-slate-400">
-        IA real · {usage.model} · {usage.input_tokens} tokens de entrada y {usage.output_tokens} de salida · USD{' '}
-        {usage.cost_usd.toFixed(4)} · Sin resultados calculados todavía
+        {usage.input_tokens === 0 && usage.cost_usd === 0 ? (
+          <>Generado por reglas, sin IA · No se envió nada a OpenAI · Sin resultados calculados todavía</>
+        ) : (
+          <>
+            IA real · {usage.model} · {usage.input_tokens} tokens de entrada y {usage.output_tokens} de salida · USD{' '}
+            {usage.cost_usd.toFixed(4)} · Sin resultados calculados todavía
+          </>
+        )}
       </p>
     </div>
   )

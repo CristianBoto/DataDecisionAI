@@ -293,7 +293,7 @@ def test_ai_catalog_matches_the_engine():
     assert set(OPERATIONS) == set(SUPPORTED_OPERATIONS)
 
 
-@pytest.mark.parametrize("operation", ["std", "percentage", "top_n", "correlation", "missing_summary", "exec_python"])
+@pytest.mark.parametrize("operation", ["kurtosis", "percentage", "top_n", "correlation", "missing_summary", "exec_python"])
 def test_operations_the_engine_cannot_run_cannot_reach_a_plan(operation):
     with pytest.raises(ValueError):
         AIPlan.model_validate(plan(op(operation, ["ventas"])))
@@ -314,5 +314,5 @@ def test_unknown_operations_are_still_reported_defensively():
     import pandas as pd
 
     src = PreparedSource(alias="A", df=pd.DataFrame({"ventas": ["1"]}), columns={})
-    result = run_operation(src, AIOperation.model_construct(operation="std", columns=[], group_by=[], description=""))
+    result = run_operation(src, AIOperation.model_construct(operation="kurtosis", columns=[], group_by=[], description=""))
     assert result.status == "error" and "todavía no está disponible" in result.error

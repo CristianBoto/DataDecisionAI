@@ -45,7 +45,7 @@ describe('revisión obligatoria antes de conversar', () => {
     expect(screen.getByRole('link', { name: /Ir a la revisión/ })).toHaveAttribute('href', '/analisis/revisar')
   })
 
-  it('exige el objetivo y no crea el proyecto hasta confirmar', async () => {
+  it('el objetivo es opcional (se define conversando), pero uno incompleto no se acepta', async () => {
     const user = userEvent.setup()
     const service = createDemoService({ delayMs: 0 })
     const createProject = vi.spyOn(service, 'createProject')
@@ -53,10 +53,18 @@ describe('revisión obligatoria antes de conversar', () => {
     await upload(user, [ventas()])
     await goToReview(user)
 
+    // Un objetivo de 1 o 2 letras no se acepta y no crea el proyecto.
+    await user.type(screen.getByLabelText('¿Qué necesitás analizar?'), 'ab')
     await user.click(screen.getByRole('button', { name: /Confirmar revisión y continuar/ }))
     expect(screen.getByText('Falta completar la revisión')).toBeInTheDocument()
     expect(createProject).not.toHaveBeenCalled()
     expect(router.state.location.pathname).toBe('/analisis/revisar')
+
+    // Vacío: se confirma y el objetivo se cuenta en la conversación (no se pide dos veces).
+    await user.clear(screen.getByLabelText('¿Qué necesitás analizar?'))
+    await user.click(screen.getByRole('button', { name: /Confirmar revisión y continuar/ }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/analisis/asistente'))
+    expect(createProject).toHaveBeenCalledTimes(1)
   })
 
   it('conserva las correcciones como decisiones del análisis y no modifica los datos originales', async () => {

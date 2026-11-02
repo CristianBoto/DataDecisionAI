@@ -221,3 +221,26 @@ Lo que falta:
 - Cifrado en reposo de `backend/data/` (o del disco) y HTTPS en la red interna.
 - Registro de auditoría: quién subió, analizó y exportó cada dataset.
 - **Listo cuando**: existe una lista de verificación de privacidad aprobada y con pruebas automatizadas para los puntos críticos.
+
+## Fase 5 — Ciencia de datos, decisiones y flujo simplificado (implementada, sin confirmar)
+
+Implementado:
+- diagnóstico de calidad con su impacto;
+- cuatro operaciones nuevas (`std`, `pareto`, `variation`, `ratio`) y cruces con participación dentro de cada categoría;
+- viabilidad del objetivo y plan descriptivo sin IA;
+- interpretación orientada a decisiones, con el origen visible de cada afirmación;
+- verificación revisada (años y comparaciones) y contexto sin el pedido original completo;
+- flujo en cuatro pasos, con el objetivo una sola vez;
+- consentimiento detallado, aviso de versión pública y `AI_PROVIDER`;
+- PDF ejecutivo con editor de identidad.
+
+Detalle en [ARCHITECTURE.md](ARCHITECTURE.md) y [PRIVACIDAD.md](PRIVACIDAD.md).
+
+### Qué desarrollar después (en este orden)
+
+1. **Validación manual con OpenAI real** de las instrucciones nuevas (convergencia a una propuesta, viabilidad, interpretación orientada a decisiones) con los datasets A, B y C. Ajustar las instrucciones si la IA no cumple el formato.
+2. **Filtro por un valor concreto** (por ejemplo, una persona o un canal) como operación del catálogo, con la misma validación.
+3. **Selección de la categoría** para el Pareto y los cocientes desde el dashboard (hoy se calculan todos los grupos).
+4. **Proveedor local (Ollama)**: implementar `send` e `interpret` en `LocalModelPlaceholder` con salida estructurada y medir su calidad con las mismas pruebas.
+5. **Unificación asistida de categorías**: proponer (no aplicar) unificar las variantes detectadas, con aprobación explícita y sin modificar el archivo original.
+6. **Persistencia opcional** de proyectos en una instalación local, con retención configurable, cifrado y auditoría.

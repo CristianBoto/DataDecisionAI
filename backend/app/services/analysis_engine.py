@@ -380,26 +380,146 @@ def op_group_by(src: PreparedSource, op: AIOperation, warnings: list[str]) -> Op
 
 
 def op_compare_groups(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
-    """Comparación entre grupos: total por grupo y su participación (%) sobre el total.
+    """Comparación entre grupos: total por grupo y su participación (%).
 
-    Si la medida depende de otra columna (indicador, unidad), la participación se calcula
-    dentro de cada categoría de esa columna: nunca sobre un total que mezcle magnitudes.
+    - Con una sola columna de grupos, la participación es sobre el total.
+    - Con dos o más (por ejemplo, rubro y canal), es la participación de la ÚLTIMA dentro de cada
+      combinación de las anteriores: «qué parte de cada rubro vende cada canal». Suma 100 % por rubro.
+    - Si la medida depende de otra columna (indicador, unidad), la participación se calcula dentro
+      de cada categoría de esa columna: nunca sobre un total que mezcle magnitudes.
     """
     result = op_group_by(src, op, warnings)
     if result.rows and result.measures:
         split_positions = [result.dimensions.index(s) for s in result.split_dimensions]
+        free = [i for i in range(len(result.dimensions)) if i not in split_positions]
+        within = free[:-1]
+        base = split_positions + within
         totals: dict[tuple, float] = {}
         for row in result.rows:
-            key = tuple(row.keys[i] for i in split_positions)
+            key = tuple(row.keys[i] for i in base)
             totals[key] = totals.get(key, 0.0) + (row.values[0] or 0)
         for row in result.rows:
-            total = totals[tuple(row.keys[i] for i in split_positions)]
+            total = totals[tuple(row.keys[i] for i in base)]
             row.values.append(round((row.values[0] or 0) / total * 100, 4) if total else None)
         result.measures.append(Measure(column=result.measures[0].column, aggregate="share_pct", unit="%"))
+        if within:
+            names = ", ".join(f"«{result.dimensions[i]}»" for i in within)
+            result.warnings.append(
+                f"La participación de «{result.dimensions[free[-1]]}» se calcula dentro de cada {names} (suma 100 % en cada uno)."
+            )
         groups = len(result.rows) / max(len(totals), 1)
         if groups < 2:
             result.warnings.append("Hay un solo grupo: no hay con qué comparar.")
     return result
+
+
+def op_pareto(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
+    """Ranking (Pareto): categorías de mayor a menor, con su participación y la participación acumulada.
+
+    Informa cuántas categorías concentran el 80 % del total. Requiere valores no negativos
+    (con signos mezclados, un acumulado no tiene sentido).
+    """
+    result = op_group_by(src, op, warnings)
+    if not result.rows or not result.measures:
+        return result
+    if any((r.values[0] or 0) < 0 for r in result.rows):
+        raise OperationError("Hay grupos con valores negativos: un ranking acumulado (Pareto) requiere valores no negativos.")
+    rows = sorted(result.rows, key=lambda r: -(r.values[0] or 0))
+    total = sum(r.values[0] or 0 for r in rows)
+    cumulative, reach = 0.0, None
+    for position, row in enumerate(rows, start=1):
+        share = (row.values[0] or 0) / total * 100 if total else None
+        cumulative += share or 0
+        row.values += [_clean(share), _clean(min(cumulative, 100.0)) if total else None]
+        if reach is None and total and cumulative >= 80 - 1e-9:
+            reach = position
+    column = result.measures[0].column
+    result.rows = rows
+    result.measures += [Measure(column=column, aggregate="share_pct", unit="%"),
+                        Measure(column=column, aggregate="cumulative_pct", unit="%")]
+    result.stats = {"groups": len(rows), "groups_for_80": reach}
+    return result
+
+
+def op_variation(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
+    """Variación entre períodos consecutivos: valor de cada período, cambio absoluto y porcentual.
+
+    Se calcula dentro de cada serie (por ejemplo, cada rubro) y en orden cronológico. El primer
+    período de cada serie no tiene variación. Si el período anterior vale 0, la variación
+    porcentual no está definida.
+    """
+    result = op_time_series(src, op, warnings)
+    if not result.rows or not result.measures or result.temporal_dimension is None:
+        return result
+    t = result.dimensions.index(result.temporal_dimension)
+    others = [i for i in range(len(result.dimensions)) if i != t]
+    previous: dict[tuple, float | None] = {}
+    undefined = 0
+    for row in sorted(result.rows, key=lambda r: (tuple(r.keys[i] for i in others), r.keys[t])):
+        series = tuple(row.keys[i] for i in others)
+        value, before = row.values[0], previous.get(series)
+        is_period = row.keys[t] != MISSING_GROUP
+        change = value - before if is_period and value is not None and before is not None else None
+        if change is not None and before == 0:
+            undefined += 1
+        pct = change / abs(before) * 100 if change is not None and before else None
+        row.values += [_clean(change), _clean(pct)]
+        if is_period:
+            previous[series] = value
+    column = result.measures[0].column
+    unit = result.measures[0].unit if result.measures[0].aggregate not in ("count", "distinct_count") else None
+    result.measures += [Measure(column=column, aggregate="change", unit=unit),
+                        Measure(column=column, aggregate="change_pct", unit="%")]
+    if undefined:
+        result.warnings.append(f"{undefined} variaciones porcentuales no están definidas porque el período anterior vale 0.")
+    return result
+
+
+def op_ratio(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
+    """Cociente de sumas (por ejemplo, gasto por alumno = suma de gastos / suma de matrícula), total o por grupos.
+
+    - Es el cociente de los TOTALES de cada grupo, no el promedio de cocientes fila por fila
+      (que daría el mismo peso a una institución con 10 alumnos que a una con 1.000).
+    - Solo se usan las filas con numerador y denominador presentes; las demás se excluyen y se avisa.
+    - Si el denominador de un grupo suma 0, el cociente no está definido («sin dato»), nunca infinito.
+    """
+    numerator, denominator = value_columns(op.operation, op.columns, op.group_by, src.meta(op.columns + op.group_by))
+    num = src.numbers(numerator, warnings)
+    den = src.numbers(denominator, warnings)
+    paired = num.notna() & den.notna()
+    excluded = int((num.notna() | den.notna()).sum() - paired.sum())
+    if excluded:
+        warnings.append(f"Se excluyeron {excluded} filas sin «{numerator}» o sin «{denominator}».")
+    zero_rows = int((paired & (den == 0)).sum())
+    if zero_rows:
+        warnings.append(f"{zero_rows} filas tienen «{denominator}» = 0: entran en las sumas, pero solas no permiten calcular el cociente.")
+    if not paired.any():
+        raise OperationError(f"No hay filas con «{numerator}» y «{denominator}» a la vez.")
+    data = pd.DataFrame({"num": num.where(paired), "den": den.where(paired)})
+    period, temporal_dim = None, None
+    keys = []
+    for column in op.group_by:
+        labels, granularity, _ = src.group_keys(column, warnings)
+        data[f"g:{column}"] = labels
+        keys.append(f"g:{column}")
+        if granularity and period is None:
+            period, temporal_dim = granularity, column
+    if keys:
+        sums = data[paired].groupby(keys, sort=True)[["num", "den"]].sum(min_count=1)
+    else:
+        sums = pd.DataFrame({"num": [data["num"].sum(min_count=1)], "den": [data["den"].sum(min_count=1)]})
+    ratio = sums["num"] / sums["den"].where(sums["den"] != 0)
+    undefined = int((sums["den"] == 0).sum())
+    if undefined:
+        warnings.append(f"En {undefined} grupos «{denominator}» suma 0: el cociente no está definido («sin dato»).")
+    frame = pd.DataFrame({"n": sums["num"], "d": sums["den"], "r": ratio})
+    num_unit, den_unit = src.unit(numerator), src.unit(denominator)
+    measures = [
+        Measure(column=numerator, aggregate="sum", unit=num_unit),
+        Measure(column=denominator, aggregate="sum", unit=den_unit),
+        Measure(column=f"{numerator} por {denominator}", aggregate="ratio", unit=num_unit if not den_unit else None),
+    ]
+    return _table(op, list(op.group_by), measures, frame, int(paired.sum()), period, warnings, temporal_dimension=temporal_dim)
 
 
 def op_time_series(src: PreparedSource, op: AIOperation, warnings: list[str]) -> OperationResult:
@@ -572,9 +692,13 @@ OPERATIONS: dict[str, Callable[[PreparedSource, AIOperation, list[str]], Operati
     "median": _simple_aggregate("median"),
     "min": _simple_aggregate("min"),
     "max": _simple_aggregate("max"),
+    "std": _simple_aggregate("std"),
     "group_by": op_group_by,
     "compare_groups": op_compare_groups,
+    "pareto": op_pareto,
     "time_series": op_time_series,
+    "variation": op_variation,
+    "ratio": op_ratio,
     "frequency": op_frequency,
     "distinct_count": op_distinct_count,
     "histogram": op_histogram,

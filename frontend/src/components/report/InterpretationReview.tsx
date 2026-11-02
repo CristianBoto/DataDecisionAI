@@ -49,7 +49,7 @@ export function InterpretationReview({ prepared, executive }: { prepared: Prepar
 
       <Block icon={<Send className="size-4 text-slate-500" aria-hidden />} title="Qué se enviará a OpenAI">
         <ul className="list-disc space-y-1 pl-5">
-          {summary.objective && <li>Tu objetivo, tal como lo escribiste: «{summary.objective}».</li>}
+          {summary.objective && <li>El objetivo aprobado (no todo tu pedido original): «{summary.objective}».</li>}
           {summary.sources.length > 0 && <li>El tamaño de cada fuente (sin el nombre del archivo): {summary.sources.join('; ')}.</li>}
           {summary.sent.map((op) => (
             <li key={op.ref}>
@@ -61,8 +61,13 @@ export function InterpretationReview({ prepared, executive }: { prepared: Prepar
               ))}
             </li>
           ))}
-          {summary.facts > 0 && <li>Las {summary.facts} frases del resumen descriptivo (las mismas cifras de arriba).</li>}
+          {summary.facts > 0 && <li>{summary.facts} hechos ya verificados (variaciones, rankings, distribuciones), junto a sus operaciones.</li>}
         </ul>
+        {summary.partial && (
+          <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-950" role="note" aria-label="Resumen parcial">
+            <strong>La IA recibirá un resumen parcial.</strong> {summary.partial}
+          </p>
+        )}
         {summary.personDimensions.length > 0 && (
           <div className="mt-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-xs text-red-900" role="note" aria-label="Posibles nombres de personas">
             <p className="font-semibold">Posibles nombres de personas o entidades</p>
@@ -84,6 +89,17 @@ export function InterpretationReview({ prepared, executive }: { prepared: Prepar
 
       <Block icon={<ShieldOff className="size-4 text-slate-500" aria-hidden />} title="Qué no se envía">
         <p>Nunca se envían: los archivos, las filas originales, los nombres de archivo ni los puntos de una dispersión o curva ROC.</p>
+      </Block>
+
+      <Block icon={<ShieldCheck className="size-4 text-slate-500" aria-hidden />} title="Para qué y qué pasa si no autorizás">
+        <p>
+          La IA redacta una interpretación orientada a tu decisión: hallazgos, implicaciones, recomendaciones e hipótesis.
+          Cada cifra se verifica contra los resultados de Pandas antes de mostrarse.
+        </p>
+        <p className="mt-1">
+          Si no autorizás, no se envía nada: los resultados, el resumen descriptivo, los gráficos y el PDF siguen
+          disponibles, calculados sin IA.
+        </p>
       </Block>
 
       <Block icon={<Wallet className="size-4 text-slate-500" aria-hidden />} title="Costo">

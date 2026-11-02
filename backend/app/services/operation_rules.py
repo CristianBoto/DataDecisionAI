@@ -15,8 +15,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-AGGREGATES = ("sum", "mean", "median", "min", "max")
+AGGREGATES = ("sum", "mean", "median", "min", "max", "std")
 FIXED_SHAPE = {"histogram": 1, "scatter": 2, "roc_curve": 2}
+# Operaciones que agrupan por una columna temporal (con, opcionalmente, una categoría).
+TEMPORAL_OPERATIONS = ("time_series", "variation")
 # Agrupar por una columna con muchísimos valores distintos no resume nada.
 TOO_MANY_GROUPS = (">500",)
 FEW_VALUES = ("1", "2", "3-10")
@@ -37,9 +39,9 @@ class ColumnMeta:
 
 def grouping_columns(operation: str, columns: list[str], group_by: list[str], meta: dict[str, ColumnMeta]) -> list[str]:
     """Columnas por las que agrupa la operación (mismo criterio que el motor)."""
-    if operation in ("group_by", "compare_groups"):
+    if operation in ("group_by", "compare_groups", "pareto"):
         return group_by or [c for c in columns if (meta.get(c) and meta[c].semantic_type) != "quantitative"]
-    if operation == "time_series":
+    if operation in TEMPORAL_OPERATIONS:
         temporal = [c for c in group_by + columns if meta.get(c) and meta[c].semantic_type == "temporal"]
         return ([temporal[0]] + [c for c in group_by if c != temporal[0]]) if temporal else list(group_by)
     if operation == "frequency":
@@ -80,8 +82,20 @@ def operation_problem(operation: str, columns: list[str], group_by: list[str], m
             return "no indica ninguna columna cuantitativa para calcular"
     if operation in ("group_by", "compare_groups") and not groups:
         return "no indica por qué columna agrupar"
-    if operation == "time_series" and not (groups and meta.get(groups[0]) and meta[groups[0]].semantic_type == "temporal"):
+    if operation in TEMPORAL_OPERATIONS and not (groups and meta.get(groups[0]) and meta[groups[0]].semantic_type == "temporal"):
         return "una evolución en el tiempo requiere una columna temporal validada (fecha, mes, trimestre o año)"
+    if operation == "variation" and (len(groups) > 2 or len(values) > 1):
+        return "la variación entre períodos usa una medida y, como máximo, una categoría además del período"
+    if operation == "pareto":
+        if len(groups) != 1:
+            return "el ranking (Pareto) ordena las categorías de UNA sola columna"
+        if meta.get(groups[0]) and meta[groups[0]].semantic_type == "temporal":
+            return "el ranking (Pareto) es para categorías; para períodos usá una evolución en el tiempo"
+        if len(values) > 1:
+            return "el ranking (Pareto) usa una sola medida (o el conteo de registros)"
+    if operation == "ratio":
+        if len(values) != 2:
+            return "el cociente necesita exactamente dos columnas cuantitativas: numerador y denominador"
     if operation == "frequency" and not groups:
         return "las frecuencias requieren al menos una columna"
     if operation == "distinct_count" and not columns:
@@ -96,11 +110,20 @@ def operation_problem(operation: str, columns: list[str], group_by: list[str], m
         if non_additive:
             return (f"«{non_additive[0]}» no es aditiva (tasa, porcentaje, promedio, índice o stock): sumarla no tiene sentido; "
                     "usá promedio, mediana, mínimo o máximo")
-    if operation == "compare_groups":
+    if operation in ("compare_groups", "pareto"):
         if len(values) > 1:
             return "la comparación entre grupos usa una sola medida"
         if values and meta[values[0]].additivity == "non_additive":
             return f"«{values[0]}» no es aditiva: su participación porcentual sobre un total no tiene sentido"
+        if operation == "pareto" and values and meta[values[0]].split_by:
+            return f"«{values[0]}» mide cosas distintas según «{', '.join(meta[values[0]].split_by)}»: no se puede ordenar en un solo ranking"
+    if operation == "ratio":
+        for column in values:
+            if meta[column].additivity == "non_additive":
+                return (f"«{column}» no es aditiva (tasa, porcentaje, promedio o stock): un cociente de sumas con ella "
+                        "no tiene sentido")
+            if meta[column].split_by:
+                return f"«{column}» mide cosas distintas según «{', '.join(meta[column].split_by)}»: no se puede usar en un cociente"
     return None
 
 

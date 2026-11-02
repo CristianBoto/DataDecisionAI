@@ -60,7 +60,9 @@ export function ReviewPage() {
   const sharedColumns = payload.sources.reduce((sum, s) => sum + s.columns.length, 0)
 
   const problems: string[] = []
-  if (review.objective.trim().length < 3) problems.push('Escribí qué necesitás analizar.')
+  // El objetivo es opcional: si queda vacío, el asistente lo pregunta a partir de los datos (sin pedirlo dos veces).
+  const objectiveLength = review.objective.trim().length
+  if (objectiveLength > 0 && objectiveLength < 3) problems.push('El objetivo debe tener al menos 3 caracteres (o dejalo vacío).')
   if (projectName.trim().length < 3) problems.push('El nombre del proyecto debe tener al menos 3 caracteres.')
 
   // Sin cambios desde la última confirmación: se vuelve a la misma conversación.
@@ -96,7 +98,7 @@ export function ReviewPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow={<Badge tone="blue">Paso 2 de 5</Badge>}
+        eyebrow={<Badge tone="blue">Paso 1 de 4 · Explorar</Badge>}
         title="Revisá tus datos y la privacidad"
         description="Confirmá cómo se interpretan tus columnas y qué información mínima se compartiría con la IA. Por defecto se aceptan las sugerencias: corregí solo lo que haga falta."
         actions={
@@ -137,6 +139,7 @@ export function ReviewPage() {
         review={review.sources}
         onReviewChange={(updated) => save({ sources: updated })}
         objectiveLabel="¿Qué necesitás analizar?"
+        objectiveOptional
       />
 
       <Card className="space-y-4 p-5">

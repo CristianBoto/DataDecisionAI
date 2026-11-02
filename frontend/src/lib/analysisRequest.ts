@@ -23,6 +23,16 @@ export const unitKey = (alias: string, column: string) => `${alias}:${column}`
  * sobre faltantes que tomó el usuario, y la unidad, aditividad y dependencia de cada
  * medida decididas en la revisión. Mismas reglas que `buildAIContext`.
  */
+/** Objetivo interpretado y aprobado (con las decisiones que ayuda a evaluar); el pedido original solo si no hay otro. */
+export function approvedObjective(plans: SessionAIPlan[], original: string): string | undefined {
+  // Tolera planes sin respuesta asociada (sesiones previas): entonces se usa el pedido original.
+  const interpreted = [...new Set(plans.map((p) => p.reply?.interpreted_objective?.trim() ?? '').filter(Boolean))]
+  const decisions = [...new Set(plans.flatMap((p) => p.reply?.decisions ?? []))]
+  // Sin el punto final del objetivo: el separador ya agrega uno («distribución.. Decisiones»).
+  const text = [interpreted.join(' ').replace(/[.\s]+$/, ''), decisions.length ? `Decisiones a evaluar: ${decisions.join('; ')}` : ''].filter(Boolean).join('. ')
+  return (text || original.trim()).slice(0, 2000) || undefined
+}
+
 export function buildExecution(
   sources: AnalysisSource[],
   review: AnalysisReviewState,
@@ -65,8 +75,9 @@ export function buildExecution(
     })
 
   return {
-    // El objetivo revisado acompaña los resultados solo para el informe (el motor no lo usa).
-    request: { plan_ids: plans.map((p) => p.planId), sources: requestSources, objective: review.objective.trim() || undefined },
+    // Acompaña los resultados solo para la interpretación y el informe (el motor no lo usa): el objetivo
+    // INTERPRETADO y aprobado, no todo el pedido original, que queda en la sesión para trazabilidad.
+    request: { plan_ids: plans.map((p) => p.planId), sources: requestSources, objective: approvedObjective(plans, review.objective) },
     files,
     problem: missingFiles.length
       ? `Falta el archivo original de la fuente ${missingFiles.join(', ')}. El navegador lo guarda solo en memoria: volvé a cargarlo en «Cargar datos».`

@@ -23,10 +23,9 @@ from app.core.security_headers import (
 )
 from app.core.upload_guard import UploadGuardMiddleware
 from app.services.ai_budget import AIBudget
-from app.services.ai_gateway import AIConversationStore, AIPlanStore, AIRequestStore
+from app.services.ai_gateway import AIConversationStore, AIPlanStore, AIRequestStore, create_provider
 from app.services.auth import AuthService, CloudflareTurnstile, DevelopmentTurnstile
 from app.services.database import Database
-from app.services.openai_provider import OpenAIProvider
 from app.services.report import ExecutionStore
 
 # Margen para el encabezado y los separadores de multipart sobre el límite del archivo.
@@ -78,7 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Frontera de IA: solicitudes, conversaciones y planes en memoria (con dueño);
     # proveedor OpenAI (solo tras una autorización de uso único); consumo en SQLite.
     app.state.ai_store = AIRequestStore()
-    app.state.ai_provider = OpenAIProvider()
+    app.state.ai_provider = create_provider(settings)
     app.state.ai_budget = AIBudget(
         db,
         budget_usd=settings.ai_budget_usd,

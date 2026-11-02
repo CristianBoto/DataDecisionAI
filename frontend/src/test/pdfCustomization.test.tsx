@@ -106,7 +106,7 @@ describe('1–3, 9, 10 · PDF sin personalizar y con portada personalizada', () 
     const { pdf, text } = await pdfText(doc)
     expect(text).toContain('Informe de análisis · Ventas')
     expect(text).toContain('Elaborado con DataDecision AI')
-    expect(text).toContain('Elaborado el')
+    expect(text).toContain('Fecha:')
     expect(text).toContain('DataDecision AI · Informe de análisis · Ventas')
     expect(pdf.getNumberOfPages()).toBeGreaterThanOrEqual(3)
     expect(reportFileName(doc)).toBe('informe-ventas-2026-10-27.pdf')
@@ -134,7 +134,7 @@ describe('1–3, 9, 10 · PDF sin personalizar y con portada personalizada', () 
     const doc = report()
     const p = custom({ showDate: false }, doc)
     const { text } = await pdfText(doc, p)
-    expect(text).not.toContain('Elaborado el')
+    expect(text).not.toContain('Fecha:')
     expect(text).not.toContain('Resultados calculados el')
     // Los períodos analizados siguen en las tablas y en el resumen.
     expect(text).toContain('2025-01')
@@ -331,7 +331,8 @@ describe('12–14 · Alcance real y advertencias contradictorias', () => {
     const { text } = await pdfText(doc)
     expect(text).not.toContain('Análisis completo')
     expect(text).toContain('Sin embargo, quedaron pendientes')
-    expect(text).toContain('Cuestiones pendientes detectadas: 3')
+    expect(text).toContain('Cuestiones pendientes')
+    expect(text).toContain('Pediste un promedio')
     expect(text).toContain('Es una ayuda, no una garantía')
   })
 
@@ -386,10 +387,10 @@ describe('12–14 · Alcance real y advertencias contradictorias', () => {
 describe('15–17 · Interpretación, paginación y valores exactos', () => {
   it('15. la sección de IA aparece solo si hay una interpretación autorizada', async () => {
     const without = (await pdfText(report())).text
-    expect(without).not.toContain('Interpretación con IA')
+    expect(without).not.toContain('Redactada por la IA')
     expect(without).toContain('No se incluyó una interpretación con IA')
     const withAi = (await pdfText(report(run, { interpretation: INTERPRETATION }))).text
-    expect(withAi).toContain('8. Interpretación con IA')
+    expect(withAi).toContain('Redactada por la IA')
     expect(withAi).toContain('Las ventas suman 69.060 ARS. [P1.O1]')
   })
 
@@ -470,7 +471,7 @@ describe('18–20 · La personalización es solo del PDF', () => {
     expect(within(cover).getByRole('heading', { name: 'Informe de ventas 2025' })).toBeInTheDocument()
     expect(within(cover).getByText('Responsable: Persona Ficticia')).toBeInTheDocument()
     expect(within(cover).getByText('Empresa Ejemplo')).toBeInTheDocument()
-    expect(within(cover).queryByText(/Elaborado el/)).not.toBeInTheDocument()
+    expect(within(cover).queryByText(/Fecha:/)).not.toBeInTheDocument()
     expect(within(cover).queryByText('DataDecision AI')).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Descargar PDF' }))

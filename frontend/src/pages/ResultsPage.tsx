@@ -70,7 +70,7 @@ export function ResultsPage() {
       <PageHeader
         eyebrow={
           <>
-            <Badge tone="blue">Paso 5 de 5</Badge>
+            <Badge tone="blue">Paso 4 de 4</Badge>
             <Badge tone={status.tone} icon={status.icon}>{status.label}</Badge>
           </>
         }

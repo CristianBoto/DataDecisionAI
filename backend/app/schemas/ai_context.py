@@ -152,6 +152,8 @@ class AIStatus(BaseModel):
     provider_configured: bool
     external_calls_implemented: bool
     model: str
+    # Proveedor configurado: "openai" (externo) u "ollama" (local, todavía no integrado).
+    provider: str = "openai"
     budget_usd: float
     spent_usd: float
     remaining_usd: float

@@ -70,6 +70,8 @@ export interface AnalysisSessionValue extends AnalysisSessionState {
   setProjectName: (name: string) => void
   /** Guardar cambios en la revisión invalida una confirmación anterior. */
   setReview: (review: AnalysisReviewState) => void
+  /** Objetivo definido en la conversación (si la revisión lo dejó vacío). No reinicia la revisión. */
+  setObjective: (objective: string) => void
   confirmReview: () => void
   appendAIChat: (turns: AIChatTurn[]) => void
   markPlanApproved: (planId: string) => void

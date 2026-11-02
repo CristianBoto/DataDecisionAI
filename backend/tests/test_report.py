@@ -180,6 +180,10 @@ def interpretation(**overrides) -> dict:
         ],
         "trends": [item("Los tres rubros muestran una evolución creciente.", evidence=["P1.O2"])],
         "recommendations": [item("Comparar el canal de venta dentro de cada rubro.", evidence=["P1.O3", "P1.O2"])],
+        "implications": [],
+        "hypotheses": [],
+        "information_needed": [],
+        "not_supported": [],
         "limitations": ["Los datos son sintéticos y abarcan 6 meses."],
         "data_quality": ["No se informaron valores faltantes."],
     }
@@ -197,7 +201,9 @@ def test_interpretation_requires_review_authorization_and_is_verified():
     assert provider.interpreted == []
     assert prepared["payload"]["objective"] == "Quiero ver la evolución de las ventas por rubro"
     assert prepared["estimated_max_cost_usd"] > 0 and prepared["estimated_input_tokens"] > 0
-    assert [o["ref"] for o in prepared["payload"]["operations"]] == ["P1.O1", "P1.O2", "P1.O3", "P1.O4"]
+    # Contexto compacto (versión 2): las operaciones van dentro de su plan.
+    assert [o["ref"] for p in prepared["payload"]["plans"] for o in p["operations"]] == ["P1.O1", "P1.O2", "P1.O3", "P1.O4"]
+    assert prepared["payload"]["coverage"]["full"] == 4
 
     response = authorize(client, prepared)
     assert response.status_code == 200, response.text
@@ -233,8 +239,8 @@ def test_rows_of_scatter_and_roc_never_reach_the_ai():
                  columns, objective="Evaluar el clasificador")
     assert any(r["operations"][0]["rows"] for r in result["results"])  # el navegador sí recibe los puntos
     prepared = prepare(client, result["execution_id"]).json()
-    for operation in prepared["payload"]["operations"]:
-        assert operation["rows"] == [] and operation["stats"]
+    for operation in [o for p in prepared["payload"]["plans"] for o in p["operations"]]:
+        assert "rows" not in operation and operation["stats"]
     assert "positive_label" not in json.dumps(prepared["payload"])  # la clase positiva es un valor del dataset
     assert "AUC: 0,889" in facts(result, "P1.O1")["facts"][0]
     assert "no implica causalidad" in facts(result, "P1.O2")["facts"][0]
@@ -323,7 +329,8 @@ def test_results_and_requests_are_isolated_between_visitors():
 def sales_context() -> InterpretationContext:
     client, app = make_client()
     result = run(client, app, SALES, SALES_OPS, sales_columns())
-    return InterpretationContext.model_validate(prepare(client, result["execution_id"]).json()["payload"])
+    # Contexto COMPLETO con el que el backend verifica las cifras (lo que viaja a la IA es su versión compacta).
+    return app.state.executions._entries[result["execution_id"]]["context"]
 
 
 def verify(context, *findings):
@@ -363,8 +370,10 @@ def test_misattributed_categories_are_rejected():
         # El claim dice Bebidas, pero 5.580 es el valor de Alimentos.
         item("Bebidas vendió 5.580 ARS en 2025-06.",
              claim("P1.O2", "monto_ars", keys={"fecha": "2025-06", "rubro": "Bebidas"}, value=5580, unit="ARS")),
-        # Una cifra correcta junto a otra categoría que no le corresponde.
-        item("Alimentos vendió 5.580 ARS en 2025-06, más que Bebidas.", claim("P1.O2", "monto_ars", keys=june, value=5580, unit="ARS")),
+        # Una cifra correcta comparada con otra categoría en la dirección equivocada (Bebidas vendió 4.060).
+        item("Alimentos vendió 5.580 ARS en 2025-06, menos que Bebidas.", claim("P1.O2", "monto_ars", keys=june, value=5580, unit="ARS")),
+        # Una cifra de otra categoría en la misma cláusula: se le atribuiría un valor que no es el suyo.
+        item("Alimentos vendió 5.580 ARS en 2025-06 y Bebidas 5.580 ARS.", claim("P1.O2", "monto_ars", keys=june, value=5580, unit="ARS")),
         # Falta el rubro: la cifra no identifica a qué serie pertenece.
         item("En 2025-06 se vendieron 5.580 ARS.", claim("P1.O2", "monto_ars", keys={"fecha": "2025-06"}, value=5580, unit="ARS")),
     )
@@ -372,7 +381,53 @@ def test_misattributed_categories_are_rejected():
     assert "no nombra «Alimentos»" in notes
     assert "valor incorrecto en P1.O2: el resultado es 4.060 ARS" in notes
     assert "nombra «Bebidas», que no corresponde" in notes
+    assert "compara con «Bebidas» en una dirección que los resultados no respaldan" in notes
     assert "no identifica todas sus categorías" in notes
+
+
+def test_correct_comparisons_and_years_are_not_rejected_unnecessarily():
+    """Fase 5: se revisaron rechazos innecesarios sin debilitar la verificación."""
+    june = {"fecha": "2025-06", "rubro": "Alimentos"}
+    total = claim("P1.O2", "monto_ars", keys=june, value=5580, unit="ARS")
+    found, notes = verify(
+        sales_context(),
+        # Comparación verificada contra el valor real de Bebidas (4.060).
+        item("Alimentos vendió 5.580 ARS en 2025-06, más que Bebidas.", total),
+        # Mención de otra categoría sin cifras ni comparación.
+        item("En 2025-06 Alimentos vendió 5.580 ARS; conviene revisar también Bebidas.", total),
+        # El año de los períodos analizados no es una cifra a verificar.
+        item("Durante 2025, Alimentos creció 500 ARS entre 2025-01 y 2025-06.", ALIMENTOS_CHANGE),
+        # Un año que no figura en los resultados sigue siendo una cifra sin respaldo.
+        item("En 2019 Alimentos vendió 5.580 ARS en 2025-06.", total),
+    )
+    assert [f["text"] for f in found] == [
+        "Alimentos vendió 5.580 ARS en 2025-06, más que Bebidas.",
+        "En 2025-06 Alimentos vendió 5.580 ARS; conviene revisar también Bebidas.",
+        "Durante 2025, Alimentos creció 500 ARS entre 2025-01 y 2025-06.",
+    ]
+    assert "la cifra «2019» no corresponde a ninguna cifra verificada" in notes
+
+
+def test_decision_sections_are_verified_and_kept_apart():
+    reply = AIInterpretation.model_validate(interpretation(
+        implications=[item("La concentración en Alimentos justifica seguir ese rubro de cerca.", evidence=["P1.O2"])],
+        hypotheses=[
+            item("La suba podría estar relacionada con precios; habría que comprobarlo con datos de precios.", evidence=["P1.O2"]),
+            item("La suba se debe a la inflación.", evidence=["P1.O2"]),
+        ],
+        information_needed=["Costos por rubro, para evaluar rentabilidad."],
+        not_supported=["No se puede concluir que el canal cause las ventas.", "La rentabilidad es del 37 %."],
+    ))
+    verified, notes = verify_interpretation(reply, sales_context())
+    assert [i["status"] for i in verified["implications"]] == ["unverified"]
+    assert [i["text"] for i in verified["hypotheses"]] == [
+        "La suba podría estar relacionada con precios; habría que comprobarlo con datos de precios.",
+    ]
+    assert verified["information_needed"] == ["Costos por rubro, para evaluar rentabilidad."]
+    # Una conclusión no permitida puede nombrar causas (para negarlas), pero no inventar cifras.
+    assert verified["not_supported"] == ["No se puede concluir que el canal cause las ventas."]
+    assert "hipótesis: atribuye causas" in " ".join(notes)
+    assert "conclusión no permitida: cita cifras" in " ".join(notes)
 
 
 def test_wrong_periods_are_rejected():
@@ -405,7 +460,7 @@ def test_incompatible_units_are_rejected():
     # Formato largo: la unidad la define la categoría «unidad» de cada indicador.
     client, app = make_client()
     result = run(client, app, ECONOMY, [op("sum", ["dato"])], mappings(ECONOMY))
-    economy = InterpretationContext.model_validate(prepare(client, result["execution_id"]).json()["payload"])
+    economy = app.state.executions._entries[result["execution_id"]]["context"]
     rate = {"serie": "desocupacion", "unidad": "%"}
     found, notes = verify(
         economy,
@@ -462,9 +517,10 @@ def test_row_level_groupings_are_withheld_and_cannot_be_cited():
     result = run(client, app, csv, [op("group_by", ["monto"], ["cliente"])], columns)
     assert result["results"][0]["operations"][0]["rows"]  # el navegador sí los recibe
     payload = prepare(client, result["execution_id"]).json()["payload"]
-    assert payload["operations"][0]["rows"] == [] and payload["operations"][0]["rows_withheld"] is True
-    assert "Ana" not in json.dumps(payload["operations"])
-    found, notes = verify(InterpretationContext.model_validate(payload),
+    sent = payload["plans"][0]["operations"][0]
+    assert "rows" not in sent and sent["detail"] == "facts" and "registro individual" in sent["omitted"]
+    assert "Ana" not in json.dumps(payload)
+    found, notes = verify(app.state.executions._entries[result["execution_id"]]["context"],
                           item("Ana compró 10 ARS.", claim("P1.O1", "monto", keys={"cliente": "Ana"}, value=10, unit="ARS")))
     assert found == [] and "no tiene resultados agregados" in notes
 
@@ -529,13 +585,13 @@ def test_mixed_sign_measures_are_reported_as_net_balances():
     assert facts.startswith("Suma neta de importe:") and "no es el saldo de una cuenta" in facts
     assert "Saldo" not in facts
     payload = prepare(client, result["execution_id"]).json()["payload"]
-    assert payload["operations"][0]["signed_measures"] == ["importe"]
+    assert payload["plans"][0]["operations"][0]["signed_measures"] == ["importe"]
 
 
 def test_a_net_balance_cannot_be_presented_as_spending():
     client, app = make_client()
     result = run(client, app, FINANCE, [op("sum", ["importe"])], finance_columns(), objective="Cuánto gasté")
-    context = InterpretationContext.model_validate(prepare(client, result["execution_id"]).json()["payload"])
+    context = app.state.executions._entries[result["execution_id"]]["context"]
     net = result["results"][0]["operations"][0]["rows"][0]["values"][0]
     written = f"{net:,.0f}".replace(",", ".")
     total = claim("P1.O1", "importe", value=net, unit="ARS")

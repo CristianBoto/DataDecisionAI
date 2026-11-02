@@ -4,7 +4,7 @@ import { ChartViewCard } from '@/components/analysis/ChartView'
 import { Alert } from '@/components/ui/Alert'
 import { Badge } from '@/components/ui/Badge'
 import { Card } from '@/components/ui/Card'
-import { buildDashboard, dimensionName, measureLabel, operationTitle, type DashboardKpi, type PlanDashboard } from '@/lib/dashboard'
+import { buildDashboard, dimensionName, measureLabel, operationTitle, PERCENT_AGGREGATES, type DashboardKpi, type PlanDashboard } from '@/lib/dashboard'
 import type { ExecutionResponse, OperationResult, ResultMeasure } from '@/services/analysisEngine'
 
 const number = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 })
@@ -12,7 +12,7 @@ const number = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 })
 function formatValue(value: number | null, m: ResultMeasure): string {
   if (value === null) return '—'
   const formatted = number.format(value)
-  if (m.aggregate === 'share_pct') return `${formatted} %`
+  if (PERCENT_AGGREGATES.includes(m.aggregate)) return `${formatted} %`
   return m.unit && m.aggregate !== 'count' && m.aggregate !== 'distinct_count' ? `${formatted} ${m.unit}` : formatted
 }
 
@@ -37,7 +37,7 @@ function OperationTable({ op }: { op: OperationResult }) {
               {op.measures.map((m, i) => (
                 <th key={i} scope="col" className="py-1 pr-3 text-right font-medium">
                   {measureLabel(m, op)}
-                  {m.unit && m.aggregate !== 'share_pct' ? ` (${m.unit})` : ''}
+                  {m.unit && !PERCENT_AGGREGATES.includes(m.aggregate) ? ` (${m.unit})` : ''}
                 </th>
               ))}
             </tr>

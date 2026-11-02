@@ -31,4 +31,13 @@ export const appConfig = {
 /** Con backend (no en la demo pública) se exige una sesión de invitación. */
 export const requiresAccess = !appConfig.demoMode || appConfig.backendProfiling
 
+/** ¿El backend corre en este mismo equipo (instalación local) o en un servidor (versión pública)? */
+export function isLocalBackend(url: string = appConfig.apiBaseUrl): boolean {
+  try {
+    return ['localhost', '127.0.0.1', '[::1]'].includes(new URL(url).hostname)
+  } catch {
+    return false
+  }
+}
+
 export { parseBoolean, parsePositiveNumber }

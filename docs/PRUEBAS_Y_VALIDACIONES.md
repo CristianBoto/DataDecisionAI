@@ -1174,3 +1174,85 @@ También se comprobaron: limpieza de campos (caracteres de control, marcas de di
 - **Personalizado** (título, autor, institución ficticios, logo, sin fecha ni marca), 7 páginas: logo sin deformar, portada sin marca, objetivo con formato, alcance parcial en naranja, aclaración de la variación, gráficos con título, ejes y leyenda, tablas sin encabezados aislados.
 - **Sin personalizar**, 7 páginas: franja y marca DataDecision AI, título predeterminado, fechas visibles.
 - Errores encontrados y corregidos en esta revisión: hoja en blanco tras la portada, mensajes de error cortados en la metodología, gráficos demasiado grandes y puntuación doble en los pendientes.
+
+## 35. Ciencia de datos, decisiones y flujo simplificado (✅ verificada, 31/10/2026)
+
+Datos **sintéticos** (`backend/tests/synthetic_datasets.py`; los mismos están como datasets de prueba en la pantalla de carga). Sin OpenAI real: proveedores falsos en las pruebas e IA simulada local en el navegador.
+
+| Verificación | Resultado |
+|--------------|-----------|
+| Backend | **339 de 339** (24 nuevas en `tests/test_data_science.py`, más pruebas en `test_report.py`, `test_general_engine.py` y `test_config.py`) |
+| Frontend | **262 de 262** (8 nuevas en `src/test/dataScienceFlow.test.tsx`; actualizadas las del informe, la navegación y la revisión por el nuevo flujo) |
+| Lint, typecheck y build | Sin errores |
+
+**Resultados exactos** (cada valor esperado se calculó a mano o con `statistics`, no con el motor):
+
+| Dataset | Caso | Resultado |
+|---------|------|-----------|
+| A · Ventas (36 filas) | Total | 17.145 = 9·(1000+500+300) + 3·315 |
+| A | Por rubro | Alimentos 9.315, Bebidas 4.815, Limpieza 3.015 |
+| A | Canal dentro de cada rubro | Alimentos Local 6.210 de 9.315 (66,67 %); cada rubro suma 100 % |
+| A | Media, mediana y desvío por canal | Iguales a `statistics.mean`, `median` y `stdev` |
+| A | Variación entre meses | +45 por mes (+1,64 % de enero a febrero); el primer mes, sin variación; Alimentos +15 por mes |
+| A | Pareto | Alimentos 54,33 %; con Bebidas, 82,41 %: 2 categorías llegan al 80 % |
+| A | Calidad | 6 de 36 valores fuera del rango IQR se informan como distribución asimétrica o grupos de magnitudes distintas (baja), no como errores |
+| B · Educación (12 filas) | Gasto por alumno por nivel | Cociente de totales; la escuela sin matrícula se excluye y se avisa; la matrícula 0 entra en la suma |
+| B | Gasto por alumno por institución | Matrícula 0 → «sin dato» (nunca infinito) y aviso |
+| B | Tasa de aprobación | Se promedia por nivel, nunca se suma |
+| B | Operaciones inválidas rechazadas | Suma de una tasa, cociente con una tasa, cociente con una sola columna, Pareto de una tasa o de dos columnas, suma de un código, variación sin columna temporal |
+| C · Errores (16 filas) | Detectado | 2 fechas ilegibles, columna de fechas y columna numérica con errores, «Norte»/«norte» y «Sur»/« SUR », 1 faltante, 1 texto no numérico, 1 atípico (99.999), 1 duplicado exacto y 1 lógico |
+| C | Nada se corrige | El motor no unifica «Norte» y «norte», suma el duplicado y el atípico, excluye «abc» y «N/A» con aviso, y el archivo no cambia |
+
+**Interpretación y verificación:**
+- Las secciones nuevas (implicaciones, hipótesis, información necesaria, conclusiones no permitidas) se verifican.
+- Una hipótesis con «se debe a» se descarta, y una conclusión no permitida con una cifra inventada («37 %») también.
+- Ya no se rechazan «Durante 2025, …» ni «… más que Bebidas» cuando la comparación es verdadera.
+- Siguen rechazándose «… menos que Bebidas» (dirección falsa), una cifra de otra categoría en la misma cláusula y un año que no está en los resultados.
+
+**Flujo y privacidad** (pruebas de interfaz):
+- Con el objetivo vacío, el asistente saluda con la estructura real de los datos y el primer mensaje pasa a ser el objetivo.
+- El panel de autorización muestra qué se envía, qué no, los nombres de columnas que podrían ser confidenciales y la alternativa sin IA.
+- El análisis descriptivo sin IA no llama a la IA, no incluye valores y se confirma.
+- La propuesta muestra viabilidad, decisiones y datos faltantes.
+- La interpretación recibe el objetivo interpretado, no todo el pedido original.
+- El logo se puede soltar sobre el área de identidad.
+
+**Navegador** (backend real con la IA simulada local y frontend real):
+- **Dataset C:** el diagnóstico lista los 10 problemas con severidad e impacto, y la tabla de estadísticas muestra n = 13, media 7.810,62 y 1 atípico.
+- **Dataset A, sin objetivo:** saludo «Revisé tu archivo: contiene 72 filas con fechas o períodos (fecha), medidas (monto_ars) y categorías (rubro, canal)».
+  - El consentimiento detallado aparece antes de enviar.
+  - La propuesta llega con «Parcialmente viable», sus decisiones y «costos» como dato faltante.
+  - Al confirmar, la cobertura avisa que el plan no usa «canal».
+  - Se ejecutó el análisis y se pidió la interpretación.
+  - Se descartaron las 3 afirmaciones falsas de la IA simulada (atribución equivocada, 37 % y causa).
+  - La vista previa sigue el nuevo orden, con el origen de cada contenido y los anexos.
+- **PDF ejecutivo:** se revisó página por página, renderizado con el lector de PDF de Windows. Errores encontrados y corregidos:
+  - el título de «Gráficos y hallazgos» quedaba solo al pie de una página;
+  - los gráficos eran demasiado altos (ahora caben dos por página);
+  - las referencias a anexos usaban letras fijas.
+
+## 36. Contexto compacto para interpretar con la IA (✅ verificada, 01/11/2026)
+
+**Problema reproducido.** El ejemplo de ventas (72 filas) con 3 planes y 17 operaciones (`tests/interpretation_cases.py`) estimaba ~8.543 tokens de entrada contra un límite de 8.000. Con el contexto compacto: 10.917 caracteres, ~6.300 tokens, las 17 operaciones completas y 4 medidas enviadas como referencia.
+
+**Backend** (`tests/test_interpretation_context.py`, 9 pruebas, IA falsa):
+- el contexto anterior superaba el límite y el compacto entra, con las 17 operaciones completas;
+- ninguna cifra se pierde ni cambia (las medidas `repeated` se comprueban contra su operación de origen) y no hay estadísticos duplicados;
+- queda información suficiente para recomendar (rankings, variaciones y hechos);
+- flujo completo por la API: preparar, autorizar y verificar; el proveedor recibe exactamente el contenido autorizado;
+- resultados mucho más grandes (24 meses × 120 productos, 3 planes, uno repetido): se resumen dentro del presupuesto, con `same_as` y aviso de cobertura parcial;
+- una cifra correcta de una fila que no viajó se verifica contra el contexto completo;
+- con un límite de 5.000 tokens se responde 413, y elegir `plans=[1]` funciona con `plans_excluded`;
+- un plan inexistente responde 422;
+- ninguna fila individual llega a la IA: las operaciones con registros individuales no envían filas ni hechos (se corrigió una fuga previa de hechos).
+
+**Frontend** (`src/test/interpretationContext.test.tsx`, 3 pruebas): el resumen del panel entiende la versión 2 (filas como arreglos, `same_as`, `repeated`, solo hechos) y avisa el resumen parcial; con varios planes se eligen los planes a interpretar, preparar no envía nada y sin planes elegidos no se puede preparar.
+
+**Resultados.** Backend 349 de 349; frontend 265 de 265; lint, typecheck y build sin errores. Dashboard y PDF sin cambios: sus pruebas siguen pasando.
+
+**Prueba real con OpenAI (01/11/2026, local, autorizada por el autor, dataset sintético «Ventas», 3 solicitudes, USD 0,0043 en total):**
+- Propuesta 1: 3 planes y 18 operaciones (USD 0,0016). La interpretación devolvió 413: el backend local seguía con código anterior porque el recargador de `uvicorn --reload` había dejado de detectar cambios (el esquema publicado no tenía el campo `plans`). Con el código actual, ese mismo caso se reprodujo fuera de línea: 18 operaciones completas y ~6.700 tokens.
+- Propuesta 2, tras reiniciar el backend (USD 0,0013): la IA armó un único plan con más de 10 operaciones y la validación la descartó. Corrección: las instrucciones ahora declaran los límites que exige el backend (6 planes, 10 operaciones y 4 gráficos por plan), con una prueba.
+- Interpretación (USD 0,0014) sobre el plan descriptivo sin IA (8 operaciones), para no consumir solicitudes no autorizadas: el panel mostró el contenido compacto exacto (versión 2, ~3.883 tokens, sin filas individuales); 1 afirmación verificada, 3 descartadas por no nombrar el período o intervalo de su cifra y 5 sin cifras marcadas como no verificables. Las recomendaciones son condicionales, no se atribuyen causas y las limitaciones (rentabilidad, causas, pronósticos, estacionalidad) aparecen explícitas.
+- PDF: 8 páginas; incluye la interpretación, las recomendaciones, lo que no se puede concluir y el origen de cada contenido.
+- Corrección menor: el objetivo aprobado mostraba «..» al unirse con las decisiones.

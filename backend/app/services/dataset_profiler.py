@@ -14,6 +14,7 @@ import pandas as pd
 from openpyxl import load_workbook
 
 from app.services.column_semantics import classify_column, suspected_missing_mask
+from app.services.data_quality import quality_report
 from app.services.measure_hints import measure_hints
 
 MAX_FILE_BYTES = 25 * 1024 * 1024
@@ -291,6 +292,9 @@ def profile_dataset(content: bytes, filename: str, *, max_bytes: int | None = No
     if encoding == "cp1252":
         warnings.append("CSV leído como Windows-1252; revisar la codificación de origen.")
 
+    # Diagnóstico de calidad: estadísticas, atípicos, categorías y fechas dudosas, duplicados lógicos.
+    quality = quality_report(df, column_profiles)
+
     total_cells = int(df.shape[0] * df.shape[1])
     empty_cells = sum(column["missing"] for column in column_profiles)
     suspected_cells = sum(column["suspected_missing"] for column in column_profiles)
@@ -303,6 +307,8 @@ def profile_dataset(content: bytes, filename: str, *, max_bytes: int | None = No
         "row_count": int(df.shape[0]),
         "column_count": int(df.shape[1]),
         "duplicate_rows": duplicate_rows,
+        "logical_duplicate_rows": quality["logical_duplicate_rows"],
+        "quality_issues": quality["issues"],
         # Completitud sobre el archivo completo: celdas no vacías / total de celdas.
         "total_cells": total_cells,
         "empty_cells": empty_cells,

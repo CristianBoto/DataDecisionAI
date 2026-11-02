@@ -98,7 +98,7 @@ describe('de resultados de Pandas a datos de Recharts', () => {
     const mean = op({ dimensions: ['sector'], measures: [{ column: 'ventas', aggregate: 'mean', unit: 'ARS' }], rows: [{ keys: ['A'], values: [10] }, { keys: ['B'], values: [20] }] })
     const result = planDashboard(plan([mean], [{ type: 'pie', x: 'sector', y: 'ventas', title: 'Torta de promedios' }]))
     expect(result.charts.some((c) => c.type === 'pie')).toBe(false)
-    expect(result.notices[0]).toMatch(/promedios o medianas no forman partes de un total/)
+    expect(result.notices[0]).toMatch(/solo las sumas y los conteos forman partes de un total/)
 
     const negative = op({ dimensions: ['sector'], measures: [{ column: 'saldo', aggregate: 'sum', unit: null }], rows: [{ keys: ['A'], values: [-5] }, { keys: ['B'], values: [20] }] })
     expect(planDashboard(plan([negative], [{ type: 'pie', x: 'sector', y: 'saldo', title: 'T' }])).notices[0]).toMatch(/no negativos/)

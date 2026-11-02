@@ -4,6 +4,7 @@ Ninguna prueba consume tokens: el proveedor real se reemplaza por uno falso o
 por un cliente simulado, y cualquier conexión externa hace fallar la prueba.
 """
 
+import json
 import socket
 import tempfile
 from pathlib import Path
@@ -14,7 +15,7 @@ from fastapi.testclient import TestClient
 from app.core.config import Settings
 from app.main import create_app
 from app.schemas.ai_plan import AIAssistantReply
-from app.services.openai_provider import ProviderResult
+from app.services.openai_provider import ProviderResult, build_input
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 external_attempts: list = []
@@ -61,7 +62,7 @@ def reply_for(context: dict, **overrides) -> AIAssistantReply:
             "charts": [{"type": "bar", "x": col, "y": None, "title": "Frecuencia"}], "limitations": [],
         })
     data = {
-        "message": "Propongo un análisis por fuente.", "interpreted_objective": context["objective"],
+        "message": "Propongo un análisis por fuente.", "feasibility": "viable", "missing_data": [], "decisions": [], "interpreted_objective": context["objective"],
         "source_relationship": "independent" if len(plans) > 1 else "single",
         "questions": [], "plans": plans, "warnings": [],
     }
@@ -98,7 +99,8 @@ class FakeProvider:
         """Interpretación falsa (Fase 4C): registra el contexto agregado y responde sin red."""
         from app.schemas.interpretation import AIInterpretation
 
-        payload = context.model_dump(mode="json")
+        # Lo mismo que recibiría el proveedor real (el contenido exacto que se autorizó).
+        payload = json.loads(build_input(context))
         self.interpreted.append(payload)
         if self.error is not None:
             raise self.error

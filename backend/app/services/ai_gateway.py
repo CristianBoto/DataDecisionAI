@@ -65,6 +65,29 @@ class NotImplementedProvider:
         raise AIGatewayError(501, "La conexión con OpenAI no está disponible.")
 
 
+class LocalModelPlaceholder:
+    """Punto de extensión para un modelo local (por ejemplo, Ollama) en una instalación propia.
+
+    Todavía no está integrado: no envía nada y el asistente lo informa. Para integrarlo hay que
+    implementar `send` e `interpret` con la misma salida estructurada y validar la respuesta
+    igual que con OpenAI (ver docs/PRIVACIDAD.md).
+    """
+
+    implemented = False
+
+    def send(self, context: AIContext, settings: Settings) -> ProviderResult:  # pragma: no cover - nunca se invoca
+        raise AIGatewayError(501, "El proveedor local (Ollama) todavía no está integrado. No se envió nada.")
+
+
+def create_provider(settings: Settings):
+    """Proveedor de IA según la configuración. OpenAI es el único integrado por ahora."""
+    if settings.ai_provider == "ollama":
+        return LocalModelPlaceholder()
+    from app.services.openai_provider import OpenAIProvider
+
+    return OpenAIProvider()
+
+
 def canonical_json(context: AIContext) -> str:
     """JSON canónico (claves ordenadas, sin espacios): base de la huella aprobada."""
     return json.dumps(context.model_dump(mode="json"), ensure_ascii=False, sort_keys=True, separators=(",", ":"))

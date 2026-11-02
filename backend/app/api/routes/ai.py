@@ -24,6 +24,7 @@ from app.services.ai_gateway import (
     send_in_conversation,
 )
 from app.services.auth import User
+from app.services.descriptive_plan import DescriptivePlanRequest, descriptive_reply
 from app.services.report import ExecutionStore, authorize_interpretation, prepare_interpretation
 
 router = APIRouter(prefix="/ai", tags=["ia"], dependencies=[Depends(require_user)])
@@ -64,6 +65,7 @@ def ai_status(
         provider_configured=bool(settings.openai_api_key),
         external_calls_implemented=provider.implemented,
         model=settings.openai_model,
+        provider=settings.ai_provider,
         budget_usd=usage.user_budget_usd,
         spent_usd=usage.user_spent_usd,
         remaining_usd=usage.remaining_usd,
@@ -167,6 +169,28 @@ def cancel_request(request_id: str, store: AIRequestStore = Depends(get_ai_store
     store.cancel(request_id, user.id)
 
 
+@router.post("/plans/descriptive", status_code=status.HTTP_201_CREATED)
+def descriptive_plan(
+    body: DescriptivePlanRequest,
+    plans: AIPlanStore = Depends(get_ai_plans),
+    budget: AIBudget = Depends(get_ai_budget),
+    user: User = Depends(require_user),
+) -> dict:
+    """Plan descriptivo SIN IA (Fase 5): no llama a ningún proveedor ni consume presupuesto.
+
+    Responde con la misma forma que una respuesta de la IA, así se aprueba, confirma y ejecuta igual.
+    """
+    reply, _ = descriptive_reply(body)
+    if not reply.plans:
+        raise HTTPException(status_code=422, detail="Con las columnas compartidas no hay ningún análisis descriptivo posible.")
+    return {
+        "reply": reply.model_dump(mode="json"),
+        "plan_ids": [plans.save(plan, user.id) for plan in reply.plans],
+        "usage": {"model": "reglas (sin IA)", "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0,
+                  "remaining_usd": budget.status(user.id).remaining_usd},
+    }
+
+
 @router.post("/plans/{plan_id}/approve")
 def approve_plan(plan_id: str, plans: AIPlanStore = Depends(get_ai_plans), user: User = Depends(require_user)) -> dict:
     """Registra la aprobación del visitante (solo de sus propios planes). No ejecuta cálculos."""
@@ -198,7 +222,8 @@ def prepare_interpretation_request(
     """Arma el contexto AGREGADO de una ejecución propia y lo devuelve para revisión. No envía nada."""
     try:
         return prepare_interpretation(
-            executions, store, execution_id=body.execution_id, owner=user.id, settings=settings, provider=provider
+            executions, store, execution_id=body.execution_id, owner=user.id, settings=settings, provider=provider,
+            plans=body.plans,
         )
     except AIGatewayError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

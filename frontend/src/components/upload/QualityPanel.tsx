@@ -4,6 +4,7 @@ import type { DatasetProfile, IssueSeverity } from '@/types/domain'
 import { Badge, DemoBadge } from '@/components/ui/Badge'
 import { Card, CardHeader } from '@/components/ui/Card'
 import { SemanticTag } from '@/components/upload/DatasetPreview'
+import { NumericSummary, QualityDiagnosis } from '@/components/upload/QualityDiagnosis'
 import { formatNumber } from '@/lib/format'
 import { COMPLETENESS_CRITERIA, formatCompleteness, getCompleteness, getSuspectedMissingCells } from '@/lib/profileMetrics'
 
@@ -36,6 +37,9 @@ export function QualityPanel({ profile }: { profile: DatasetProfile }) {
   ]
   if (profile.duplicateRowCount !== undefined && profile.duplicateRowCount !== null) {
     stats.push({ label: 'Filas duplicadas', value: formatNumber(profile.duplicateRowCount) })
+  }
+  if (profile.logicalDuplicateRowCount) {
+    stats.push({ label: 'Posibles duplicados (mayúsculas o espacios)', value: formatNumber(profile.logicalDuplicateRowCount) })
   }
   if (suspectedCells > 0) {
     stats.push({ label: 'Posibles marcadores de ausencia', value: formatNumber(suspectedCells) })
@@ -77,21 +81,42 @@ export function QualityPanel({ profile }: { profile: DatasetProfile }) {
         </div>
       )}
 
+      {profile.qualityFindings && <QualityDiagnosis findings={profile.qualityFindings} />}
+      <NumericSummary columns={profile.columns} />
+
       <div className="p-5">
-        <p className="mb-2 text-xs font-semibold text-slate-700">Observaciones</p>
-        {profile.issues.length === 0 ? (
-          <p className="text-xs text-slate-500">No se detectaron observaciones en la vista previa.</p>
+        {profile.qualityFindings ? (
+          // Con diagnóstico del backend, las observaciones del perfilado quedan como detalle (no se repiten arriba).
+          profile.issues.length > 0 && (
+            <details>
+              <summary className="cursor-pointer text-xs font-semibold text-slate-600">Observaciones del perfilado ({profile.issues.length})</summary>
+              <Observations profile={profile} />
+            </details>
+          )
         ) : (
-          <ul className="space-y-2">
-            {profile.issues.map((issue, i) => (
-              <li key={i} className="flex gap-2 text-xs leading-relaxed text-slate-600">
-                {SEVERITY_ICON[issue.severity]}
-                <span>{issue.message}</span>
-              </li>
-            ))}
-          </ul>
+          <>
+            <p className="mb-2 text-xs font-semibold text-slate-700">Observaciones</p>
+            {profile.issues.length === 0 ? (
+              <p className="text-xs text-slate-500">No se detectaron observaciones en la vista previa.</p>
+            ) : (
+              <Observations profile={profile} />
+            )}
+          </>
         )}
       </div>
     </Card>
+  )
+}
+
+function Observations({ profile }: { profile: DatasetProfile }) {
+  return (
+    <ul className="mt-2 space-y-2">
+      {profile.issues.map((issue, i) => (
+        <li key={i} className="flex gap-2 text-xs leading-relaxed text-slate-600">
+          {SEVERITY_ICON[issue.severity]}
+          <span>{issue.message}</span>
+        </li>
+      ))}
+    </ul>
   )
 }

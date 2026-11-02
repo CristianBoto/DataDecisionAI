@@ -31,6 +31,8 @@ export interface PdfCustomization {
   author: string
   organization: string
   logo: PdfLogo | null
+  /** Fecha del informe (AAAA-MM-DD); vacía = la fecha de elaboración. */
+  date: string
   showDate: boolean
   showBrand: boolean
 }
@@ -41,12 +43,14 @@ export interface PdfPresentation {
   author: string | null
   organization: string | null
   logo: PdfLogo | null
+  /** Fecha elegida; null = la de elaboración. */
+  date: Date | null
   showDate: boolean
   showBrand: boolean
 }
 
 export function defaultCustomization(): PdfCustomization {
-  return { title: '', author: '', organization: '', logo: null, showDate: true, showBrand: true }
+  return { title: '', author: '', organization: '', logo: null, date: '', showDate: true, showBrand: true }
 }
 
 // Caracteres de control e invisibles de dirección (no se imprimen y pueden alterar el texto).
@@ -61,12 +65,21 @@ export function cleanField(value: string, max: number): string {
     .trim()
 }
 
+/** «AAAA-MM-DD» → fecha local (mediodía, para que ninguna zona horaria cambie el día); inválida o vacía → null. */
+export function parseDate(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim())
+  if (!match) return null
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12)
+  return date.getMonth() === Number(match[2]) - 1 ? date : null
+}
+
 export function presentation(c: PdfCustomization, defaultTitle: string): PdfPresentation {
   return {
     title: cleanField(c.title, LIMITS.title) || cleanField(defaultTitle, LIMITS.title),
     author: cleanField(c.author, LIMITS.author) || null,
     organization: cleanField(c.organization, LIMITS.organization) || null,
     logo: c.logo,
+    date: parseDate(c.date),
     showDate: c.showDate,
     showBrand: c.showBrand,
   }

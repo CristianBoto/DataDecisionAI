@@ -71,6 +71,10 @@ export function AppProviders({
     // Cambiar la revisión cambia la frontera de privacidad: el permiso de conversación deja de valer.
     setSession((current) => ({ ...current, review, reviewConfirmed: false, projectId: null, ...CONVERSATION_RESET }))
   }, [])
+  const setObjective = useCallback((objective: string) => {
+    // Solo completa un objetivo vacío: cambiar uno ya compartido cambiaría la frontera de privacidad autorizada.
+    setSession((current) => (current.review && !current.review.objective.trim() ? { ...current, review: { ...current.review, objective } } : current))
+  }, [])
   const appendAIChat = useCallback((turns: AnalysisSessionState['aiChat']) => {
     setSession((current) => ({ ...current, aiChat: [...current.aiChat, ...turns] }))
   }, [])
@@ -118,6 +122,7 @@ export function AppProviders({
       setProjectId,
       setProjectName,
       setReview,
+      setObjective,
       confirmReview,
       appendAIChat,
       markPlanApproved,
@@ -135,6 +140,7 @@ export function AppProviders({
       setProjectId,
       setProjectName,
       setReview,
+      setObjective,
       confirmReview,
       appendAIChat,
       markPlanApproved,

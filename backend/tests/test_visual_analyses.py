@@ -194,7 +194,7 @@ def context_with(*columns):
 
 def reply_with(operation):
     return AIAssistantReply.model_validate({
-        "message": "m", "interpreted_objective": "o", "source_relationship": "single", "questions": [], "warnings": [],
+        "message": "m", "feasibility": "viable", "missing_data": [], "decisions": [], "interpreted_objective": "o", "source_relationship": "single", "questions": [], "warnings": [],
         "plans": [plan(operation, columns=operation["columns"])],
     })
 

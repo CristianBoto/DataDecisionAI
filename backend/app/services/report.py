@@ -31,6 +31,7 @@ from itertools import groupby
 from app.core.config import Settings
 from app.schemas.interpretation import (
     AIInterpretation,
+    CompactInterpretationContext,
     Claim,
     ContextFacts,
     ContextMeasure,
@@ -51,9 +52,6 @@ MAX_EXECUTIONS_PER_OWNER = 2
 MAX_STORED_EXECUTIONS = 100
 # Etiquetas (categorías, períodos) que viajan a la IA: sin caracteres de control y con largo acotado.
 MAX_LABEL_CHARS = 80
-# Filas agregadas por operación que pueden viajar a la IA (las series temporales conservan más períodos).
-MAX_CONTEXT_ROWS = 40
-MAX_CONTEXT_TEMPORAL_ROWS = 120
 # Series y combinaciones de categorías descriptas por operación en el resumen.
 MAX_SUMMARY_SERIES = 6
 MAX_SUMMARY_SPLITS = 8
@@ -71,6 +69,11 @@ AGGREGATE_LABELS = {
     "max": "Máximo de {c}",
     "distinct_count": "Valores distintos de {c}",
     "share_pct": "Participación sobre el total",
+    "std": "Desvío estándar de {c}",
+    "cumulative_pct": "Participación acumulada",
+    "change": "Variación de {c}",
+    "change_pct": "Variación % de {c}",
+    "ratio": "{c}",
     "value": "{c}",
 }
 
@@ -126,7 +129,7 @@ def measure_label(m: dict) -> str:
 
 
 def with_unit(value: float | None, m: dict) -> str:
-    if m["aggregate"] == "share_pct":
+    if m["aggregate"] in ("share_pct", "cumulative_pct", "change_pct"):
         return f"{fmt(value)} %"
     unit = m.get("unit")
     if unit and m["aggregate"] not in ("count", "distinct_count"):
@@ -279,9 +282,77 @@ def _roc_facts(op: dict) -> list[str]:
     ]
 
 
+def _pareto_facts(op: dict) -> list[str]:
+    rows = [r for r in op["rows"] if r["values"][0] is not None]
+    if not rows:
+        return []
+    m = op["measures"][0]
+    stats = op.get("stats") or {}
+    group = op["dimensions"][0]
+    top = rows[0]
+    text = (f"Ranking de {len(rows)} categorías de {group} por {measure_label(m).lower()}: primera, {top['keys'][0]} con "
+            f"{with_unit(top['values'][0], m)} ({fmt(top['values'][1])} % del total).")
+    reach = stats.get("groups_for_80")
+    if reach:
+        text += f" {fmt(reach, 0)} de {len(rows)} categorías concentran el 80 % del total."
+    return [text]
+
+
+def _variation_facts(op: dict) -> list[str]:
+    """Variación entre períodos consecutivos: la mayor suba y la mayor baja de cada serie."""
+    t = op["dimensions"].index(op["temporal_dimension"])
+    others = [i for i in range(len(op["dimensions"])) if i != t]
+    m = op["measures"][0]
+    change_m = op["measures"][1]
+    key = lambda r: tuple(r["keys"][i] for i in others)  # noqa: E731
+    facts = []
+    series = [(k, list(g)) for k, g in groupby(sorted(op["rows"], key=key), key=key)]
+    for k, rows in series[:MAX_SUMMARY_SERIES]:
+        rows = [r for r in rows if r["values"][1] is not None]
+        if not rows:
+            continue
+        name = ", ".join(f"{op['dimensions'][i]} = {v}" for i, v in zip(others, k))
+        up = max(rows, key=lambda r: r["values"][1])
+        down = min(rows, key=lambda r: r["values"][1])
+        pct = lambda r: f" ({'+' if r['values'][1] >= 0 else ''}{fmt(r['values'][2], 1)} %)" if r["values"][2] is not None else ""  # noqa: E731
+        text = (f"{measure_label(m)}{f' ({name})' if name else ''}: mayor variación entre períodos consecutivos en "
+                f"{up['keys'][t]}, {'+' if up['values'][1] >= 0 else ''}{with_unit(up['values'][1], change_m)}{pct(up)}")
+        if down is not up:
+            text += f"; menor en {down['keys'][t]}, {'+' if down['values'][1] >= 0 else ''}{with_unit(down['values'][1], change_m)}{pct(down)}"
+        facts.append(text + ".")
+    return facts
+
+
+def _ratio_facts(op: dict) -> list[str]:
+    num, den, ratio = op["measures"][:3]
+    rows = [r for r in op["rows"] if r["values"][2] is not None]
+    if not op["dimensions"]:
+        row = op["rows"][0]
+        return [f"{ratio['column'].capitalize()}: {with_unit(row['values'][2], ratio)} "
+                f"({with_unit(row['values'][0], num)} / {with_unit(row['values'][1], den)})."]
+    if not rows:
+        return [f"{ratio['column'].capitalize()}: no está definido en ningún grupo (el denominador suma 0)."]
+    top = max(rows, key=lambda r: r["values"][2])
+    bottom = min(rows, key=lambda r: r["values"][2])
+    idx = list(range(len(op["dimensions"])))
+    text = f"{ratio['column'].capitalize()} en {len(rows)} grupos. Mayor: {_label(top['keys'], idx, op)} con {with_unit(top['values'][2], ratio)}"
+    if len(rows) > 1:
+        text += f"; menor: {_label(bottom['keys'], idx, op)} con {with_unit(bottom['values'][2], ratio)}"
+    undefined = len(op["rows"]) - len(rows)
+    if undefined:
+        text += f". En {undefined} grupos no está definido (denominador 0)"
+    return [text + "."]
+
+
 def operation_facts(op: dict) -> list[str]:
     if op["status"] != "ok" or (not op.get("rows") and op["operation"] not in ("scatter", "roc_curve")):
         return []
+    if op["operation"] == "pareto":
+        return _pareto_facts(op)
+    if op["operation"] == "ratio":
+        return _ratio_facts(op)
+    if op["operation"] == "variation" and op.get("temporal_dimension") in op["dimensions"]:
+        return _variation_facts(op)
     if op["operation"] == "scatter":
         return _scatter_facts(op)
     if op["operation"] == "roc_curve":
@@ -368,12 +439,9 @@ def build_context(entry: dict) -> InterpretationContext:
     operations = []
     for ref, plan, op in _refs(result):
         points = op["operation"] in ("scatter", "roc_curve")  # puntos casi individuales: nunca viajan
+        # Todas las filas agregadas: este contexto queda en el backend para VERIFICAR. Lo que viaja a la IA es su
+        # versión compacta (`interpretation_context.compact_context`), con presupuesto de tamaño.
         rows = [] if points else op["rows"]
-        limit = MAX_CONTEXT_TEMPORAL_ROWS if op.get("temporal_dimension") else MAX_CONTEXT_ROWS
-        if len(rows) > limit:
-            if not op.get("temporal_dimension") and op["operation"] != "histogram":
-                rows = sorted(rows, key=lambda r: -(r["values"][0] or 0))
-            rows = rows[:limit]
         # Tantos grupos como registros usados: cada grupo sería un registro individual. No se envían.
         withheld = bool(rows) and bool(op.get("dimensions")) and len(op["rows"]) >= (op.get("rows_used") or 0) > 1
         if withheld:
@@ -396,7 +464,7 @@ def build_context(entry: dict) -> InterpretationContext:
     )
 
 
-def estimate_interpretation(context: InterpretationContext, settings: Settings) -> tuple[int, float | None]:
+def estimate_interpretation(context: InterpretationContext | CompactInterpretationContext, settings: Settings) -> tuple[int, float | None]:
     tokens = estimate_tokens(INTERPRETATION_INSTRUCTIONS, build_input(context)) + INTERPRETATION_SCHEMA_CHARS // 3
     prices = model_prices(settings.openai_model, settings.openai_price_input_per_1m, settings.openai_price_output_per_1m)
     return tokens, (cost_usd(prices, tokens, settings.ai_max_output_tokens) if prices else None)
@@ -581,6 +649,60 @@ def _labels_of(ops: list[ContextOperation]) -> set[str]:
     return {k for op in ops for row in op.rows for k in row.keys if len(k.strip()) >= 2}
 
 
+YEAR_RE = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+# Separadores de cláusulas: no cortan cifras como «79,41» o «1.500» (no llevan espacio).
+CLAUSE_RE = re.compile(r";|:|\.\s|,\s|\s(?:y|e|pero|mientras|aunque|frente a|contra)\s", re.IGNORECASE)
+
+
+def _years_of(ops: list[ContextOperation]) -> set[float]:
+    """Años que aparecen en los períodos de las operaciones citadas («2025-01» → 2025): nombrarlos no es una cifra."""
+    return {float(y) for label in _labels_of(ops) for y in YEAR_RE.findall(label)}
+
+
+MORE_RE = re.compile(r"\b(más|mayor(?:es)?|supera\w*|por encima|superior(?:es)?)\b", re.IGNORECASE)
+LESS_RE = re.compile(r"\b(menos|menor(?:es)?|por debajo|inferior(?:es)?)\b", re.IGNORECASE)
+
+
+def _comparison_ok(label: str, clause: str, checked: list["_Checked"], ops: list[ContextOperation]) -> bool:
+    """Una comparación con otra categoría («más que Bebidas») se verifica con el valor real de esa categoría.
+
+    Se busca, en la misma operación y medida de un claim verificado, la fila que solo cambia en esa
+    categoría; la dirección escrita (más / menos) tiene que coincidir. Si no se encuentra, no se acepta.
+    """
+    more, less = bool(MORE_RE.search(clause)), bool(LESS_RE.search(clause))
+    if more == less:
+        return not (more and less)  # sin comparación: es solo una mención; con las dos, es ambigua
+    by_ref = {op.ref: op for op in ops}
+    for c in checked:
+        op = by_ref.get(c.claim.ref)
+        if op is None or c.claim.kind not in ("value", "share_pct"):
+            continue
+        want_share = c.claim.kind == "share_pct"
+        index = next((i for i, m in enumerate(op.measures)
+                      if _norm(m.column) == _norm(c.claim.measure) and (m.aggregate == "share_pct") == want_share), None)
+        keys = {k.dimension: k.value for k in c.claim.keys}
+        for dim_index, dimension in enumerate(op.dimensions):
+            if index is None or not any(_norm(r.keys[dim_index]) == _norm(label) for r in op.rows):
+                continue
+            wanted = {**{_norm(d): _norm(v) for d, v in keys.items()}, _norm(dimension): _norm(label)}
+            other = next((r for r in op.rows
+                          if all(_norm(r.keys[i]) == wanted.get(_norm(d), _norm(r.keys[i])) for i, d in enumerate(op.dimensions))), None)
+            if other is not None and other.values[index] is not None:
+                return c.actual > other.values[index] if more else c.actual < other.values[index]
+    return False
+
+
+def _figures(text: str, years: set[float]) -> list[str]:
+    """Cifras escritas que deben estar respaldadas: no los enteros chicos sin unidad ni los años de los períodos."""
+    found = []
+    for token in NUMBER_RE.findall(text):
+        readings = _readings(token)
+        if any(v.is_integer() and (abs(v) in FREE_INTEGERS or abs(v) in years) for v, _ in readings):
+            continue
+        found.append(token)
+    return found
+
+
 def _units_of(ops: list[ContextOperation]) -> set[str]:
     units = {m.unit for op in ops for m in op.measures if m.unit}
     for op in ops:
@@ -600,12 +722,25 @@ def _check_text(text: str, checked: list[_Checked], ops: list[ContextOperation])
         if not _mentions(bare, label):
             return f"no nombra «{label}», al que corresponde su cifra"
     labels = _labels_of(ops)
+    years = _years_of(ops)
+
+    def without_labels(fragment: str) -> str:
+        # Los nombres de categorías y períodos con dígitos («2025-01») no son cifras.
+        for label in sorted(labels, key=len, reverse=True):
+            fragment = re.sub(rf"(?<!\w){re.escape(label)}(?!\w)", " ", fragment, flags=re.IGNORECASE)
+        return fragment
+
     for label in labels:
         if _norm(label) not in required and _mentions(bare, label) and checked:
-            return f"nombra «{label}», que no corresponde a las cifras que declara"
-    # Los nombres de categorías y períodos con dígitos («2025-01») no son cifras.
-    for label in sorted(labels, key=len, reverse=True):
-        bare = re.sub(rf"(?<!\w){re.escape(label)}(?!\w)", " ", bare, flags=re.IGNORECASE)
+            # Nombrar otra categoría para comparar está permitido si en esa cláusula no hay ninguna cifra
+            # («…muy por encima de Online»). Con una cifra al lado, sería atribuirle un valor que no es el suyo.
+            clauses = [c for c in CLAUSE_RE.split(bare) if _mentions(c, label)]
+            if any(_figures(without_labels(c), years) for c in clauses):
+                return f"nombra «{label}», que no corresponde a las cifras que declara"
+            # Una comparación («más que Bebidas») también es una afirmación: se verifica su dirección.
+            if not all(_comparison_ok(label, c, checked, ops) for c in clauses):
+                return f"compara con «{label}» en una dirección que los resultados no respaldan"
+    bare = without_labels(bare)
     units = _units_of(ops) | {"%"}
     for match in NUMBER_RE.finditer(bare):
         after = bare[match.end():match.end() + 16].lstrip()
@@ -613,7 +748,7 @@ def _check_text(text: str, checked: list[_Checked], ops: list[ContextOperation])
             (u for u in sorted(units, key=len, reverse=True) if re.match(rf"{re.escape(u)}(?!\w)", after, re.IGNORECASE)), None
         )
         readings = _readings(match.group())
-        if unit is None and any(v.is_integer() and abs(v) in FREE_INTEGERS for v, _ in readings):
+        if unit is None and any(v.is_integer() and (abs(v) in FREE_INTEGERS or abs(v) in years) for v, _ in readings):
             continue
         bound = any(
             _matches(value, decimals, c.actual) and (unit is None or _norm(unit) == _norm(c.unit))
@@ -653,7 +788,7 @@ def _verify_item(item: InterpretationItem, ops: dict[str, ContextOperation]) -> 
             bare = re.sub(rf"(?<!\w){re.escape(label)}(?!\w)", " ", bare, flags=re.IGNORECASE)
         if CAUSAL_RE.search(bare) and not DISCLAIMER_RE.search(bare):
             return None, "atribuye causas que los resultados no permiten establecer"
-        if any(not (v.is_integer() and abs(v) in FREE_INTEGERS) for t in NUMBER_RE.findall(bare) for v, _ in _readings(t)):
+        if _figures(bare, _years_of(cited)):
             return None, "escribe cifras sin declararlas para su verificación"
         return {"text": item.text, "evidence": [c.ref for c in cited], "status": "unverified", "claims": []}, None
     reason = _check_text(item.text, checked, cited)
@@ -688,12 +823,12 @@ def _verified(token: str, allowed: list[float]) -> bool:
     return False
 
 
-def _clean_notes(values: list[str], allowed: list[float], rejected: list[str], section: str) -> list[str]:
+def _clean_notes(values: list[str], allowed: list[float], rejected: list[str], section: str, *, causal: bool = True) -> list[str]:
     """Limitaciones y calidad de datos: sin causas y solo con cifras que figuran en los resultados o advertencias."""
     kept = []
     for text in values:
         bare = REF_RE.sub(" ", text)
-        if CAUSAL_RE.search(bare) and not DISCLAIMER_RE.search(bare):
+        if causal and CAUSAL_RE.search(bare) and not DISCLAIMER_RE.search(bare):
             rejected.append(f"{section}: atribuye causas que los resultados no permiten establecer")
         elif not all(_verified(t, allowed) for t in NUMBER_RE.findall(bare)):
             rejected.append(f"{section}: cita cifras que no figuran en los resultados")
@@ -706,7 +841,9 @@ SECTIONS = {
     "executive_summary": "resumen ejecutivo",
     "findings": "hallazgo",
     "trends": "tendencia",
+    "implications": "implicación",
     "recommendations": "recomendación",
+    "hypotheses": "hipótesis",
 }
 
 
@@ -727,6 +864,9 @@ def verify_interpretation(reply: AIInterpretation, context: InterpretationContex
     allowed = allowed_numbers(context)
     verified["limitations"] = _clean_notes(reply.limitations, allowed, rejected, "limitación")
     verified["data_quality"] = _clean_notes(reply.data_quality, allowed, rejected, "calidad de datos")
+    verified["information_needed"] = _clean_notes(reply.information_needed, allowed, rejected, "información necesaria")
+    # «No se puede concluir que X causa Y» es justamente lo que se pide: solo se controlan sus cifras.
+    verified["not_supported"] = _clean_notes(reply.not_supported, allowed, rejected, "conclusión no permitida", causal=False)
 
     notes = []
     if rejected:
@@ -746,18 +886,21 @@ def verify_interpretation(reply: AIInterpretation, context: InterpretationContex
 # --- Flujo: preparar → autorizar → enviar → verificar -----------------------------------
 
 def prepare_interpretation(executions: ExecutionStore, store: AIRequestStore, *, execution_id: str, owner: str,
-                           settings: Settings, provider: AIProvider) -> dict:
+                           settings: Settings, provider: AIProvider, plans: list[int] | None = None) -> dict:
     entry = executions.get(execution_id, owner)
     if entry is None:
         raise AIGatewayError(404, "Los resultados ya no están disponibles (por ejemplo, se reinició el backend). Ejecutá el análisis de nuevo.")
-    context: InterpretationContext = entry["context"]
+    from app.services.interpretation_context import compact_context
+
+    # Lo que viaja es el contexto COMPACTO (con presupuesto de tamaño); el completo queda para verificar.
+    context = compact_context(entry["context"], settings, plans=plans)
     tokens, max_cost = estimate_interpretation(context, settings)
-    if tokens > settings.ai_max_input_tokens:
+    if tokens > settings.ai_max_input_tokens:  # pragma: no cover - el presupuesto deja margen; última barrera
         raise AIGatewayError(413, "Los resultados superan el tamaño máximo permitido para la IA. No se envió nada.")
     request_id, sha = store.prepare(context, owner)
     return {
         "request_id": request_id,
-        "payload": context.model_dump(mode="json"),
+        "payload": context.wire(),
         "payload_sha256": sha,
         "expires_in_seconds": store.ttl_seconds,
         "ai_enabled": settings.ai_enabled,
@@ -772,7 +915,7 @@ def authorize_interpretation(store: AIRequestStore, provider: AIProvider, budget
     if not settings.ai_enabled:
         store.cancel(request_id, owner)
         raise AIGatewayError(403, "La IA externa está deshabilitada (AI_ENABLED=false). No se envió nada.")
-    context: InterpretationContext = store.consume(request_id, approved_sha256, owner)  # uso único desde aquí
+    context: CompactInterpretationContext = store.consume(request_id, approved_sha256, owner)  # uso único desde aquí
     interpret = getattr(provider, "interpret", None)
     if interpret is None:
         raise AIGatewayError(501, "La interpretación con IA no está disponible. No se envió nada.")
@@ -785,7 +928,10 @@ def authorize_interpretation(store: AIRequestStore, provider: AIProvider, budget
     )
     if not isinstance(result.reply, AIInterpretation):
         raise AIGatewayError(502, f"{result.problem or 'La respuesta de la IA no tenía el formato esperado.'} Se registró el consumo.")
-    verified, notes = verify_interpretation(result.reply, context)
+    # Las cifras se verifican contra los resultados completos de Pandas (no solo contra lo enviado).
+    verified, notes = verify_interpretation(result.reply, context.verification)
+    if context.coverage.summarized or context.coverage.facts_only or context.coverage.plans_excluded:
+        notes.append(f"La IA recibió un resumen parcial de los resultados. {context.coverage.note}")
     if not verified["executive_summary"] and not verified["findings"]:
         raise AIGatewayError(
             502, "La interpretación de la IA no superó la verificación contra los resultados y se descartó. " + " ".join(notes[:2])

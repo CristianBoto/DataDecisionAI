@@ -4,7 +4,7 @@ import { DemoBanner } from '@/components/DemoBanner'
 import { Logo } from '@/components/ui/Logo'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { cn } from '@/lib/cn'
-import { stepAccess, WIZARD_STEPS, type StepKey } from '@/lib/wizardSteps'
+import { stepAccess, VISUAL_STEPS, visualStepIndex, WIZARD_STEPS, type StepKey } from '@/lib/wizardSteps'
 
 const ICONS: Record<StepKey, LucideIcon> = {
   cargar: Upload,
@@ -18,7 +18,8 @@ export function WizardLayout() {
   const { pathname } = useLocation()
   const session = useAnalysisSession()
   const access = stepAccess(session)
-  const current = Math.max(0, WIZARD_STEPS.findIndex((s) => pathname.startsWith(s.path)))
+  // Cuatro pasos visibles; «Cargar y explorar» reúne la carga y la revisión de los datos.
+  const current = visualStepIndex(pathname)
 
   return (
     <div className="flex min-h-svh flex-col">
@@ -31,16 +32,18 @@ export function WizardLayout() {
 
           <nav aria-label="Pasos del análisis" className="hidden md:block">
             <ol className="flex items-center gap-2">
-              {WIZARD_STEPS.map((step, index) => {
-                const Icon = ICONS[step.key]
+              {VISUAL_STEPS.map((visual, index) => {
+                const step = WIZARD_STEPS.find((s) => s.key === visual.keys[0])!
+                const Icon = ICONS[visual.keys[visual.keys.length - 1]]
                 const active = index === current
-                const { available, reason } = access[step.key]
+                const available = visual.keys.some((k) => access[k].available)
+                const reason = access[visual.keys[0]].reason
                 const done = index < current && available
                 const base = 'flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium transition-colors'
                 const content = (
                   <>
                     {done ? <Check className="size-3.5" aria-hidden /> : available || active ? <Icon className="size-3.5" aria-hidden /> : <Lock className="size-3.5" aria-hidden />}
-                    {step.label}
+                    {visual.label}
                   </>
                 )
                 return (
@@ -53,7 +56,7 @@ export function WizardLayout() {
                       // Pasos alcanzados: se pueden abrir (también con teclado).
                       <Link
                         to={step.path}
-                        aria-label={`${step.label}${done ? ' (completado)' : ''}`}
+                        aria-label={`${visual.label}${done ? ' (completado)' : ''}`}
                         className={cn(
                           base,
                           'focus-visible:ring-4 focus-visible:ring-blue-200 focus-visible:outline-none',
@@ -68,7 +71,7 @@ export function WizardLayout() {
                         <span className="sr-only"> (bloqueado: {reason})</span>
                       </span>
                     )}
-                    {index < WIZARD_STEPS.length - 1 && <span className="h-px w-6 bg-slate-200" aria-hidden />}
+                    {index < VISUAL_STEPS.length - 1 && <span className="h-px w-6 bg-slate-200" aria-hidden />}
                   </li>
                 )
               })}
@@ -76,7 +79,7 @@ export function WizardLayout() {
           </nav>
 
           <span className="text-xs font-medium text-slate-500 md:hidden">
-            Paso {current + 1} de {WIZARD_STEPS.length}
+            Paso {current + 1} de {VISUAL_STEPS.length}
           </span>
 
           <Link

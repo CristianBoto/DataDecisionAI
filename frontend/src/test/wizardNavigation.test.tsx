@@ -54,12 +54,14 @@ describe('navegación del encabezado', () => {
   it('muestra pasos completados, activo y bloqueados, y no enlaza los bloqueados', async () => {
     const user = userEvent.setup()
     renderApp(createDemoService({ delayMs: 0 }))
-    expect(steps().getByText('Cargar datos').closest('[aria-current="step"]')).not.toBeNull()
-    expect(steps().queryByRole('link', { name: /Revisar/ })).toBeNull()
-    expect(steps().getByText('Revisar').closest('[aria-disabled="true"]')).not.toBeNull()
+    // Cuatro pasos visibles: «Cargar y explorar» reúne la carga y la revisión de los datos.
+    expect(steps().getAllByRole('listitem')).toHaveLength(4)
+    for (const label of ['Cargar y explorar', 'Conversar', 'Confirmar propuesta', 'Resultados']) expect(steps().getByText(label)).toBeInTheDocument()
+    expect(steps().getByText('Cargar y explorar').closest('[aria-current="step"]')).not.toBeNull()
+    expect(steps().getByText('Conversar').closest('[aria-disabled="true"]')).not.toBeNull()
 
     await upload(user, [ventas()])
-    expect(steps().getByRole('link', { name: 'Revisar' })).toHaveAttribute('href', '/analisis/revisar')
+    expect(steps().queryByRole('link', { name: /Conversar/ })).toBeNull()
     expect(steps().getByText('Conversar').closest('[aria-disabled="true"]')).toHaveAttribute('title', 'Primero confirmá la revisión de datos.')
   })
 
@@ -68,7 +70,11 @@ describe('navegación del encabezado', () => {
     const router = renderApp(createDemoService({ delayMs: 0 }))
     await upload(user, [ventas()])
     await goToReview(user)
-    const back = steps().getByRole('link', { name: 'Cargar datos (completado)' })
+    // La revisión también es parte del paso 1: sigue activo.
+    expect(steps().getByText('Cargar y explorar').closest('[aria-current="step"]')).not.toBeNull()
+    await completeReview(user, 'Comparar las ventas')
+    await waitFor(() => expect(router.state.location.pathname).toBe('/analisis/asistente'))
+    const back = await steps().findByRole('link', { name: 'Cargar y explorar (completado)' })
     back.focus()
     await user.keyboard('{Enter}')
     await waitFor(() => expect(router.state.location.pathname).toBe('/analisis/cargar'))

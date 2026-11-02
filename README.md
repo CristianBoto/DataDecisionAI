@@ -27,24 +27,27 @@ Proyecto final de **Prácticas Profesionalizantes — Tecnicatura en Ciencia de 
 |---------------|--------|--------------|
 | **Acceso por invitación** con Cloudflare Turnstile | ✅ Implementado | Sin registro público, roles ni recuperación de cuenta. Las invitaciones se crean desde la consola del servidor |
 | **Carga y perfilado de CSV/XLSX** con Pandas (hasta 3 archivos, cada uno analizado por separado) | ✅ Implementado | Tamaño, filas, columnas y celdas limitados. Solo la primera hoja del XLSX. No se unen archivos |
+| **Diagnóstico de calidad** con su impacto: faltantes, duplicados exactos y lógicos, categorías inconsistentes, fechas inválidas o ambiguas, errores de conversión, atípicos (IQR) y estadísticas descriptivas | ✅ Implementado | Nada se corrige automáticamente. Las variantes de categorías se detectan por mayúsculas, tildes y espacios, no por sinónimos |
 | **Revisión de los datos y de la privacidad**: tipo de cada columna, unidad, si se puede sumar, dependencias y marcadores de ausencia | ✅ Implementado | Las sugerencias son heurísticas: hay que confirmarlas |
-| **Conversación con OpenAI** (asistente de requisitos) | ✅ Implementado | Cada mensaje requiere autorización explícita. Cuotas y presupuesto limitados |
-| **Propuesta y aprobación del plan** | ✅ Implementado | Catálogo cerrado de 14 operaciones. Las operaciones incompatibles con los datos se descartan antes de aprobar |
-| **Cálculos reales con Pandas** (conteos, sumas, promedios, medianas, mínimos, máximos, frecuencias, agrupaciones, comparaciones, series temporales, histogramas, correlaciones y curva ROC) | ✅ Implementado | Una fuente por plan. Tope de tiempo y de celdas por ejecución |
+| **Conversación con OpenAI** (asistente de requisitos), que empieza con la estructura real de los datos | ✅ Implementado | Cada mensaje requiere autorización explícita, con resumen de qué se envía y qué no. Cuotas y presupuesto limitados |
+| **Propuesta y aprobación del plan**, con viabilidad (viable, parcial, no viable), decisiones que ayuda a evaluar y datos faltantes | ✅ Implementado | Catálogo cerrado de 18 operaciones. Las operaciones incompatibles con los datos se descartan antes de aprobar |
+| **Análisis descriptivo sin IA** (plan por reglas, sin enviar nada a OpenAI) | ✅ Implementado | No interpreta el objetivo: es un punto de partida |
+| **Cálculos reales con Pandas** (conteos, sumas, promedios, medianas, mínimos, máximos, desvío estándar, frecuencias, agrupaciones y cruces, comparaciones con participación, ranking y Pareto, series temporales, variaciones entre períodos, cocientes como costo por alumno, histogramas, correlaciones y curva ROC) | ✅ Implementado | Una fuente por plan. Tope de tiempo y de celdas por ejecución. Sin modelos predictivos |
 | **Dashboard con Recharts** (barras, líneas, torta, histograma, dispersión y ROC, con vista de tabla; eje, series y filtros elegibles en resultados con varias dimensiones) | ✅ Implementado | Hasta 6 series por gráfico. Los resultados viven en la pestaña del navegador |
 | **Informe descriptivo** calculado sin IA | ✅ Implementado | Describe los resultados; no explica causas |
-| **Interpretación opcional con OpenAI**, con autorización y **validación de afirmaciones** | ✅ Implementado | Cada cifra se recalcula sobre los resultados de Pandas. Las afirmaciones sin cifras se marcan «no verificadas» |
-| **Descarga de PDF** con jsPDF (en el navegador) | ✅ Implementado | Fuentes estándar (Latin-1). Los gráficos usan la vista predeterminada |
+| **Interpretación opcional con OpenAI orientada a decisiones** (hallazgos, implicaciones, recomendaciones condicionadas, hipótesis, información faltante y conclusiones no permitidas), con **verificación de afirmaciones** | ✅ Implementado | Cada cifra y cada comparación se recalculan sobre los resultados de Pandas. Lo que no tiene cifras se muestra como interpretación, nunca como hecho |
+| **Informe ejecutivo en PDF** con jsPDF (en el navegador): portada con identidad (logo, organización, autor, fecha), resumen ejecutivo, gráficos con sus hallazgos, origen de cada contenido y anexos | ✅ Implementado | Fuentes estándar (Latin-1). Los gráficos usan la vista predeterminada |
 | Exportación a Excel, Word o Canva | ❌ No implementado | Solo existe como formulario ilustrativo en el modo DEMO |
 | Persistencia de proyectos, archivos o resultados | ❌ No implementado (por diseño) | Ver [Limitaciones](#limitaciones-conocidas) |
 
 ## Recorrido de un análisis
 
-1. **Cargar:** se suben hasta 3 archivos CSV o XLSX (o un dataset sintético de prueba). El backend los perfila con Pandas: filas, columnas, vacíos, duplicados, tipo de cada columna y advertencias.
-2. **Revisar:** la persona confirma o corrige la interpretación de cada columna y elige qué columnas puede conocer la IA y con qué nombre. Ve el contenido exacto que se compartiría.
-3. **Conversar:** el asistente (OpenAI) entiende el objetivo, pregunta lo que falta y propone planes. Cada envío se autoriza; también se puede autorizar una conversación por tiempo y cantidad de mensajes acotados.
-4. **Confirmar:** la persona aprueba los planes y ejecuta el análisis. Los archivos se vuelven a enviar al backend, se calculan con Pandas y se descartan.
-5. **Resultados:** dashboard, tablas exactas, informe descriptivo, interpretación opcional con IA, vista previa y descarga en PDF.
+El recorrido visible tiene cuatro pasos (internamente siguen existiendo las pantallas de carga y de revisión):
+
+1. **Cargar y explorar:** se suben hasta 3 archivos CSV o XLSX (o un dataset sintético de prueba). El backend los perfila con Pandas y muestra el **diagnóstico de calidad** con su impacto y las estadísticas descriptivas. Después, la persona confirma la interpretación de cada columna y qué puede conocer la IA. El objetivo es **opcional** en este paso.
+2. **Conversar:** el asistente abre la conversación con la estructura real de los datos («Revisé tu archivo: contiene fechas, medidas y categorías… ¿qué decisión querés tomar?»). El primer mensaje pasa a ser el objetivo: no se pide dos veces. Cada envío se autoriza. Sin IA, «Análisis descriptivo sin IA» propone un plan por reglas.
+3. **Confirmar propuesta:** objetivo interpretado, planes, viabilidad, decisiones que ayuda a evaluar, datos faltantes y limitaciones. La persona aprueba y ejecuta: los archivos se vuelven a enviar al backend, se calculan con Pandas y se descartan.
+4. **Resultados (workspace):** dashboard, tablas exactas, informe descriptivo, interpretación opcional con IA, editor de identidad del PDF, vista previa y descarga.
 
 ## Privacidad: qué datos van a cada lugar
 
@@ -55,7 +58,7 @@ Proyecto final de **Prácticas Profesionalizantes — Tecnicatura en Ciencia de 
 | **Base SQLite** (disco persistente de Render) | Huellas SHA-256 de invitaciones y sesiones (nunca los códigos), vencimientos y revocaciones. El consumo de la IA: fecha, visitante, modelo, tokens y costo. **No guarda datasets, objetivos, mensajes ni resultados** |
 | **OpenAI** (solo con autorización explícita de cada envío) | En la **conversación**: el objetivo, los mensajes y los **metadatos** de las columnas autorizadas (nombre, formato, tipo, rango aproximado de valores distintos, unidad, si se puede sumar). En la **interpretación**: el objetivo, la cantidad de filas y columnas y los **resultados agregados** de Pandas (totales por grupo o período, intervalos, correlaciones, AUC), que **incluyen nombres de categorías** de los datos. **Nunca:** archivos, filas, valores individuales, nombres de archivo ni puntos de dispersión o ROC |
 
-Las solicitudes a OpenAI se envían con `store=False`. El tratamiento de esos datos por OpenAI se rige por sus propios términos. Detalle en [docs/SEGURIDAD.md](docs/SEGURIDAD.md).
+Las solicitudes a OpenAI se envían con `store=False`. El tratamiento de esos datos por OpenAI se rige por sus propios términos. Detalle en [docs/SEGURIDAD.md](docs/SEGURIDAD.md) y, sobre versión pública, instalación local, consentimiento y proveedor de IA, en [docs/PRIVACIDAD.md](docs/PRIVACIDAD.md).
 
 ## Arquitectura
 

@@ -15,6 +15,8 @@ export interface AIStatus {
   ai_enabled: boolean
   /** Solo indica si hay clave configurada en el backend; nunca su valor. */
   provider_configured: boolean
+  /** Proveedor configurado en el backend: «openai» (externo) u «ollama» (local, todavía no integrado). */
+  provider?: 'openai' | 'ollama' | string
   external_calls_implemented: boolean
   model?: string
   budget_usd?: number
@@ -36,6 +38,7 @@ export function isRealAIAvailable(status: AIStatus | null): boolean {
 export type AIOperationName =
   | 'count' | 'distinct_count' | 'sum' | 'mean' | 'median' | 'min' | 'max'
   | 'frequency' | 'group_by' | 'compare_groups' | 'time_series' | 'histogram' | 'scatter' | 'roc_curve'
+  | 'std' | 'pareto' | 'variation' | 'ratio'
 
 export interface AIPlan {
   source_alias: 'A' | 'B' | 'C'
@@ -50,6 +53,12 @@ export interface AIPlan {
 export interface AIReply {
   message: string
   interpreted_objective: string
+  /** Viabilidad del objetivo con estas columnas y este catálogo (Fase 5; opcional en respuestas previas). */
+  feasibility?: 'viable' | 'partial' | 'not_viable' | 'needs_information'
+  /** Datos que harían falta para lo que no se puede responder. */
+  missing_data?: string[]
+  /** Decisiones que los planes ayudan a evaluar, y hasta dónde. */
+  decisions?: string[]
   source_relationship: 'single' | 'independent' | 'compare' | 'concatenate' | 'relate' | 'unclear'
   questions: { question: string; reason: string; source_alias: string | null; column: string | null }[]
   plans: AIPlan[]
@@ -126,7 +135,14 @@ export interface AIInterpretation {
   executive_summary: InterpretationItem[]
   findings: InterpretationItem[]
   trends: InterpretationItem[]
+  /** Qué cambia para el objetivo (Fase 5; opcional en respuestas previas). */
+  implications?: InterpretationItem[]
   recommendations: InterpretationItem[]
+  /** Explicaciones posibles a comprobar: nunca se presentan como hechos. */
+  hypotheses?: InterpretationItem[]
+  information_needed?: string[]
+  /** Conclusiones que estos datos no permiten. */
+  not_supported?: string[]
   limitations: string[]
   data_quality: string[]
 }
@@ -161,8 +177,11 @@ export interface AIGatewayClient {
   revokeConversation?(conversationId: string): Promise<void>
   /** Registra la aprobación de un plan validado. No ejecuta cálculos. */
   approvePlan?(planId: string): Promise<{ plan_id: string; status: string; executed: boolean }>
+  /** Fase 5: plan descriptivo armado por reglas en el backend, SIN IA (no envía nada a OpenAI ni consume presupuesto). */
+  descriptivePlan?(sources: AIContextPayload['sources']): Promise<AIAuthorizeResult>
   /** Fase 4C: prepara la interpretación de una ejecución propia (no envía nada). */
-  prepareInterpretation?(executionId: string): Promise<PreparedInterpretation>
+  /** `plans`: planes a interpretar (1 = P1); sin ellos, todos. Permite interpretar por partes. */
+  prepareInterpretation?(executionId: string, plans?: number[]): Promise<PreparedInterpretation>
   /** Envío autorizado (uso único) del contenido exacto que se mostró. */
   authorizeInterpretation?(requestId: string, payloadSha256: string): Promise<AIInterpretationResult>
   cancelInterpretation?(requestId: string): Promise<void>
@@ -185,8 +204,12 @@ export function createAIGatewayClient(baseUrl: string): AIGatewayClient {
       http.empty(`/api/ai/conversations/${id(conversationId)}`, { method: 'DELETE' }),
     cancel: (requestId) => http.empty(`/api/ai/requests/${id(requestId)}`, { method: 'DELETE' }),
     approvePlan: (planId) => http.json(`/api/ai/plans/${id(planId)}/approve`, { method: 'POST', body: {} }),
-    prepareInterpretation: (executionId) =>
-      http.json<PreparedInterpretation>('/api/ai/interpretations', { method: 'POST', body: { execution_id: executionId } }),
+    descriptivePlan: (sources) => http.json<AIAuthorizeResult>('/api/ai/plans/descriptive', { method: 'POST', body: { sources } }),
+    prepareInterpretation: (executionId, plans) =>
+      http.json<PreparedInterpretation>('/api/ai/interpretations', {
+        method: 'POST',
+        body: plans?.length ? { execution_id: executionId, plans } : { execution_id: executionId },
+      }),
     authorizeInterpretation: (requestId, payloadSha256) =>
       http.json<AIInterpretationResult>(`/api/ai/interpretations/${id(requestId)}/authorize`, {
         method: 'POST',

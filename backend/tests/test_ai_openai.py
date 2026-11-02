@@ -59,7 +59,7 @@ def mandatory_case_reply(payload: dict) -> AIAssistantReply:
     """Lo que se espera de la IA real en el caso obligatorio (respuesta simulada)."""
     return AIAssistantReply.model_validate({
         "message": "Voy a analizar cada fuente por separado, sin unirlas. Antes, necesito aclarar los NA.",
-        "interpreted_objective": "Analizar A y B de forma independiente.",
+        "feasibility": "viable", "missing_data": [], "decisions": [], "interpreted_objective": "Analizar A y B de forma independiente.",
         "source_relationship": "independent",
         "questions": [
             {"question": "¿Los NA de ORIGEN son datos faltantes o un país válido (Namibia)?",
@@ -424,7 +424,7 @@ def test_instructions_list_exactly_the_engine_catalog_and_the_rules():
 
     for name in SUPPORTED_OPERATIONS + SUPPORTED_CHARTS:
         assert f"- {name}:" in INSTRUCTIONS
-    for absent in ("std", "correlation", "top_n", "box"):
+    for absent in ("kurtosis", "correlation", "top_n", "box"):
         assert f"- {absent}:" not in INSTRUCTIONS
     # Responder la pregunta concreta, no repetir planes y explicar lo imposible en lugar de aproximarlo.
     assert "Partí de la decisión que la persona quiere tomar y de su pregunta concreta" in INSTRUCTIONS
@@ -451,3 +451,12 @@ def test_exact_counts_are_not_accepted_as_distinct_values(value):
     col = {"name": "x", "format": "text", "distinct_values": value}
     client, _ = make_client()
     assert prepare(client, context(source("A", col))).status_code == 422
+
+def test_las_instrucciones_declaran_los_limites_que_valida_el_backend():
+    """Prueba real (01/11/2026): la IA propuso un plan con más operaciones de las permitidas y se descartó.
+    Las instrucciones tienen que declarar los mismos límites que exige la validación."""
+    from app.schemas.ai_plan import MAX_CHARTS_PER_PLAN, MAX_OPERATIONS_PER_PLAN, MAX_PLANS
+    from app.services.openai_provider import INSTRUCTIONS
+
+    assert f"como máximo {MAX_PLANS} planes" in INSTRUCTIONS
+    assert f"{MAX_OPERATIONS_PER_PLAN} operaciones y {MAX_CHARTS_PER_PLAN} gráficos por plan" in " ".join(INSTRUCTIONS.split())

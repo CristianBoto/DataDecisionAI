@@ -105,7 +105,20 @@ La respuesta usa **snake_case** (tal como la genera `backend/app/services/datase
 
 Campos de calidad (Fase 2): `total_cells`, `empty_cells`, `suspected_missing_cells`, `completeness` (celdas no vacías ÷ total) y, por columna, `suspected_missing`, `suspected_missing_values`, `value_kind`, `semantic_type` (`quantitative | categorical | identifier | temporal | text | unknown`), `semantic_confidence` (`high | medium | low`) y `semantic_reason`. Son **aditivos**: el adaptador tolera su ausencia.
 
+Campos del diagnóstico de calidad (Fase 5), también aditivos:
+- `logical_duplicate_rows`: filas iguales a otra salvo mayúsculas, tildes o espacios (no idénticas).
+- `quality_issues[]`: `{ severity: "alta" | "media" | "baja", column, kind, message, impact }`. `kind`: `missing`, `constant`, `mixed_numeric`, `mixed_dates`, `conversion`, `outliers`, `spaces`, `inconsistent_categories`, `invalid_dates`, `ambiguous_dates`, `duplicates`, `logical_duplicates`. Nada se corrige automáticamente.
+- Por columna: `stats` (`count`, `mean`, `std`, `min`, `q1`, `median`, `q3`, `max`, `zeros`, `negatives`, `conversion_errors`, `outliers`, `outlier_bounds`), `category_variants` y `dates` (`invalid`, `granularity`, `mixed`, `first`, `last`, `ambiguous`).
+
 Errores: `413` más de 25 MB · `422` formato no admitido, archivo vacío o ilegible (con `detail` en español).
+
+### Plan descriptivo sin IA (Fase 5)
+
+`POST /api/ai/plans/descriptive` — cuerpo `{ "sources": [SourceContext] }` (los mismos metadatos revisados que viajarían a la IA, nunca valores). Arma con reglas un plan descriptivo por fuente, lo valida como los de la IA y responde con la misma forma que una respuesta de la IA (`reply`, `plan_ids`, `usage` con costo 0). **No llama a ningún proveedor.** `422` si no hay ningún análisis posible. Los planes se aprueban con `POST /api/ai/plans/{plan_id}/approve`.
+
+La respuesta de la IA (`AIAssistantReply`) incluye además `feasibility` (`viable | partial | not_viable | needs_information`), `missing_data[]` y `decisions[]`; el contexto admite `request_proposal: true`. La interpretación (`AIInterpretation`) suma `implications`, `hypotheses`, `information_needed` y `not_supported`.
+
+**Interpretación por partes (Fase 5.1).** `POST /api/ai/interpretations` acepta `{"execution_id": "…", "plans": [0, 2]}`; `plans` es opcional (máximo 20 índices) y un índice inexistente responde 422. El `payload` devuelto es el contexto compacto `version: 2`: `objective`, `sources`, `coverage` (`operations`, `full`, `summarized`, `facts_only`, `plans_excluded`, `note`), `plans[]` (con `ref`, `title`, `source_alias` y `operations[]`: `ref`, `operation`, `detail` = `full | summary | facts`, `dimensions`, `measures`, `rows` como arreglos, `rows_total`, `repeated`, `same_as`, `omitted`, `facts`, `stats`) y `warnings[]` (`text`, `refs`). Si ni el resumen mínimo entra en el límite de la IA, responde 413 y sugiere elegir menos planes.
 
 Lo usa el proveedor DEMO cuando `VITE_BACKEND_PROFILING=true`.
 

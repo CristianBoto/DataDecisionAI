@@ -69,6 +69,33 @@ export interface ColumnProfile {
   splitReason?: string | null
   /** Valores numéricos que podrían ser marcadores de ausencia (por ejemplo, -99). */
   missingValueSuggestions?: string[]
+  /** Estadísticas descriptivas calculadas con Pandas (columnas cuantitativas o mayormente numéricas). */
+  stats?: NumericStats | null
+}
+
+export interface NumericStats {
+  count: number
+  mean?: number | null
+  std?: number | null
+  min?: number | null
+  q1?: number | null
+  median?: number | null
+  q3?: number | null
+  max?: number | null
+  zeros?: number
+  negatives?: number
+  conversionErrors: number
+  /** Valores fuera de [Q1 − 1,5·IQR, Q3 + 1,5·IQR]. */
+  outliers?: number
+}
+
+/** Problema de calidad detectado con Pandas, con su impacto en el análisis. Nada se corrige automáticamente. */
+export interface QualityFinding {
+  severity: 'alta' | 'media' | 'baja'
+  column: string | null
+  kind: string
+  message: string
+  impact: string
 }
 
 export type IssueSeverity = 'info' | 'warning' | 'error'
@@ -100,6 +127,10 @@ export interface DatasetProfile {
   columnCount: number
   /** Filas idénticas; undefined o null cuando no se calculó (vista previa local). */
   duplicateRowCount?: number | null
+  /** Filas iguales a otra salvo mayúsculas, tildes o espacios (no idénticas). */
+  logicalDuplicateRowCount?: number | null
+  /** Diagnóstico de calidad con su impacto (perfil del backend). */
+  qualityFindings?: QualityFinding[]
   /** Celdas no vacías / total de celdas, informado por el backend sobre el archivo completo. */
   completeness?: number | null
   /** Total de celdas con marcadores sospechosos de ausencia (no incluidas en los faltantes). */

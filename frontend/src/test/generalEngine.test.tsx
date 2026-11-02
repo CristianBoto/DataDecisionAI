@@ -230,7 +230,7 @@ describe('revisión de las medidas', () => {
 
 describe('datos sintéticos de prueba', () => {
   it('son CSV determinísticos, identificados como datos de prueba, de temáticas distintas', () => {
-    expect(SAMPLE_DATASETS.map((d) => d.key)).toEqual(['ventas', 'indicadores', 'clasificacion'])
+    expect(SAMPLE_DATASETS.map((d) => d.key)).toEqual(['ventas', 'indicadores', 'clasificacion', 'educacion', 'errores'])
     for (const sample of SAMPLE_DATASETS) {
       expect(sample.fileName).toMatch(/^datos-sinteticos-de-prueba-/)
       expect(sample.csv()).toBe(sample.csv())

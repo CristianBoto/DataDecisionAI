@@ -92,9 +92,13 @@ const OPERATION_LABELS: Record<string, string> = {
   median: 'Mediana',
   min: 'Mínimo',
   max: 'Máximo',
+  std: 'Desvío estándar',
   group_by: 'Agrupación',
   compare_groups: 'Comparación entre grupos',
+  pareto: 'Ranking (Pareto)',
   time_series: 'Serie temporal',
+  variation: 'Variación entre períodos',
+  ratio: 'Cociente',
   frequency: 'Frecuencias',
   distinct_count: 'Valores distintos',
   histogram: 'Histograma',
@@ -114,7 +118,14 @@ const AGGREGATE_LABELS: Record<string, string> = {
   max: 'Máximo de',
   distinct_count: 'Valores distintos de',
   share_pct: 'Participación de',
+  std: 'Desvío estándar de',
+  cumulative_pct: 'Participación acumulada de',
+  change: 'Variación de',
+  change_pct: 'Variación % de',
 }
+
+/** Medidas en porcentaje calculadas por el motor (se muestran con «%» y no se grafican junto a los valores). */
+export const PERCENT_AGGREGATES = ['share_pct', 'cumulative_pct', 'change_pct']
 
 const CHART_NAMES: Record<string, string> = {
   bar: 'barras', line: 'líneas', pie: 'torta', histogram: 'histograma', scatter: 'dispersión', box: 'caja', table: 'tabla', kpi: 'indicador',
@@ -132,7 +143,7 @@ export function operationTitle(op: OperationResult): string {
 export function measureLabel(m: ResultMeasure, op?: Pick<OperationResult, 'signed_measures'>): string {
   if (m.aggregate === 'sum' && op?.signed_measures?.includes(m.column)) return `Suma neta de ${m.column}`
   if (m.aggregate === 'count') return 'Registros'
-  if (m.aggregate === 'value' || m.aggregate === 'fpr' || m.aggregate === 'tpr') return m.column
+  if (m.aggregate === 'value' || m.aggregate === 'fpr' || m.aggregate === 'tpr' || m.aggregate === 'ratio') return m.column
   return `${AGGREGATE_LABELS[m.aggregate] ?? m.aggregate} ${m.column}`
 }
 
@@ -266,7 +277,10 @@ export function selectionCaption(op: OperationResult, selection: ViewSelection):
 function measuresByUnit(op: OperationResult): { unit: string | null; indexes: number[] }[] {
   const groups: { unit: string | null; indexes: number[] }[] = []
   op.measures.forEach((m, i) => {
-    if (m.aggregate === 'share_pct') return
+    if (PERCENT_AGGREGATES.includes(m.aggregate)) return
+    // Variación: se grafica el cambio de cada período. Cociente: solo el cociente (numerador y denominador están en la tabla).
+    if (op.operation === 'variation' && m.aggregate !== 'change') return
+    if (op.operation === 'ratio' && m.aggregate !== 'ratio') return
     const group = groups.find((g) => g.unit === m.unit)
     if (group) group.indexes.push(i)
     else groups.push({ unit: m.unit, indexes: [i] })
@@ -286,6 +300,8 @@ function autoType(op: OperationResult): ChartType | null {
   if (FIXED_CHART[op.operation]) return FIXED_CHART[op.operation]
   if (op.dimensions.length === 0) return null
   if (freeDimensions(op).length === 0) return null // solo dimensiones que definen la medida: indicadores por categoría
+  // Variaciones entre períodos y rankings se leen mejor como barras (positivas y negativas, u ordenadas).
+  if (op.operation === 'variation' || op.operation === 'pareto') return 'bar'
   const x = isExplorable(op) ? defaultSelection(op).x : op.dimensions[0]
   return x === temporalDimension(op) ? 'line' : 'bar'
 }
@@ -315,8 +331,8 @@ function incompatibility(op: OperationResult, type: string): string | null {
       const values = op.rows.map((r) => r.values[0])
       if (values.some((v) => v === null || v < 0)) return 'una torta necesita valores no negativos en todos los grupos'
       if (values.reduce<number>((a, v) => a + (v ?? 0), 0) <= 0) return 'el total es cero: no hay proporciones válidas'
-      if (op.measures[0]?.aggregate === 'mean' || op.measures[0]?.aggregate === 'median') {
-        return 'los promedios o medianas no forman partes de un total'
+      if (!['sum', 'count', 'value'].includes(op.measures[0]?.aggregate ?? '') || op.operation === 'variation' || op.operation === 'ratio') {
+        return 'solo las sumas y los conteos forman partes de un total (no los promedios, desvíos, cocientes ni variaciones)'
       }
       return null
     }
@@ -450,7 +466,7 @@ function splitOnlyKpis(op: OperationResult): DashboardKpi[] {
   return op.rows.flatMap((row, r) =>
     op.measures.flatMap((m, i) => {
       const value = row.values[i]
-      if (value === null || m.aggregate === 'share_pct') return []
+      if (value === null || PERCENT_AGGREGATES.includes(m.aggregate)) return []
       return [{ id: `${op.operation}-${r}-${i}`, label: `${measureLabel(m, op)} · ${row.keys.join(' · ')}`, value, unit: m.unit, description: operationTitle(op) }]
     }),
   )
@@ -539,6 +555,8 @@ export function planDashboard(plan: PlanResult): PlanDashboard {
     }
     addView(dashboard, op, type)
   }
+  // Trazabilidad: cada gráfico indica su fuente y que lo calculó Pandas.
+  for (const chart of dashboard.charts) chart.description = [chart.description, `Fuente ${plan.source_alias} · calculado con Pandas`].filter(Boolean).join(' · ')
   return dashboard
 }
 

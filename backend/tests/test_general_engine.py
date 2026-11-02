@@ -281,7 +281,7 @@ def test_ai_plans_are_pruned_with_the_same_rules():
         {"name": "tasa", "format": "numeric", "semantic_type": "quantitative", "additivity": "non_additive", "unit": "%"},
     ]}]})
     reply = AIAssistantReply.model_validate({
-        "message": "m", "interpreted_objective": "o", "source_relationship": "single", "questions": [], "warnings": [],
+        "message": "m", "feasibility": "viable", "missing_data": [], "decisions": [], "interpreted_objective": "o", "source_relationship": "single", "questions": [], "warnings": [],
         "plans": [{"source_alias": "A", "title": "Producción", "rationale": "r", "columns_needed": ["periodo", "dato"],
                    "charts": [], "limitations": [], "operations": [
                        op("time_series", ["periodo", "dato"], ["serie"]) | {"description": "evolución"},
@@ -293,6 +293,12 @@ def test_ai_plans_are_pruned_with_the_same_rules():
     assert [o.operation for o in pruned.plans[0].operations] == ["time_series"]
     assert len(notes) == 2 and any("mezclaría" in n for n in notes) and any("no es aditiva" in n for n in notes)
     assert all(n in pruned.plans[0].limitations for n in notes)  # la persona ve qué se descartó y por qué
+    # La viabilidad declarada no puede contradecir lo validado: con operaciones descartadas, es parcial…
+    assert pruned.feasibility == "partial"
+    # …y sin ningún plan válido, falta información (nunca «viable»).
+    only_invalid = reply.model_copy(update={"plans": [reply.plans[0].model_copy(update={"operations": reply.plans[0].operations[2:]})]})
+    empty, _ = prune_reply(only_invalid, context)
+    assert empty.plans == [] and empty.feasibility == "needs_information"
 
 
 def test_split_columns_must_be_shared_columns():

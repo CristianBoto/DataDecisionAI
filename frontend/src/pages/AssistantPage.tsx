@@ -21,6 +21,7 @@ import { useAIGateway, useService } from '@/hooks/useService'
 import { buildAIContext, MAX_HISTORY_TURNS, MAX_OBJECTIVE_CHARS, type AIHistoryTurn } from '@/lib/aiContext'
 import { collectAIPlans } from '@/lib/aiPlans'
 import { aiConversationStage, routeMessage } from '@/lib/conversationFlow'
+import { dataGreeting } from '@/lib/dataGreeting'
 import { buildDatasetCatalog } from '@/lib/datasetCatalog'
 import { ApiError, getErrorMessage } from '@/services'
 import { isRealAIAvailable, type AIAuthorizeResult, type AIStatus } from '@/services/aiGateway'
@@ -96,11 +97,14 @@ export function AssistantPage() {
   const [accepted, setAccepted] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [confirmError, setConfirmError] = useState<string | null>(null)
+  const [describing, setDescribing] = useState(false)
+  const [describeError, setDescribeError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
   const composerRef = useRef<HTMLTextAreaElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
   const catalog = useMemo(() => buildDatasetCatalog(sources), [sources])
   const stage = useMemo(() => aiConversationStage(aiChat, approvedPlanIds), [aiChat, approvedPlanIds])
+  const greeting = useMemo(() => (review ? dataGreeting(catalog, review.sources, sources) : ''), [catalog, review, sources])
 
   // Mientras hay un permiso, se revisa su vencimiento para mostrar el estado correcto.
   useEffect(() => {
@@ -194,6 +198,8 @@ export function AssistantPage() {
   const objective = review?.objective.trim() ?? ''
   const started = realMode ? aiChat.length > 0 : messages.some((m) => m.role === 'user')
   const showStart = Boolean(objective) && !started && !outgoing
+  // Sin objetivo escrito en la revisión: el asistente abre la conversación a partir de los datos (sin IA).
+  const showGreeting = realMode && !objective && !started && !outgoing
 
   const grantActive = Boolean(grant && grant.expiresAt > now && aiGateway?.sendInConversation)
   const grantExpired = Boolean(grant && !grantActive)
@@ -224,6 +230,8 @@ export function AssistantPage() {
   function handleComposerSend(text: string) {
     if (!realMode) return void send(text) // solo en la demo pública
     if (!aiReady) return
+    // El primer mensaje define el objetivo si la revisión lo dejó vacío: no se pide dos veces.
+    if (!objective) session.setObjective(text)
     const route = routeMessage(stage, text)
     // «Sí» a una propuesta completa: no hace falta volver a consultar a la IA (ni gastar presupuesto).
     // Se pasa a la confirmación formal, que es la que cambia el estado.
@@ -325,6 +333,25 @@ export function AssistantPage() {
     setJustApproved(true)
   }
 
+  /** Plan descriptivo por reglas en el backend (Fase 5): solo metadatos revisados, sin IA ni costo. */
+  async function requestDescriptive() {
+    if (!aiGateway?.descriptivePlan || !review) return
+    setDescribing(true)
+    setDescribeError(null)
+    try {
+      const { sources: shared } = buildAIContext(catalog, review.objective || 'Análisis descriptivo', review.sources)
+      const result = await aiGateway.descriptivePlan(shared)
+      session.appendAIChat([
+        { id: turnId(), role: 'user', content: 'Análisis descriptivo sin IA' },
+        { id: turnId(), role: 'assistant', content: result.reply.message, result },
+      ])
+    } catch (err) {
+      setDescribeError(getErrorMessage(err))
+    } finally {
+      setDescribing(false)
+    }
+  }
+
   function keepTalking() {
     setJustApproved(false)
     composerRef.current?.focus()
@@ -339,7 +366,7 @@ export function AssistantPage() {
       <PageHeader
         eyebrow={
           <>
-            <Badge tone="blue">Paso 3 de 5</Badge>
+            <Badge tone="blue">Paso 2 de 4</Badge>
             {realMode ? (
               aiReady ? (
                 <Badge tone="green" icon={<ShieldCheck className="size-3" aria-hidden />}>
@@ -431,6 +458,17 @@ export function AssistantPage() {
             </div>
 
             <div className="scrollbar-thin flex-1 space-y-5 overflow-y-auto bg-slate-50/60 px-4 py-5 sm:px-6" aria-live="polite">
+              {showGreeting && (
+                <section aria-label="Saludo del asistente" className="flex gap-3">
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-navy-900 to-blue-600 text-white" aria-hidden>
+                    <Bot className="size-4" />
+                  </span>
+                  <div className="max-w-[90%] rounded-2xl rounded-tl-md border border-slate-200 bg-white px-4 py-3 text-sm leading-relaxed text-slate-800 shadow-sm">
+                    <p>{greeting}</p>
+                    <p className="mt-1.5 text-[11px] text-slate-400">Mensaje armado en tu navegador con la estructura de los datos: todavía no se envió nada a la IA.</p>
+                  </div>
+                </section>
+              )}
               {showStart && (
                 <section
                   aria-label="Objetivo confirmado"
@@ -669,6 +707,19 @@ export function AssistantPage() {
         </div>
 
         <aside className="space-y-4">
+          {realMode && aiGateway?.descriptivePlan && review && (
+            <Card className="space-y-2 p-5" role="region" aria-label="Análisis descriptivo sin IA">
+              <p className="text-sm font-semibold text-slate-900">Sin enviar nada a la IA</p>
+              <p className="text-xs leading-relaxed text-slate-600">
+                Un plan descriptivo armado con reglas a partir de tus columnas: registros, totales, promedios, dispersión,
+                evolución y distribución. No usa OpenAI ni consume presupuesto; no interpreta tu objetivo.
+              </p>
+              <Button size="sm" variant="outline" loading={describing} onClick={() => void requestDescriptive()}>
+                Análisis descriptivo sin IA
+              </Button>
+              {describeError && <Alert tone="error">{describeError}</Alert>}
+            </Card>
+          )}
           <Card className="p-5">
             <p className="text-sm font-semibold text-slate-900">Estado de la propuesta</p>
             {realMode ? (

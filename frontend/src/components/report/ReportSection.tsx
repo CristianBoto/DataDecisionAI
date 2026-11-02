@@ -10,11 +10,11 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useAIGateway } from '@/hooks/useService'
-import { conversationClarifications } from '@/lib/aiPlans'
+import { approvedAIPlans, conversationClarifications } from '@/lib/aiPlans'
 import { buildDatasetCatalog } from '@/lib/datasetCatalog'
 import { planCoverage, sharedColumns } from '@/lib/planCoverage'
 import { defaultCustomization, presentation as toPresentation, type PdfCustomization } from '@/lib/pdfCustomization'
-import { buildReport, defaultReportTitle } from '@/lib/report'
+import { buildReport, defaultReportTitle, reportProposal } from '@/lib/report'
 import { downloadReportPdf } from '@/lib/reportPdf'
 import { getErrorMessage } from '@/services'
 import { isRealAIAvailable, type AIStatus, type PreparedInterpretation } from '@/services/aiGateway'
@@ -38,6 +38,8 @@ export function ReportSection({ run, fileNames }: { run: ExecutionResponse; file
   const [busy, setBusy] = useState<'prepare' | 'send' | 'pdf' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  // Planes que se interpretan (1 = P1); por defecto, todos.
+  const [selectedPlans, setSelectedPlans] = useState<number[]>(() => run.results.map((_, i) => i + 1))
   const [pdfNotice, setPdfNotice] = useState<string | null>(null)
   // Personalización del PDF: solo estado de esta pantalla (no se guarda ni se envía).
   const [customization, setCustomization] = useState<PdfCustomization>(defaultCustomization)
@@ -82,8 +84,9 @@ export function ReportSection({ run, fileNames }: { run: ExecutionResponse; file
         fileNames,
         interpretation,
         coverage,
+        proposal: reportProposal(approvedAIPlans(session.aiChat, session.approvedPlanIds)),
       }),
-    [run, session.review?.objective, session.projectName, fileNames, interpretation, coverage],
+    [run, session.review?.objective, session.projectName, fileNames, interpretation, coverage, session.aiChat, session.approvedPlanIds],
   )
   const defaultTitle = defaultReportTitle(report)
   const pdfPresentation = useMemo(() => toPresentation(customization, defaultTitle), [customization, defaultTitle])
@@ -93,7 +96,9 @@ export function ReportSection({ run, fileNames }: { run: ExecutionResponse; file
     setBusy('prepare')
     setError(null)
     try {
-      setPrepared(await gateway.prepareInterpretation(run.execution_id))
+      // Todos los planes, o solo los elegidos (interpretar por partes). Preparar no envía nada.
+      const plans = selectedPlans.length < run.results.length ? selectedPlans : undefined
+      setPrepared(await gateway.prepareInterpretation(run.execution_id, plans))
     } catch (err) {
       setError(getErrorMessage(err))
     } finally {
@@ -207,7 +212,30 @@ export function ReportSection({ run, fileNames }: { run: ExecutionResponse; file
               La IA puede redactar un resumen ejecutivo, hallazgos, tendencias, recomendaciones y limitaciones a partir de
               estos resultados. Antes de enviar, vas a ver el contenido exacto y su costo máximo estimado.
             </p>
-            <Button icon={<Sparkles className="size-4" />} loading={busy === 'prepare'} onClick={prepare}>
+            {run.results.length > 1 && (
+              <fieldset className="space-y-1 rounded-lg border border-slate-200 p-3">
+                <legend className="px-1 text-xs font-semibold text-slate-700">Planes a interpretar</legend>
+                {run.results.map((plan, i) => (
+                  <label key={plan.plan_id} className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-blue-600"
+                      checked={selectedPlans.includes(i + 1)}
+                      onChange={(e) =>
+                        setSelectedPlans((current) =>
+                          e.target.checked ? [...current, i + 1].sort((a, b) => a - b) : current.filter((n) => n !== i + 1),
+                        )
+                      }
+                    />
+                    P{i + 1} · {plan.title}
+                  </label>
+                ))}
+                <p className="text-xs text-slate-500">
+                  Si los resultados no entran en el límite de la IA, podés interpretarlos por partes, eligiendo menos planes.
+                </p>
+              </fieldset>
+            )}
+            <Button icon={<Sparkles className="size-4" />} loading={busy === 'prepare'} onClick={prepare} disabled={selectedPlans.length === 0}>
               Interpretar resultados con IA
             </Button>
           </div>

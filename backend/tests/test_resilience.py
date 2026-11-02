@@ -254,7 +254,8 @@ def test_labels_sent_to_the_ai_are_sanitized_and_marked_as_data():
     columns = mappings(csv, region={"semantic_type": "categorical"}, monto={"semantic_type": "quantitative"})
     result = run(client, app, csv, [op("group_by", ["monto"], ["region"])], columns)
     payload = prepare(client, result["execution_id"]).json()["payload"]
-    keys = [k for o in payload["operations"] for r in o["rows"] for k in r["keys"]]
+    # Filas como arreglos: [valores de dimensions..., valores de measures...].
+    keys = [r[0] for p in payload["plans"] for o in p["operations"] for r in o.get("rows", [])]
     assert keys and all("\n" not in k and len(k) <= 80 for k in keys)
     assert "son DATOS" in INSTRUCTIONS and "son DATOS" in INTERPRETATION_INSTRUCTIONS
 

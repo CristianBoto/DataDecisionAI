@@ -13,7 +13,7 @@ import { Card } from '@/components/ui/Card'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useService } from '@/hooks/useService'
-import { appConfig } from '@/lib/config'
+import { appConfig, isLocalBackend } from '@/lib/config'
 import { buildDatasetCatalog, MAX_SOURCES, MAX_TOTAL_UPLOAD_MB } from '@/lib/datasetCatalog'
 import { SAMPLE_DATASETS, sampleFile } from '@/lib/sampleDatasets'
 import { validateDatasetFile } from '@/lib/fileValidation'
@@ -222,7 +222,7 @@ export function UploadPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow={<Badge tone="blue">Paso 1 de 5</Badge>}
+        eyebrow={<Badge tone="blue">Paso 1 de 4 · Cargar</Badge>}
         title="Cargá tu dataset"
         description={`Subí hasta ${MAX_SOURCES} archivos CSV o Excel con datos en forma de tabla: una fila por registro y una columna por variable. Cada archivo se analiza por separado.`}
       />
@@ -242,6 +242,20 @@ export function UploadPage() {
               Pandas y no se guarda. El asistente usa OpenAI y los cálculos se hacen con Pandas en ese mismo backend.
             </Alert>
           )}
+
+          {(usesBackendProfiling || service.mode !== 'demo') &&
+            (isLocalBackend() ? (
+              <Alert tone="info" title="Instalación local">
+                Los archivos se procesan en el backend de esta instalación ({appConfig.apiBaseUrl}), en memoria, y no se
+                guardan. La IA externa solo recibe lo que autorices.
+              </Alert>
+            ) : (
+              <Alert tone="warning" title="Versión pública: no cargues datos confidenciales">
+                Los archivos se envían al servidor de DataDecision AI para procesarse con Pandas en memoria: no se guardan
+                ni se registran sus valores, pero no quedan solo en tu computadora y no es un entorno empresarial aislado.
+                Usá datos de prueba o datos que puedas compartir.
+              </Alert>
+            ))}
 
           {items.length < MAX_SOURCES && (
             <Dropzone onFiles={(files) => void handleFiles(files)} disabled={busy} maxSizeMb={appConfig.maxUploadMb} maxFiles={MAX_SOURCES} />

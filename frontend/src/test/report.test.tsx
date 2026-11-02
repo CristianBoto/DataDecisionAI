@@ -130,7 +130,7 @@ describe('Informe de análisis e interpretación', () => {
     const user = renderSection(ai)
     await user.click(await screen.findByRole('button', { name: 'Interpretar resultados con IA' }))
 
-    expect(ai.prepareInterpretation).toHaveBeenCalledWith('exec-ventas-1')
+    expect(ai.prepareInterpretation).toHaveBeenCalledWith('exec-ventas-1', undefined) // sin selección: todos los planes
     const panel = await screen.findByRole('region', { name: 'Autorizar interpretación con IA' })
     expect(within(panel).getByText(/USD 0\.0021/)).toBeInTheDocument()
     expect(within(panel).getByText(/Nunca se envían: los archivos, las filas originales/)).toBeInTheDocument()
@@ -150,11 +150,12 @@ describe('Informe de análisis e interpretación', () => {
     expect(within(preview).getByText('El canal Local concentra el 79,41 % del total.')).toBeInTheDocument()
     expect(within(preview).getByText('[P1.O3, P1.O2]')).toBeInTheDocument()
     // Las afirmaciones sin cifras se muestran aparte, marcadas como no verificadas.
-    const unverified = within(preview).getByText('No verificadas automáticamente (sin cifras)').parentElement!
-    expect(within(unverified).getByText(/Hallazgo: Alimentos es el rubro de mayor venta./)).toBeInTheDocument()
-    expect(within(preview).getByText('Hallazgos principales').parentElement).not.toHaveTextContent('Alimentos es el rubro de mayor venta')
-    expect(within(preview).getByText('3. Resumen ejecutivo (descriptivo, calculado sin IA)')).toBeInTheDocument()
-    expect(within(preview).getByText('8. Interpretación con IA')).toBeInTheDocument()
+    // Cada afirmación muestra su origen: las verificadas como tales y las sin cifras como interpretación, nunca como hechos.
+    const findings = within(preview).getByText('Hallazgos principales').parentElement!
+    expect(within(findings).getByText('El canal Local concentra el 79,41 % del total.').closest('li')).toHaveTextContent('verificado automáticamente')
+    expect(within(findings).getByText('Alimentos es el rubro de mayor venta.').closest('li')).toHaveTextContent('sin cifras, no verificable con los datos')
+    expect(within(preview).getByText('1. Resumen ejecutivo')).toBeInTheDocument()
+    expect(within(preview).getByText('5. Interpretación orientada a decisiones')).toBeInTheDocument()
   })
 
   it('cancelar no envía nada', async () => {
@@ -210,21 +211,29 @@ describe('PDF', () => {
     const text = doc.output()
     // jsPDF escapa los paréntesis del texto: se comparan sin ellos.
     const has = (s: string) => expect(text.replace(/\\([()])/g, '$1')).toContain(s)
-    has('1. Objetivo original del análisis')
-    has('2. Alcance real y estado de cobertura')
+    // Informe ejecutivo (Fase 5): secciones en orden y el pedido original completo en un anexo.
+    has('1. Resumen ejecutivo')
+    has('2. Objetivo interpretado y alcance')
+    has('3. Indicadores principales')
+    has('4. Gráficos y hallazgos')
+    has('5. Interpretación orientada a decisiones')
+    has('6. Recomendaciones y limitaciones')
+    has('7. Metodología, fuentes y detalles técnicos')
+    has('Anexo A. Pedido original')
     has('Quiero ver la evolución de las ventas por rubro')
-    has('Resumen ejecutivo (descriptivo, calculado sin IA)')
-    has('Se calcularon 4 de 5 operaciones con Pandas.')
-    has('Hallazgos calculados (resumen descriptivo con Pandas, sin IA)')
+    has('Anexo B. Tablas con valores exactos')
+    has('Anexo C. Auditoría de la verificación de la IA')
     has('Indicador')
     has('69.060 ARS')
     has('Se listan 25 de 30 filas')
     has('Vista predeterminada')
     has('No se pudo convertir este gráfico en imagen')
-    has('Hallazgos respaldados por los cálculos')
+    has('Hallazgos principales')
     has('El canal Local concentra el 79,41 % del total. [P1.O3]')
-    has('No verificadas automáticamente (sin cifras)')
-    has('Cuestiones pendientes, advertencias y limitaciones')
+    // El origen de cada contenido se distingue: Pandas, IA verificada e interpretación sin cifras.
+    has('Calculado por Pandas')
+    has('Interpretado por IA · verificado automáticamente')
+    has('sin cifras, no verificable con los datos')
     // La portada no lleva pie; la numeración empieza a verse en la página 2.
     has('Página 2 de')
     expect(text).not.toContain('Página 1 de')

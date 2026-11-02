@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     # Envío a la IA externa: deshabilitado por defecto. Aun habilitado, cada
     # envío requiere revisión y autorización explícita (Fase 3B.1).
     ai_enabled: bool = False
+    # Proveedor de IA (Fase 5). "openai": servicio externo (requiere OPENAI_API_KEY). "ollama": modelos
+    # locales en la infraestructura propia; preparado pero TODAVÍA NO integrado (la IA queda deshabilitada).
+    ai_provider: Literal["openai", "ollama"] = "openai"
 
     # Fase 3B.2: proveedor OpenAI y control del consumo (aplicados en el backend).
     openai_model: str = "gpt-6-luna"

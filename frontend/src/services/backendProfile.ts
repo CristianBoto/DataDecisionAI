@@ -1,4 +1,4 @@
-import type { Additivity, ColumnType, DataQualityIssue, DatasetProfile, SemanticConfidence, SemanticType } from '@/types/domain'
+import type { Additivity, ColumnType, DataQualityIssue, DatasetProfile, QualityFinding, SemanticConfidence, SemanticType } from '@/types/domain'
 import { inferColumnType } from '@/lib/csv'
 import { ApiError } from './errors'
 import { HttpClient } from './httpClient'
@@ -32,6 +32,20 @@ export interface BackendColumnProfile {
   value_sign?: 'positive' | 'negative' | 'mixed' | null
   split_reason?: string | null
   missing_value_suggestions?: string[]
+  stats?: {
+    count: number
+    mean?: number | null
+    std?: number | null
+    min?: number | null
+    q1?: number | null
+    median?: number | null
+    q3?: number | null
+    max?: number | null
+    zeros?: number
+    negatives?: number
+    conversion_errors: number
+    outliers?: number
+  } | null
 }
 
 export interface BackendProfileResponse {
@@ -42,6 +56,8 @@ export interface BackendProfileResponse {
   row_count: number
   column_count: number
   duplicate_rows: number
+  logical_duplicate_rows?: number
+  quality_issues?: QualityFinding[]
   total_cells?: number
   empty_cells?: number
   suspected_missing_cells?: number
@@ -83,6 +99,8 @@ export function adaptBackendProfile(response: BackendProfileResponse, datasetId:
     rowCountIsEstimate: false,
     columnCount: response.column_count,
     duplicateRowCount: response.duplicate_rows,
+    logicalDuplicateRowCount: response.logical_duplicate_rows ?? null,
+    qualityFindings: response.quality_issues ?? [],
     completeness: response.completeness,
     suspectedMissingCellCount: response.suspected_missing_cells,
     columns: response.columns.map((column) => ({
@@ -108,6 +126,22 @@ export function adaptBackendProfile(response: BackendProfileResponse, datasetId:
       valueSign: column.value_sign ?? null,
       splitReason: column.split_reason ?? null,
       missingValueSuggestions: column.missing_value_suggestions ?? [],
+      stats: column.stats
+        ? {
+            count: column.stats.count,
+            mean: column.stats.mean,
+            std: column.stats.std,
+            min: column.stats.min,
+            q1: column.stats.q1,
+            median: column.stats.median,
+            q3: column.stats.q3,
+            max: column.stats.max,
+            zeros: column.stats.zeros,
+            negatives: column.stats.negatives,
+            conversionErrors: column.stats.conversion_errors,
+            outliers: column.stats.outliers,
+          }
+        : null,
     })),
     previewRows: response.preview,
     issues: response.warnings.map(toIssue),

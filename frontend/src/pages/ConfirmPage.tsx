@@ -19,7 +19,7 @@ import { EmptyState, ErrorState, Spinner } from '@/components/ui/Feedback'
 import { FeasibilityBadge } from '@/components/ui/FeasibilityBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AnalysisExecution } from '@/components/analysis/AnalysisExecution'
-import { AIPlanDetails } from '@/components/chat/AIReplyCard'
+import { AIPlanDetails, FeasibilitySummary } from '@/components/chat/AIReplyCard'
 import { MissingCoverageNotice, NotObtainableNotice } from '@/components/analysis/CoverageNotice'
 import { useAnalysisSession } from '@/hooks/useAnalysisSession'
 import { useAsync } from '@/hooks/useAsync'
@@ -96,7 +96,7 @@ function AIPlanConfirmation() {
       <PageHeader
         eyebrow={
           <>
-            <Badge tone="blue">Paso 4 de 5</Badge>
+            <Badge tone="blue">Paso 3 de 4</Badge>
             <Badge tone="green" icon={<CheckCircle2 className="size-3" aria-hidden />}>
               {approved.length === 1 ? '1 plan aprobado' : `${approved.length} planes aprobados`}
             </Badge>
@@ -109,12 +109,16 @@ function AIPlanConfirmation() {
       <Card className="relative overflow-hidden border-blue-200 bg-gradient-to-br from-navy-950 to-navy-800 p-6 text-white">
         <div className="relative">
           <p className="flex items-center gap-2 text-xs font-semibold tracking-wide text-cyan-300 uppercase">
-            <Target className="size-4" aria-hidden /> Objetivo confirmado
+            <Target className="size-4" aria-hidden /> Objetivo interpretado
           </p>
-          <p className="mt-2 text-lg leading-relaxed font-semibold">{objective}</p>
-          <p className="mt-3 text-sm text-slate-300">La IA lo interpretó así: {approved[0].reply.interpreted_objective}</p>
+          <p className="mt-2 text-lg leading-relaxed font-semibold">{approved[0].reply.interpreted_objective}</p>
+          <details className="mt-3 text-sm text-slate-300">
+            <summary className="cursor-pointer">Tu pedido original</summary>
+            <p className="mt-1 whitespace-pre-wrap">{objective}</p>
+          </details>
         </div>
       </Card>
+      <FeasibilitySummary reply={approved[approved.length - 1].reply} />
 
       {approved.map((p) => (
         <Card key={p.planId} className="p-5" role="region" aria-label={`Plan aprobado: ${p.plan.title}`}>
@@ -282,7 +286,7 @@ export function ConfirmPage() {
       <PageHeader
         eyebrow={
           <>
-            <Badge tone="blue">Paso 4 de 5</Badge>
+            <Badge tone="blue">Paso 3 de 4</Badge>
             <FeasibilityBadge value={p.feasibility} />
             {p.isDemo && <DemoBadge label="Propuesta simulada" />}
           </>

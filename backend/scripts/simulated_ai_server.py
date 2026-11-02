@@ -46,6 +46,7 @@ class SimulatedProvider:
         measures = [n for n, c in cols.items() if c.semantic_type == "quantitative"]
         if not measures:
             reply = {"message": "No encuentro una medida cuantitativa: ¿cuál querés analizar? (respuesta simulada)",
+                     "feasibility": "needs_information", "missing_data": ["una columna cuantitativa para medir"], "decisions": [],
                      "interpreted_objective": context.objective, "source_relationship": "single",
                      "questions": [{"question": "¿Qué columna querés medir?", "reason": "No hay columnas cuantitativas.",
                                     "source_alias": source.alias, "column": None}], "plans": [], "warnings": []}
@@ -65,6 +66,8 @@ class SimulatedProvider:
         ]
         reply = {
             "message": "Propuesta SIMULADA para verificar el recorrido (no proviene de OpenAI).",
+            "feasibility": "partial", "missing_data": ["costos (sin ellos no se puede evaluar la rentabilidad)"],
+            "decisions": [f"Dónde concentrar el seguimiento de {measure} (simulado)"],
             "interpreted_objective": context.objective, "source_relationship": "single", "questions": [], "warnings": [],
             "plans": [{"source_alias": source.alias, "title": "Plan de verificación", "rationale": "Respuesta simulada.",
                        "columns_needed": [measure, *temporal[:1], *categories[:1]], "operations": operations,
@@ -116,6 +119,11 @@ class SimulatedProvider:
             "trends": [],
             "recommendations": [{"text": "Revisar los resultados de cada operación antes de decidir.",
                                  "evidence": [o.ref for o in ok[:1]], "claims": []}],
+            "implications": [{"text": "Conviene priorizar el seguimiento de las series con mayor magnitud (simulado).",
+                              "evidence": [o.ref for o in ok[:1]], "claims": []}],
+            "hypotheses": [{"text": "La diferencia entre grupos podría estar relacionada con la cantidad de operaciones; para comprobarlo haría falta contarlas (simulado).", "evidence": [o.ref for o in ok[:1]], "claims": []}],
+            "information_needed": ["Costos por categoría, para evaluar la rentabilidad (simulado)."],
+            "not_supported": ["Con estos datos no se puede concluir qué categoría es más rentable (simulado)."],
             "limitations": ["Respuesta generada por la IA simulada de pruebas."]
             + [f"No se pudo calcular {o.ref}: {o.error}" for o in failed],
             "data_quality": [w for o in context.operations for w in o.warnings][:3],

@@ -130,7 +130,7 @@ describe('pantallas para personas sin conocimientos técnicos', () => {
     expect(within(panel).getByText(/Sin resultados: Suma inválida/)).toBeInTheDocument()
     // Principales cifras: del resumen descriptivo ya calculado (local), no de la IA.
     expect(within(panel).getByText('Suma de monto_ars: 69.060 ARS.')).toBeInTheDocument()
-    expect(within(panel).getByText(/Tu objetivo, tal como lo escribiste: «Comparar las ventas por región»/)).toBeInTheDocument()
+    expect(within(panel).getByText(/El objetivo aprobado \(no todo tu pedido original\): «Comparar las ventas por región»/)).toBeInTheDocument()
     expect(within(panel).getByText(`Valores de «region» que se envían (15): ${CATEGORIES.join(', ')}`)).toBeInTheDocument()
     expect(within(panel).getByText(/no se anonimizan/)).toBeInTheDocument()
     expect(within(panel).getByText(/USD 0\.0021/)).toBeInTheDocument()
