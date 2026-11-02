@@ -317,7 +317,7 @@ class FakeResponses:
         self.outcome = outcome
         self.calls = []
 
-    def parse(self, **kwargs):
+    def create(self, **kwargs):
         self.calls.append(kwargs)
         if isinstance(self.outcome, Exception):
             raise self.outcome
@@ -329,14 +329,18 @@ def fake_openai(outcome):
     return OpenAIProvider(client_factory=lambda settings: SimpleNamespace(responses=responses)), responses
 
 
-def completed(parsed, *, status="completed", reason=None, refusal=False):
+def completed(parsed=None, *, text=None, status="completed", reason=None, refusal=False):
+    """Respuesta de la Responses API: el modelo (`parsed`) viaja como el texto JSON que devuelve OpenAI."""
+    if text is None and parsed is not None:
+        text = parsed.model_dump_json()
     content = [SimpleNamespace(type="refusal", refusal="No")] if refusal else []
+    if text is not None:
+        content.append(SimpleNamespace(type="output_text", text=text))
     return SimpleNamespace(
         status=status,
         incomplete_details=SimpleNamespace(reason=reason) if reason else None,
         usage=SimpleNamespace(input_tokens=900, output_tokens=300),
-        output=[SimpleNamespace(type="message", content=content)],
-        output_parsed=parsed,
+        output=[SimpleNamespace(type="message", phase=None, content=content)],
     )
 
 
@@ -351,8 +355,9 @@ def test_openai_provider_uses_responses_api_with_limits_and_no_storage():
     provider, responses = fake_openai(completed(reply_for(context())))
     result = provider.send(CTX, settings(ai_max_output_tokens=1200))
     call = responses.calls[0]
-    assert call["model"] == "gpt-6-luna" and call["text_format"] is AIAssistantReply
-    assert call["max_output_tokens"] == 1200 and call["store"] is False
+    assert call["model"] == "gpt-6-luna" and call["text"]["format"]["type"] == "json_schema"
+    assert call["text"]["format"]["name"] == "AIAssistantReply" and call["text"]["format"]["strict"] is True
+    assert call["max_output_tokens"] == 1200 and call["store"] is False and call["timeout"] == 40
     assert call["reasoning"] == {"effort": "low"} and call["instructions"] == INSTRUCTIONS
     assert json.loads(call["input"]) == CTX.model_dump(mode="json")
     assert result.reply is not None and (result.input_tokens, result.output_tokens) == (900, 300)
@@ -365,9 +370,9 @@ def test_default_client_never_retries_and_has_a_timeout():
 
 
 @pytest.mark.parametrize("outcome, problem", [
-    (completed(None, status="incomplete", reason="max_output_tokens"), "límite de tokens"),
+    (completed(text='{"assistant_message": "Ho', status="incomplete", reason="max_output_tokens"), "límite de tokens"),
     (completed(None, refusal=True), "no aceptó"),
-    (completed(None), "formato esperado"),
+    (completed(None), "no devolvió contenido"),
 ])
 def test_openai_provider_reports_unusable_replies(outcome, problem):
     provider, _ = fake_openai(outcome)
@@ -382,7 +387,7 @@ def test_openai_provider_reports_unusable_replies(outcome, problem):
     (openai.RateLimitError("quota", response=httpx2.Response(429, request=REQUEST), body={"code": "insufficient_quota"}), 429, "saldo", False),
     (openai.RateLimitError("rate", response=httpx2.Response(429, request=REQUEST), body=None), 429, "limitó", False),
     (openai.NotFoundError("model", response=httpx2.Response(404, request=REQUEST), body=None), 502, "modelo", False),
-    (ValueError("salida malformada"), 502, "formato esperado", True),
+    (openai.OpenAIError("respuesta ilegible"), 502, "no se pudo leer", True),
 ])
 def test_openai_errors_are_translated_without_secrets(error, status, fragment, may_have_cost):
     provider, _ = fake_openai(error)

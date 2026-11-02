@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     openai_price_output_per_1m: float | None = Field(default=None, ge=0)
     ai_timeout_seconds: float = Field(default=40, gt=0, le=120)
     ai_max_output_tokens: int = Field(default=2500, ge=256, le=16000)
+    # La interpretación declara un claim por cifra: con 2500 tokens (que incluyen el razonamiento) la respuesta
+    # quedaba cortada en la beta. Su tope y su espera son propios; el costo máximo se estima con este tope.
+    ai_interpretation_max_output_tokens: int = Field(default=6000, ge=256, le=16000)
+    ai_interpretation_timeout_seconds: float = Field(default=90, gt=0, le=120)
     ai_max_input_tokens: int = Field(default=8000, ge=500, le=50000)
     # Presupuesto GLOBAL acumulado (USD) de toda la instalación, en la base SQLite.
     ai_budget_usd: float = Field(default=1.0, ge=0, le=20)

@@ -214,6 +214,9 @@ export function createAIGatewayClient(baseUrl: string): AIGatewayClient {
       http.json<AIInterpretationResult>(`/api/ai/interpretations/${id(requestId)}/authorize`, {
         method: 'POST',
         body: { payload_sha256: payloadSha256, confirm: true },
+        // Más que la espera del backend a OpenAI (AI_INTERPRETATION_TIMEOUT_SECONDS, 90 s): si el navegador corta antes,
+        // la persona no ve una respuesta que igual se cobró.
+        timeoutMs: 120_000,
       }),
     cancelInterpretation: (requestId) => http.empty(`/api/ai/interpretations/${id(requestId)}`, { method: 'DELETE' }),
   }

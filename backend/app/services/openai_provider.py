@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 
 from app.core.config import Settings
@@ -24,6 +25,8 @@ from app.schemas.ai_plan import (
 )
 from app.schemas.interpretation import AIInterpretation, InterpretationContext
 from app.services.ai_errors import AIGatewayError
+
+logger = logging.getLogger(__name__)
 
 def _build_instructions() -> str:
     operations = "\n".join(f"  - {name}: {text}" for name, text in OPERATION_GUIDE.items())
@@ -182,6 +185,9 @@ Reglas (obligatorias; el sistema recalcula cada cifra y descarta automáticament
 9. Prudencia: un hecho lleva cifras verificables; una interpretación razonable no lleva cifras nuevas; una hipótesis va
    en hypotheses; una recomendación depende de condiciones. Si algo no se puede verificar, no lo presentes como hecho.
 10. Español rioplatense, claro, sin jerga innecesaria ni párrafos genéricos. No escribas código.
+11. Sé breve: cada text en una o dos oraciones y claims solo para las cifras que escribas. La respuesta tiene un
+    límite de extensión: priorizá executive_summary, findings, recommendations y not_supported; si hace falta,
+    dejá trends, implications o hypotheses con menos elementos. Una respuesta cortada se descarta completa.
 """
 
 
@@ -216,25 +222,38 @@ class OpenAIProvider:
         self._client_factory = client_factory or _default_client
 
     def send(self, context: AIContext, settings: Settings) -> ProviderResult:
-        return self._parse(INSTRUCTIONS, build_input(context), AIAssistantReply, settings)
+        return self._parse(
+            INSTRUCTIONS, build_input(context), AIAssistantReply, settings,
+            settings.ai_max_output_tokens, settings.ai_timeout_seconds,
+        )
 
     def interpret(self, context, settings: Settings) -> ProviderResult:
-        """Interpretación de resultados agregados (Fase 4C). Mismos controles que `send`."""
-        return self._parse(INTERPRETATION_INSTRUCTIONS, build_input(context), AIInterpretation, settings)
+        """Interpretación de resultados agregados (Fase 4C). Mismos controles que `send`, con su propio
+        tope de salida: una afirmación por cifra con sus claims necesita más tokens que una propuesta."""
+        return self._parse(
+            INTERPRETATION_INSTRUCTIONS, build_input(context), AIInterpretation, settings,
+            settings.ai_interpretation_max_output_tokens, settings.ai_interpretation_timeout_seconds,
+        )
 
-    def _parse(self, instructions: str, input_text: str, text_format: type, settings: Settings) -> ProviderResult:
+    def _parse(self, instructions: str, input_text: str, text_format: type, settings: Settings,
+               max_output_tokens: int, timeout_seconds: float) -> ProviderResult:
         import openai
+        from openai.lib._parsing._responses import type_to_text_format_param
 
         client = self._client_factory(settings)
         try:
-            response = client.responses.parse(
+            # `create` y no `parse`: `parse` valida el texto aunque la respuesta esté truncada, y un JSON cortado
+            # terminaba como «formato inesperado» sin registrar los tokens reales. Acá se revisa primero el estado
+            # y después se valida con el mismo esquema estricto que se le exige a OpenAI.
+            response = client.responses.create(
                 model=settings.openai_model,
                 instructions=instructions,
                 input=input_text,
-                text_format=text_format,
-                max_output_tokens=settings.ai_max_output_tokens,
+                text={"format": type_to_text_format_param(text_format)},
+                max_output_tokens=max_output_tokens,
                 reasoning={"effort": settings.openai_reasoning_effort},
                 store=False,
+                timeout=timeout_seconds,
             )
         except openai.APITimeoutError as exc:
             raise ProviderCallError(
@@ -266,27 +285,57 @@ class OpenAIProvider:
             raise ProviderCallError(502, "OpenAI rechazó la solicitud por un problema de formato.", may_have_cost=False) from exc
         except openai.APIStatusError as exc:
             raise ProviderCallError(502, f"OpenAI devolvió un error ({exc.status_code}).", may_have_cost=True) from exc
-        except (openai.OpenAIError, ValueError) as exc:
-            # ValueError incluye la validación de Pydantic sobre una salida malformada.
-            raise ProviderCallError(502, "La respuesta de OpenAI no tenía el formato esperado.", may_have_cost=True) from exc
+        except openai.OpenAIError as exc:
+            raise ProviderCallError(502, "La respuesta de OpenAI no se pudo leer.", may_have_cost=True) from exc
 
         usage = getattr(response, "usage", None)
         input_tokens = getattr(usage, "input_tokens", 0) or 0
         output_tokens = getattr(usage, "output_tokens", 0) or 0
-        if response.status == "incomplete":
-            reason = getattr(response.incomplete_details, "reason", None)
+        if getattr(response, "status", None) == "incomplete":
+            reason = getattr(getattr(response, "incomplete_details", None), "reason", None)
+            logger.warning("Respuesta de la IA incompleta (%s): %s; tokens de salida %s de %s",
+                           text_format.__name__, reason, output_tokens, max_output_tokens)
             problem = (
-                "La respuesta superó el límite de tokens de salida y quedó incompleta."
+                "La respuesta de la IA superó el límite de tokens de salida y quedó cortada: no se usó nada de ella."
                 if reason == "max_output_tokens"
-                else "La respuesta de la IA quedó incompleta."
+                else "La respuesta de la IA quedó incompleta: no se usó nada de ella."
             )
             return ProviderResult(None, input_tokens, output_tokens, problem)
         if _refusal(response):
             return ProviderResult(None, input_tokens, output_tokens, "La IA no aceptó responder esta solicitud.")
-        parsed = getattr(response, "output_parsed", None)
-        if parsed is None:
-            return ProviderResult(None, input_tokens, output_tokens, "La respuesta de la IA no tenía el formato esperado.")
-        return ProviderResult(parsed, input_tokens, output_tokens)
+        reply, problem = _validate(_output_text(response), text_format)
+        return ProviderResult(reply, input_tokens, output_tokens, problem)
+
+
+def _output_text(response) -> str:
+    """Texto de la respuesta final (los mensajes con otra fase, como comentarios intermedios, no cuentan)."""
+    parts = []
+    for item in getattr(response, "output", None) or []:
+        if getattr(item, "type", None) != "message" or getattr(item, "phase", None) not in (None, "final_answer"):
+            continue
+        parts += [c.text for c in getattr(item, "content", None) or [] if getattr(c, "type", None) == "output_text"]
+    return "".join(parts)
+
+
+def _validate(text: str, text_format: type) -> tuple[object | None, str | None]:
+    """Valida el JSON contra el mismo modelo del esquema estricto. Nunca devuelve contenido parcial."""
+    from pydantic import ValidationError
+
+    if not text.strip():
+        return None, "La IA no devolvió contenido: no se usó nada de la respuesta."
+    try:
+        return text_format.model_validate_json(text), None
+    except ValidationError as exc:
+        kinds = {error["type"] for error in exc.errors()}
+    if "json_invalid" in kinds:
+        detail = "no era un JSON válido"
+    elif "missing" in kinds:
+        detail = "le faltaban campos obligatorios"
+    else:
+        detail = "tenía datos de un tipo incorrecto"
+    # Solo la categoría: el contenido de la respuesta no se registra ni se muestra.
+    logger.warning("Respuesta de la IA descartada (%s): %s", text_format.__name__, ", ".join(sorted(kinds)))
+    return None, f"La respuesta de la IA {detail}: no se usó nada de ella."
 
 
 def _refusal(response) -> bool:

@@ -1256,3 +1256,14 @@ Datos **sintéticos** (`backend/tests/synthetic_datasets.py`; los mismos están 
 - Interpretación (USD 0,0014) sobre el plan descriptivo sin IA (8 operaciones), para no consumir solicitudes no autorizadas: el panel mostró el contenido compacto exacto (versión 2, ~3.883 tokens, sin filas individuales); 1 afirmación verificada, 3 descartadas por no nombrar el período o intervalo de su cifra y 5 sin cifras marcadas como no verificables. Las recomendaciones son condicionales, no se atribuyen causas y las limitaciones (rentabilidad, causas, pronósticos, estacionalidad) aparecen explícitas.
 - PDF: 8 páginas; incluye la interpretación, las recomendaciones, lo que no se puede concluir y el origen de cada contenido.
 - Corrección menor: el objetivo aprobado mostraba «..» al unirse con las decisiones.
+
+## 37. Interpretación en la beta pública: respuesta cortada de OpenAI (✅ corregida, 02/11/2026)
+
+**Error.** En la beta (Cloudflare + Render), con 10 operaciones y ~5.025 tokens de entrada, la interpretación terminó en «La respuesta de OpenAI no tenía el formato esperado».
+
+**Causa.** `OpenAIProvider._parse` usaba `responses.parse`, que valida el texto con Pydantic aunque la respuesta tenga `status="incomplete"`. Con `max_output_tokens=2500` (incluye el razonamiento) la respuesta quedaba cortada; el JSON truncado lanzaba `ValidationError` (un `ValueError`) y se informaba como error de formato, antes de llegar a la revisión del estado. Reproducido con el SDK instalado (`openai` 3.37.0). En la prueba local del 01/11, 8 operaciones ya usaban 2.164 de 2.500 tokens de salida.
+
+**Corrección.** `responses.create` con el mismo esquema estricto; primero se revisa el estado (truncada o incompleta) y el rechazo, y después se valida, distinguiendo JSON inválido, campos faltantes y tipos incorrectos. Se registran los tokens reales y nunca se usa contenido parcial. La interpretación tiene tope de salida (6.000) y espera (90 s) propios, y el navegador espera 120 s. El costo máximo mostrado usa ese tope.
+
+**Pruebas** (`tests/test_interpretation_provider.py`, 12, con cliente simulado y sin OpenAI): respuesta válida y verificada; truncada; incompleta por otro motivo; JSON inválido; campos faltantes; tipos incorrectos (2); sin contenido; cifra que no coincide con Pandas descartada; ninguna cifra verificada; resultados conservados y reintento con nueva autorización; costo máximo. Frontend (2): el error conserva los resultados y reintentar prepara un envío nuevo; espera de 120 s. Backend 361 de 361; frontend 267 de 267; lint, typecheck y build sin errores.
+

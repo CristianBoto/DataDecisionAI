@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event'
 import { ReportSection } from '@/components/report/ReportSection'
 import { AppProviders } from '@/context/AppProviders'
 import { summarizeInterpretationPayload } from '@/lib/interpretationSummary'
-import type { AIGatewayClient } from '@/services/aiGateway'
+import { createAIGatewayClient, type AIGatewayClient } from '@/services/aiGateway'
 import type { ExecutionResponse } from '@/services/analysisEngine'
 import { createDemoService } from '@/services/demoProvider'
 import salesFixture from './fixtures/salesReportResponse.json'
@@ -102,5 +102,41 @@ describe('interpretar por partes', () => {
     const again = await screen.findByRole('group', { name: 'Planes a interpretar' })
     await user.click(within(again).getByRole('checkbox', { name: /P1 · / }))
     expect(screen.getByRole('button', { name: 'Interpretar resultados con IA' })).toBeDisabled()
+  })
+})
+
+describe('si la interpretación falla', () => {
+  it('se conservan los resultados y reintentar exige preparar y autorizar de nuevo (sin envíos silenciosos)', async () => {
+    const run = structuredClone(salesFixture) as unknown as ExecutionResponse
+    const ai = gateway()
+    ai.authorizeInterpretation.mockRejectedValueOnce(
+      new Error('La respuesta de la IA superó el límite de tokens de salida y quedó cortada: no se usó nada de ella. Se registró el consumo.'),
+    )
+    render(
+      <AppProviders service={createDemoService({ delayMs: 0 })} aiGateway={ai} analysisEngine={null}>
+        <ReportSection run={run} fileNames={{ A: 'ventas.csv' }} />
+      </AppProviders>,
+    )
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Interpretar resultados con IA' }))
+    const panel = await screen.findByRole('region', { name: 'Autorizar interpretación con IA' })
+    await user.click(within(panel).getByRole('button', { name: 'Autorizar y enviar' }))
+    expect(await screen.findByText(/quedó cortada: no se usó nada de ella/)).toBeInTheDocument()
+    expect(ai.authorizeInterpretation).toHaveBeenCalledTimes(1)
+    // Los resultados calculados siguen ahí y el botón vuelve a pedir un envío nuevo, con su panel y su costo.
+    expect(screen.getByText(/Calculado con Pandas/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Interpretar resultados con IA' }))
+    expect(await screen.findByRole('region', { name: 'Autorizar interpretación con IA' })).toBeInTheDocument()
+    expect(ai.prepareInterpretation).toHaveBeenCalledTimes(2)
+    expect(ai.authorizeInterpretation).toHaveBeenCalledTimes(1)
+  })
+
+  it('el navegador espera la respuesta más que el backend a OpenAI', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }))
+    const timeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+    await createAIGatewayClient('http://127.0.0.1:8000').authorizeInterpretation?.('int-1', 'a'.repeat(64))
+    expect(timeoutSpy.mock.calls.some(([, ms]) => ms === 120_000)).toBe(true)
+    fetchSpy.mockRestore()
+    timeoutSpy.mockRestore()
   })
 })

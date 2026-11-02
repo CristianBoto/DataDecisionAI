@@ -843,6 +843,7 @@ Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 33.
 - Con 24 operaciones ni el nivel de hechos entraba: se agregó `same_as` para operaciones idénticas y el caso extremo pasa a la selección de planes.
 - En la prueba real, el backend local respondió 413 con código anterior: `uvicorn --reload` había dejado de recargar. Aprendizaje: antes de una prueba con costo, comprobar en el esquema publicado que el servidor tenga el cambio.
 - La IA propuso un plan con más de 10 operaciones y se descartó: las instrucciones no declaraban los límites de la validación. Ahora los declaran.
+- Beta pública (02/11): una interpretación de 10 operaciones se cortó en el tope de 2.500 tokens de salida y `responses.parse` la informó como «formato esperado». Se pasó a `responses.create` con revisión del estado antes de validar, y la interpretación tiene tope y espera propios. Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 37.
 
 **Verificación.** Backend 348 de 348, frontend 265 de 265, lint, typecheck y build sin errores. Detalle en [PRUEBAS_Y_VALIDACIONES.md](PRUEBAS_Y_VALIDACIONES.md), sección 36.
 

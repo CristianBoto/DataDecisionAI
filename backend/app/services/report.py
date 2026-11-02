@@ -467,7 +467,7 @@ def build_context(entry: dict) -> InterpretationContext:
 def estimate_interpretation(context: InterpretationContext | CompactInterpretationContext, settings: Settings) -> tuple[int, float | None]:
     tokens = estimate_tokens(INTERPRETATION_INSTRUCTIONS, build_input(context)) + INTERPRETATION_SCHEMA_CHARS // 3
     prices = model_prices(settings.openai_model, settings.openai_price_input_per_1m, settings.openai_price_output_per_1m)
-    return tokens, (cost_usd(prices, tokens, settings.ai_max_output_tokens) if prices else None)
+    return tokens, (cost_usd(prices, tokens, settings.ai_interpretation_max_output_tokens) if prices else None)
 
 
 # --- Verificación de la respuesta ------------------------------------------------------
